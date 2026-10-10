@@ -1,0 +1,70 @@
+import { build } from 'esbuild';
+import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+const dir = await mkdtemp(path.join(os.tmpdir(), 'reqflow-1.4-'));
+const output = path.resolve('out/review-1.4.0'); await mkdir(output, { recursive: true });
+try {
+  const entry = path.join(dir, 'ipc.ts');
+  await writeFile(entry, `export { registerIpc } from ${JSON.stringify(path.resolve('src/main/ipc.ts'))};`);
+  await build({ entryPoints: [entry], outfile: path.join(dir, 'ipc.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
+  const host = path.join(dir, 'host.cjs');
+  await writeFile(host, `
+const {app,BrowserWindow}=require('electron');
+const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
+app.setPath('userData',${JSON.stringify(path.join(dir, 'profile'))});
+app.whenReady().then(async()=>{try{
+ const root=${JSON.stringify(dir)},output=${JSON.stringify(output)},data=path.join(root,'data'),checkout=path.join(root,'checkout');
+ await fs.mkdir(data);await fs.writeFile(path.join(root,'empty-config'),'');process.env.GIT_CONFIG_GLOBAL=path.join(root,'empty-config');process.env.GIT_CONFIG_NOSYSTEM='1';process.env.GIT_CONFIG_COUNT='1';process.env.GIT_CONFIG_KEY_0='url.'+pathToFileURL(root+path.sep).href+'.insteadOf';process.env.GIT_CONFIG_VALUE_0='https://fixture.invalid/';
+ const git=(cwd,...args)=>execFileSync('git',args,{cwd,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','pipe']}).trim();
+ git(root,'init','--bare','--initial-branch=main',path.join(root,'repo.git'));git(root,'clone',path.join(root,'repo.git'),path.join(root,'seed'));const seed=path.join(root,'seed');git(seed,'config','user.name','test');git(seed,'config','user.email','test@example.invalid');await fs.writeFile(path.join(seed,'fixture.txt'),'remote file');git(seed,'add','.');git(seed,'commit','-m','fixture');git(seed,'push','origin','main');
+ git(data,'init');git(data,'config','url.'+pathToFileURL(path.join(root,'missing.git')).href+'.insteadOf','https://fixture.invalid/repo.git');
+ require('./ipc.cjs').registerIpc(data);
+ const win=new BrowserWindow({width:1440,height:900,show:false,webPreferences:{preload:${JSON.stringify(path.resolve('dist/preload/index.js'))},sandbox:false,contextIsolation:true,nodeIntegration:false}});
+ await win.loadFile(${JSON.stringify(path.resolve('dist/renderer/index.html'))});win.setPosition(-2000,-2000);win.show();win.webContents.focus();
+ const js=async s=>{try{return await win.webContents.executeJavaScript(s);}catch(e){console.error('FAILED SCRIPT',s);throw e;}},wait=async s=>{for(let i=0;i<140;i++){if(await js(s))return;await new Promise(r=>setTimeout(r,50));}throw Error('timeout '+s)};
+ const click=text=>js('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==='+JSON.stringify(text)+').click()');
+ const remote={provider:'github',url:'https://fixture.invalid/repo.git',branch:'main',sshKeyPath:''};
+ await wait('!!document.querySelector(".navtabs")');
+ const original=await fs.readFile(path.join(data,'workspace.json'),'utf8');
+ let r=await js('window.reqflow.testRemote('+JSON.stringify(remote)+')');assert.equal(r.ok,true,JSON.stringify(r));
+ r=await js('window.reqflow.testRemote('+JSON.stringify({...remote,branch:'missing'})+')');assert.equal(r.ok,true,'connection probe does not attempt branch checkout');assert.equal(await fs.readFile(path.join(data,'workspace.json'),'utf8'),original);await assert.rejects(fs.stat(checkout),{code:'ENOENT'});
+ r=await js('window.reqflow.prepareDir('+JSON.stringify(checkout)+','+JSON.stringify(remote)+')');assert.equal(r.ok,true);assert.equal(r.warning,undefined);assert.equal(await fs.readFile(path.join(checkout,'fixture.txt'),'utf8'),'remote file');
+ const fail=path.join(root,'failed');r=await js('window.reqflow.prepareDir('+JSON.stringify(fail)+','+JSON.stringify({...remote,branch:'missing'})+')');assert.equal(r.ok,true);assert.match(r.warning,/调整/);
+ assert.equal(await js('Array.from(document.querySelectorAll(".navtabs button")).slice(0,2).map(b=>b.textContent.replace(/[0-9]/g,"").trim()).join("|")'),'需求池|排期表');
+ assert.equal(await js('Array.from(document.querySelectorAll(".side-label")).some(e=>e.textContent==="协作项目") && document.querySelector(".flow-note").textContent.includes("开发中")'),true);
+ assert.equal(await js('Array.from(document.querySelectorAll(".navtabs button")).some(b=>b.textContent.includes("批次历史"))'),false,'history moved to archive secondary entry');
+ await js('Array.from(document.querySelectorAll(".navtabs button")).find(b=>b.textContent.includes("归档")).click()');await wait('!!document.querySelector(".archive-navigation")');assert.equal(await js('document.querySelector(".archive-navigation").textContent.includes("批次历史")'),true);await js('Array.from(document.querySelectorAll(".navtabs button")).find(b=>b.textContent.includes("需求池")).click()');
+ async function drag(surface,handle){
+  const before=await js('(()=>{let r=document.querySelector('+JSON.stringify(surface)+').getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})()');
+  const xy=await js('(()=>{let r=document.querySelector('+JSON.stringify(handle)+').getBoundingClientRect();return [Math.round(r.left+12),Math.round(r.top+7)]})()');
+  win.webContents.sendInputEvent({type:'mouseMove',x:xy[0],y:xy[1]});win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:xy[0],y:xy[1]});win.webContents.sendInputEvent({type:'mouseMove',x:xy[0]+14,y:xy[1]+10});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:xy[0]+14,y:xy[1]+10});await new Promise(r=>setTimeout(r,80));
+  const after=await js('(()=>{let r=document.querySelector('+JSON.stringify(surface)+').getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})()');
+  assert.ok(after[0]>before[0]||after[1]>before[1],surface+' draggable');assert.ok(after[0]>=0&&after[1]>=0);return after;
+ }
+ const shot=async name=>{win.setPosition(20,20);win.webContents.invalidate();await new Promise(r=>setTimeout(r,500));await fs.writeFile(path.join(output,name+'.png'),(await win.webContents.capturePage()).toPNG());win.setPosition(-2000,-2000);};
+ await click('插件/MOD');await wait('!!document.querySelector(".mod-document")');assert.equal(await js('document.querySelector(".mod-document").textContent.includes("claim_requirement") && document.querySelector(".mod-document").textContent.includes("当前没有")'),true);await drag('.help-panel','.help-header');await shot('mods');win.setSize(1100,650);await new Promise(r=>setTimeout(r,150));assert.equal(await js('(()=>{let r=document.querySelector(".help-panel").getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()'),true,'dragged modal stays reachable after resize');await shot('mods-low');win.setSize(1440,900);await js('Array.from(document.querySelectorAll("button")).find(b=>b.getAttribute("aria-label")==="关闭插件/MOD").click()');
+ await click('设置');await wait('!!document.querySelector(".settings-dialog")');assert.equal(await js('Array.from(document.querySelectorAll(".settings-tabs button")).some(b=>b.textContent==="项目仓库")'),false);await drag('.settings-dialog','.dialog-head');
+ const savedTranslate=await js('document.querySelector(".settings-dialog").style.translate');const xy=await js('(()=>{let r=document.querySelector(".settings-tabs button").getBoundingClientRect();return [Math.round(r.left+10),Math.round(r.top+10)]})()');win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:xy[0],y:xy[1]});win.webContents.sendInputEvent({type:'mouseMove',x:xy[0]+5,y:xy[1]+5});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:xy[0]+5,y:xy[1]+5});assert.equal(await js('document.querySelector(".settings-dialog").style.translate'),savedTranslate,'controls do not start dragging');await js('document.querySelector("[aria-label=关闭设置]").click()');
+ await click('新建项目');await wait('!!document.querySelector(".project-create")');await drag('.dialog','.dialog-head');await js('document.querySelector(".dialog-head [aria-label=关闭]").click()');
+ await click('记录新需求');await wait('!!document.querySelector(".requirement-dialog")');await drag('.requirement-dialog','.dialog-head');await js('document.querySelector(".dialog-head [aria-label=关闭]").click()');
+ await js('document.querySelector("[aria-label=选择记录需求方式]").click()');await click('AI 需求');await wait('!!document.querySelector(".ai-requirements-dialog")');await drag('.ai-requirements-dialog','.dialog-head');await js('document.querySelector("[aria-label=关闭AI需求]")?.click() || document.querySelector(".ai-requirements-dialog .icon-btn").click()');
+ await click('帮助 · CLI 参考');await wait('!!document.querySelector(".help-panel")');await drag('.help-panel','.help-header');await js('document.querySelector("[aria-label=关闭帮助]").click()');
+ const project=(await js('window.reqflow.getWorkspace()')).state.projects[0].id;
+ r=await js('window.reqflow.apply('+JSON.stringify({op:'projectDir',project,dir:checkout})+')');assert.equal(r.ok,true);
+ await js('document.querySelector("[aria-label=刷新数据]").click()');await wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent.trim()==="浏览项目")');await click('浏览项目');await wait('!!document.querySelector(".fb-viewer-head")');await drag('.fb','.fb-viewer-head');
+ await js('document.querySelector("[aria-label=项目仓库设置]").click()');await wait('!!document.querySelector(".project-remote-overlay")');await drag('.project-remote-overlay .dialog','.project-remote-overlay .dialog-head');
+ await js('(()=>{let e=Array.from(document.querySelectorAll(".project-remote-overlay label.field")).find(n=>n.textContent.startsWith("仓库地址")).querySelector("input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(remote.url)+');e.dispatchEvent(new Event("input",{bubbles:true}));})()');
+ await click('测试连接');await wait('document.querySelector(".project-remote-overlay [role=status]")?.textContent.includes("连接成功")');await click('保存仓库配置');await wait('document.querySelector(".project-remote-overlay [role=status]")?.textContent.includes("已保存")');assert.equal((await js('window.reqflow.getWorkspace()')).state.projects[0].remote.url,remote.url);await shot('project-remote');
+ await js('document.querySelector("[aria-label=关闭项目仓库设置]").click()');
+ await wait('!!document.querySelector(".fb-git-badge")');await js('if(document.querySelector(".fb-git-toggle").getAttribute("aria-expanded")==="false")document.querySelector(".fb-git-toggle").click()');await wait('!!document.querySelector(".commit-actions")');await click('展开');await wait('!!document.querySelector(".commit-editor .dialog")');await drag('.commit-editor .dialog','.commit-editor .dialog > h3');await click('完成编辑');
+ await js('document.querySelector("[aria-label=关闭浏览项目]").click()');
+ console.log('PASS 1.4: read-only isolated connection probe, directory checkout+failure guidance, renamed tabs/collaboration placeholder, MOD protocol, history preservation, settings migration, repository save/test, and native pointer dragging of project/settings/help/MOD/browser/nested remote');
+ win.destroy();app.exit(0);
+}catch(e){console.error(e);app.exit(1);}});
+`);
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const result = await new Promise(resolve => execFile(path.resolve('node_modules/electron/dist/electron.exe'), [host], { env, timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+  console.log(result.stdout); if (result.error) throw Error(result.stderr || result.error.message);
+} finally { await rm(dir, { recursive: true, force: true }); }

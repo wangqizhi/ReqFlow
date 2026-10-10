@@ -1,0 +1,74 @@
+import { build } from 'esbuild';
+import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+const dir = await mkdtemp(path.join(os.tmpdir(), 'reqflow-pull-'));
+const output = path.resolve('out/review-1.3.2');
+await mkdir(output, { recursive: true });
+try {
+  const entry = path.join(dir, 'ipc.ts');
+  await writeFile(entry, `export { registerIpc } from ${JSON.stringify(path.resolve('src/main/ipc.ts'))};`);
+  await build({ entryPoints: [entry], outfile: path.join(dir, 'ipc.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
+  const host = path.join(dir, 'host.cjs');
+  await writeFile(host, `
+const {app,BrowserWindow}=require('electron');
+const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
+app.setPath('userData',${JSON.stringify(path.join(dir, 'profile'))});
+app.whenReady().then(async()=>{try{
+ const root=${JSON.stringify(dir)}, output=${JSON.stringify(output)};
+ await fs.writeFile(path.join(root,'empty-config'),'');
+ process.env.GIT_CONFIG_GLOBAL=path.join(root,'empty-config');process.env.GIT_CONFIG_NOSYSTEM='1';
+ process.env.GIT_CONFIG_COUNT='1';process.env.GIT_CONFIG_KEY_0='url.'+pathToFileURL(root+path.sep).href+'.insteadOf';process.env.GIT_CONFIG_VALUE_0='https://fixture.invalid/';
+ const git=(cwd,...args)=>execFileSync('git',args,{cwd,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','pipe']}).trim();
+ const bare=path.join(root,'repo.git'),seed=path.join(root,'seed'),target=path.join(root,'checkout');
+ git(root,'init','--bare','--initial-branch=main',bare);git(root,'clone',bare,seed);
+ git(seed,'config','user.name','ReqFlow test');git(seed,'config','user.email','test@example.invalid');
+ await fs.writeFile(path.join(seed,'readme.txt'),'first');git(seed,'add','.');git(seed,'commit','-m','first');git(seed,'push','origin','main');
+ require('./ipc.cjs').registerIpc(path.join(root,'data'));
+ const win=new BrowserWindow({width:1440,height:900,show:false,webPreferences:{preload:${JSON.stringify(path.resolve('dist/preload/index.js'))},sandbox:false,contextIsolation:true,nodeIntegration:false}});
+ await win.loadFile(${JSON.stringify(path.resolve('dist/renderer/index.html'))});win.setPosition(-2000,-2000);win.show();win.webContents.focus();
+ const js=s=>win.webContents.executeJavaScript(s),wait=async s=>{for(let i=0;i<150;i++){if(await js(s))return;await new Promise(r=>setTimeout(r,50));}throw Error('timeout '+s)};
+ const apply=a=>js('window.reqflow.apply('+JSON.stringify(a)+')');
+ await wait('!!document.querySelector(".project-background")');
+ const remote={provider:'gitlab',url:'https://fixture.invalid/repo.git',branch:'main',sshKeyPath:''};
+ let r=await apply({op:'project',name:'自动拉取',dir:target,createDirectory:true,remote});assert.equal(r.ok,true,JSON.stringify(r));assert.equal(r.warning,undefined,JSON.stringify(r));assert.match(r.summary,/已拉取/);assert.equal(await fs.readFile(path.join(target,'readme.txt'),'utf8'),'first');assert.equal(r.createdProjectId,r.state.projects.at(-1).id);
+ assert.equal(git(target,'config','--get','remote.origin.url'),remote.url);assert.equal(git(target,'symbolic-ref','--short','HEAD'),'main');
+ await fs.writeFile(path.join(seed,'readme.txt'),'second');git(seed,'add','.');git(seed,'commit','-m','second');git(seed,'push','origin','main');
+ r=await js('window.reqflow.gitPull('+JSON.stringify(target)+')');assert.equal(r.ok,true,JSON.stringify(r));assert.equal(await fs.readFile(path.join(target,'readme.txt'),'utf8'),'second');
+ await fs.writeFile(path.join(target,'readme.txt'),'local dirty');r=await js('window.reqflow.gitPull('+JSON.stringify(target)+')');assert.equal(r.ok,false);assert.match(r.error,/未提交/);assert.equal(await fs.readFile(path.join(target,'readme.txt'),'utf8'),'local dirty');git(target,'restore','readme.txt');
+ await fs.writeFile(path.join(target,'untracked.txt'),'retain');r=await js('window.reqflow.gitPull('+JSON.stringify(target)+')');assert.equal(r.ok,false);assert.match(r.error,/未跟踪/);await fs.unlink(path.join(target,'untracked.txt'));
+ // Reusing a clean, matching existing repo performs fast-forward only.
+ await fs.writeFile(path.join(seed,'more.txt'),'auto pull');git(seed,'add','.');git(seed,'commit','-m','more');git(seed,'push','origin','main');
+ r=await apply({op:'project',name:'已有仓库拉取',dir:target,remote});assert.equal(r.ok,true);assert.equal(r.warning,undefined);assert.equal(await fs.readFile(path.join(target,'more.txt'),'utf8'),'auto pull');
+ const results=await js('Promise.all([window.reqflow.gitPull('+JSON.stringify(target)+'),window.reqflow.gitPull('+JSON.stringify(target)+')])');assert.equal(results.filter(x=>x.ok).length,1);assert.match(results.find(x=>!x.ok).error,/正在拉取/);
+ const nonempty=path.join(root,'nonempty');await fs.mkdir(nonempty);await fs.writeFile(path.join(nonempty,'keep.txt'),'safe');
+ r=await apply({op:'project',name:'不覆盖',dir:nonempty,remote});assert.equal(r.ok,true);assert.match(r.warning,/不会覆盖/);assert.equal(await fs.readFile(path.join(nonempty,'keep.txt'),'utf8'),'safe');
+ r=await apply({op:'project',name:'无目录',remote});assert.equal(r.ok,true);assert.match(r.warning,/本地目录/);
+ r=await apply({op:'project',name:'失败仍保留',dir:path.join(root,'failed'),createDirectory:true,remote:{...remote,url:'https://fixture.invalid/missing.git'}});assert.equal(r.ok,true);assert.match(r.warning,/未拉取/);assert.ok(r.state.projects.some(p=>p.name==='失败仍保留'));
+ r=await apply({op:'project',name:'分支不存在',dir:path.join(root,'wrong-branch'),createDirectory:true,remote:{...remote,branch:'missing-branch'}});assert.equal(r.ok,true);assert.match(r.warning,/未拉取/);
+ r=await apply({op:'project',name:'origin不匹配',dir:target,remote:{...remote,url:'https://fixture.invalid/another.git'}});assert.equal(r.ok,true);assert.match(r.warning,/origin/);assert.equal(git(target,'config','--get','remote.origin.url'),remote.url);
+ const subdir=path.join(target,'sub');await fs.mkdir(subdir);r=await js('window.reqflow.gitPull('+JSON.stringify(subdir)+')');assert.equal(r.ok,false);assert.match(r.error,/根目录/);await fs.rmdir(subdir);
+ git(target,'config','user.name','ReqFlow test');git(target,'config','user.email','test@example.invalid');await fs.writeFile(path.join(target,'local.txt'),'local');git(target,'add','.');git(target,'commit','-m','local');const localHash=git(target,'rev-parse','HEAD');
+ await fs.writeFile(path.join(seed,'remote.txt'),'remote');git(seed,'add','.');git(seed,'commit','-m','remote');git(seed,'push','origin','main');r=await js('window.reqflow.gitPull('+JSON.stringify(target)+')');assert.equal(r.ok,false);assert.equal(git(target,'rev-parse','HEAD'),localHash);assert.equal(await fs.readFile(path.join(target,'local.txt'),'utf8'),'local');
+ // Verify real renderer entry/button wiring; point the active project to an isolated clone.
+ await wait('!!document.querySelector(".side-project")');
+ await js('document.querySelector(".side-project").click()');await wait('document.querySelector(".project-background")!==null');
+ const first=(await js('window.reqflow.getWorkspace()')).state.projects[0].id;
+ await apply({op:'projectDir',project:first,dir:target});
+ await js('document.querySelector("[aria-label=刷新数据]").click()');
+ await wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent.trim()==="浏览项目")');
+ await js('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="关联目录"||b.textContent.trim()==="浏览项目").click()');
+ await wait('!!document.querySelector(".fb-git-badge")');
+ await js('if(document.querySelector(".fb-git-toggle").getAttribute("aria-expanded")==="false")document.querySelector(".fb-git-toggle").click()');await wait('Array.from(document.querySelectorAll(".fb-git-group button")).some(b=>b.textContent==="Pull")');
+ assert.equal(await js('Array.from(document.querySelectorAll(".fb-git-group button")).find(b=>b.textContent==="Pull").disabled'),false);
+ await js('Array.from(document.querySelectorAll(".fb-git-group button")).find(b=>b.textContent==="Pull").click()');await wait('!!document.querySelector(".toast.err")');assert.equal(git(target,'rev-parse','HEAD'),localHash);
+ win.webContents.invalidate();await new Promise(r=>setTimeout(r,500));await fs.writeFile(path.join(output,'git-pull.png'),(await win.webContents.capturePage()).toPNG());
+ console.log('PASS REQ-045: real Git clone/create, existing fast-forward, manual Pull, dirty/untracked/root/origin/divergence protection, concurrent rejection, failure-preserves-project, and renderer Pull entry');
+ win.destroy();app.exit(0);
+}catch(e){console.error(e);app.exit(1);}});
+`);
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const result = await new Promise(resolve => execFile(path.resolve('node_modules/electron/dist/electron.exe'), [host], { env, timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+  console.log(result.stdout); if (result.error) throw Error(result.stderr || result.error.message);
+} finally { await rm(dir, { recursive: true, force: true }); }

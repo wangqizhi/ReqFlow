@@ -1,0 +1,1 @@
+ReqFlow 1.0.25：透明外角，浅薄荷色圆角方形底，深青和蓝色粗线流程箭头。矢量母版 build/icon-source.svg；scripts/create-icon-source.mjs 可重建 1024px PNG，make-icon.mjs 生成 Windows 多尺寸 ICO 与应用 PNG。

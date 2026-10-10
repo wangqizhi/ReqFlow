@@ -1,0 +1,40 @@
+// preload —— 通过 contextBridge 暴露最小 API 面（contextIsolation 开启）。
+// 文件浏览相关通道全部在主进程做「关联目录内」的路径校验。
+
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('reqflow', {
+  aiRequirements: (project: string, mode: string, instruction: string, discussion: any[]) => ipcRenderer.invoke('ai:requirements', project, mode, instruction, discussion),
+  gitPush: (root: string) => ipcRenderer.invoke('git:push', root),
+  gitPull: (root: string) => ipcRenderer.invoke('git:pull', root),
+  getBackupSettings: () => ipcRenderer.invoke('backup:get'),
+  saveBackupSettings: (settings: any) => ipcRenderer.invoke('backup:save', settings),
+  syncBackup: () => ipcRenderer.invoke('backup:sync'),
+  testRemote: (settings: any) => ipcRenderer.invoke('remote:test', settings),
+  applyRemote: (project: string) => ipcRenderer.invoke('remote:apply', project),
+  pickSSHKey: () => ipcRenderer.invoke('ssh:pick'),
+  getAISettings: () => ipcRenderer.invoke('ai:settings:get'),
+  getAIRequestLogs: () => ipcRenderer.invoke('ai:logs:get'),
+  optimizeCommitMessage: (project: string, message: string) => ipcRenderer.invoke('ai:commit:optimize', project, message),
+  saveAISettings: (settings: any) => ipcRenderer.invoke('ai:settings:save', settings),
+  getWorkspace: () => ipcRenderer.invoke('workspace:get'),
+  apply: (action: any) => ipcRenderer.invoke('workspace:apply', action),
+  appInfo: () => ipcRenderer.invoke('app:info'),
+  showDataFile: () => ipcRenderer.invoke('app:showDataFile'),
+  openConfigDir: () => ipcRenderer.invoke('app:openConfigDir'),
+  pickDir: () => ipcRenderer.invoke('dir:pick'),
+  prepareDir: (dir: string, remote?: any) => ipcRenderer.invoke('dir:prepare', dir, remote),
+  listDir: (root: string, rel: string) => ipcRenderer.invoke('fs:list', root, rel),
+  readFile: (root: string, rel: string) => ipcRenderer.invoke('fs:read', root, rel),
+  readImage: (root: string, rel: string) => ipcRenderer.invoke('fs:readImage', root, rel),
+  writeFile: (root: string, rel: string, content: string) => ipcRenderer.invoke('fs:write', root, rel, content),
+  revealFile: (root: string, rel: string) => ipcRenderer.invoke('fs:reveal', root, rel),
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  gitAvailable: () => ipcRenderer.invoke('git:available'),
+  gitStatus: (root: string) => ipcRenderer.invoke('git:status', root),
+  gitInit: (root: string) => ipcRenderer.invoke('git:init', root),
+  gitStage: (root: string, mode: string, paths: string[]) => ipcRenderer.invoke('git:stage', root, mode, paths),
+  gitCommit: (root: string, message: string, project: string, items: any[]) => ipcRenderer.invoke('git:commit', root, message, project, items),
+  gitBranchCreate: (root: string, name: string) => ipcRenderer.invoke('git:branchCreate', root, name),
+  gitBranchSwitch: (root: string, name: string) => ipcRenderer.invoke('git:branchSwitch', root, name)
+});

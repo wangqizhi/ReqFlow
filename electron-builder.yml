@@ -1,0 +1,42 @@
+appId: com.reqflow.desktop
+productName: ReqFlow
+copyright: ReqFlow Local
+
+directories:
+  output: release
+  buildResources: build
+
+# 全部代码已由 esbuild/vite 打包进 dist/，运行时零 node_modules 依赖
+files:
+  - dist/**
+  - package.json
+
+compression: normal
+asar: true
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  # 向导式安装：可选安装目录；installer.nsh 追加「数据存放目录」页（选择写入 data-dir.cfg 供应用读取）
+  # 语言限定中英（自定义页面的 LangString 只提供这两种，避免其他语言表缺失警告）
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  installerLanguages:
+    - zh-CN
+    - en-US
+  artifactName: ReqFlow-Setup-${version}.${ext}
+  shortcutName: ReqFlow
+  uninstallDisplayName: ReqFlow ${version}
+
+portable:
+  artifactName: ReqFlow-Portable-${version}.${ext}

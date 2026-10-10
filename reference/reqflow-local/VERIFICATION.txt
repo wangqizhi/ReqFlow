@@ -1,0 +1,10 @@
+验证日期：2026-10-08
+线上源码提交：3892f74571164c9136987f6d7dec58784e80703d
+PASS TypeScript: tsc --noEmit
+PASS Portable production: scripts/run-framework.mjs build
+PASS Local DB: local:init
+PASS Local API: anonymous 401, mock sign-in, initial GET, POST save, AI validation off Prompt, submit, complete, failure return, next Prompt includes failure, resubmit, pass archive, database read-back.
+PASS Local import: --replace succeeds; default import refuses existing workspace.
+本次复用原环境锁文件对应的已安装依赖，没有重新从公共软件源安装。
+未做真实 iPhone 或浏览器视觉验证。
+压缩包不含测试工作区、node_modules、dist、凭据或线上业务数据。

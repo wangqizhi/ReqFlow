@@ -1,0 +1,11 @@
+{
+  "name": "reqflow-local",
+  "plugins": [
+    {
+      "name": "reqflow-agent",
+      "source": { "source": "local", "path": "./plugins/reqflow-agent" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

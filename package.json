@@ -1,0 +1,40 @@
+{
+  "name": "reqflow-desktop",
+  "productName": "ReqFlow",
+  "version": "1.5.0",
+  "description": "ReqFlow · 需求流 — 个人需求管理与 Prompt 工作台（本地 Electron 版）",
+  "private": true,
+  "main": "dist/main/index.js",
+  "author": "ReqFlow Local",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "dev:renderer": "vite",
+    "dev": "node scripts/dev.mjs",
+    "start": "electron .",
+    "smoke": "node scripts/smoke.mjs",
+    "cli-e2e": "node scripts/cli-e2e.mjs",
+    "cli": "electron . --cli",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "electron-builder --win nsis portable --x64",
+    "release:github": "node scripts/release-github.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^39.2.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.27.0",
+    "png-to-ico": "^2.1.8",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.13",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  }
+}
