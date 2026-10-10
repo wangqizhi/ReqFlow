@@ -218,7 +218,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   function doCommit() {
     gitOp(async () => {
       const r = await bridge.gitCommit?.(root, commitMsg, project.id, pendingItems.map((i) => ({ id: i.id, version: i.version })));
-      if (r?.ok) { setCommitMsg(''); await onCommitted(); notify(r.warning || '已提交：' + commitMsg.trim().replace(/\s+/g, ' ').slice(0, 60) + (commitMsg.trim().length > 60 ? '…' : ''), r.warning ? 'err' : 'ok'); }
+      if (r?.ok) { setCommitMsg(''); await onCommitted(); notify(r.warning || '提交成功', r.warning ? 'err' : 'ok'); }
       return r;
     });
   }
@@ -458,7 +458,6 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             <div className="fb-tree-title">
               <FolderOpen size={15} />
               <strong>项目文件</strong>
-              <button className="icon-btn" aria-label="项目仓库设置" title="GitHub / GitLab 配置与连接测试" onClick={() => setRemoteOpen(true)}><Settings /></button>
               <button className="icon-btn" aria-label="刷新目录" title="刷新目录"
                 onClick={() => { setTree({}); loadDir(''); setExpanded(new Set([''])); }}>
                 <RefreshCw size={14} />
@@ -479,6 +478,9 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                   <X size={13} />取消关联
                 </button>
               )}
+              <button className="btn plain" title="GitHub / GitLab 配置与连接测试" onClick={() => setRemoteOpen(true)}>
+                <Settings size={13} />远程仓库设置
+              </button>
             </div>
           </div>
           <div className="fb-tree-body">
@@ -594,7 +596,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                         )}
                       </div>
 
-                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span><button className="btn sm" title="从当前分支上游快进拉取；有本地变动时拒绝操作" disabled={gitBusy || aiBusy || dirty || !bridge.gitPull} onClick={() => gitOp(() => bridge.gitPull?.(root), { tree: true })}>Pull</button><button className="btn sm" disabled={gitBusy || aiBusy || !git.ahead || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button></div>
+                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span><button className="btn sm" title="从当前分支上游快进拉取；有本地变动时拒绝操作" disabled={gitBusy || aiBusy || dirty || !bridge.gitPull} onClick={() => gitOp(() => bridge.gitPull?.(root), { tree: true })}>Pull</button><button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button></div>
                       {!(git.log || []).length && <p className="fb-git-empty">暂无提交记录</p>}
                       <div className="fb-git-logs">{(git.log || []).map((entry) => <div key={entry.hash} className="fb-git-log" title={entry.hash + '\n' + entry.author + ' · ' + entry.date + '\n\n' + entry.message}><code>{entry.hash.slice(0, 7)}</code><span>{entry.message.split('\n')[0]}</span></div>)}</div>
 

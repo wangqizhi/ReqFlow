@@ -17,7 +17,7 @@ import { BackupManager, runRemoteGit } from './remote';
 import { validateRemote } from '../core/remote';
 import { prepareProjectDirectory } from './project-directory';
 import { checkoutNewProject, pullProject } from './git-checkout';
-import { emptyRemote } from '../core/remote';
+import { emptyRemote, type RemoteSettings } from '../core/remote';
 
 // 浏览项目支持预览的图片格式（Chromium 可直接渲染的位图/矢量格式）
 const IMAGE_MIME: Record<string, string> = {
@@ -427,7 +427,7 @@ export function registerIpc(dataDir: string) {
   }
 
   function parseStatus(out: string) {
-    const branch = { name: '', ahead: 0, behind: 0 };
+    const branch = { name: '', ahead: 0, behind: 0, upstream: false };
     const changes: { path: string; index: string; worktree: string }[] = [];
     for (const ln of out.split('\n')) {
       if (!ln) continue;
@@ -442,6 +442,7 @@ export function registerIpc(dataDir: string) {
         m = head.match(/^(\S+?)(?:\.\.\.\S+)?(?:\s+\[(?:ahead (\d+))?(?:,\s*)?(?:behind (\d+))?\])?$/);
         if (m) {
           branch.name = m[1];
+          branch.upstream = head.includes('...');
           branch.ahead = Number(m[2] || 0);
           branch.behind = Number(m[3] || 0);
         }
@@ -479,7 +480,7 @@ export function registerIpc(dataDir: string) {
         const [hash, author, date, message] = record.trimStart().split('\0');
         return { hash, author, date, message: (message || '').trim() };
       }) : [];
-      return { ok: true, repo: true, branch: branch.name, ahead: branch.ahead, behind: branch.behind, changes, branches, log };
+      return { ok: true, repo: true, branch: branch.name, ahead: branch.ahead, behind: branch.behind, upstream: branch.upstream, changes, branches, log };
     } catch (e: any) {
       return { ok: false, error: e?.message || '读取 Git 状态失败' };
     }
@@ -559,8 +560,31 @@ export function registerIpc(dataDir: string) {
     } catch (e: any) { return { ok: false, error: e.message || 'Pull 失败' }; }
   });
   ipcMain.handle('git:push', async (_e, root: string) => {
-    const r = await runGit(['push'], root, 60000);
-    return r.code === 0 ? { ok: true } : { ok: false, error: gitErr(r.err) };
+    try {
+      const dir = await fs.realpath(root);
+      const same = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+      const { state } = await service.get();
+      let settings: RemoteSettings | null = null;
+      for (const project of state.projects) {
+        if (!project.dir || !project.remote) continue;
+        const bound = await fs.realpath(project.dir).catch(() => '');
+        if (same(bound) === same(dir)) { settings = validateRemote(project.remote); break; }
+      }
+      if (settings) {
+        // 项目绑定了远程仓库：校准 origin 指向配置地址，推送当前分支并建立上游；
+        // 仅 git remote add origin 后裸 git push 会因分支没有上游而失败。
+        const git = (args: string[]) => runRemoteGit(args, dir, settings);
+        await git(['rev-parse', '--git-dir']);
+        if (!(await git(['rev-parse', '--verify', 'HEAD'])).trim()) throw Error('还没有提交，先 Commit 后再 Push');
+        const remotes = (await git(['remote'])).split(/\r?\n/);
+        await git(remotes.includes('origin') ? ['remote', 'set-url', 'origin', settings.url] : ['remote', 'add', 'origin', settings.url]);
+        const out = await git(['push', '-u', 'origin', 'HEAD']);
+        return { ok: true, summary: out.trim() || '已推送当前分支并关联 origin' };
+      }
+      // 未绑定远程设置的项目沿用仓库自身上游配置
+      const r = await runGit(['push'], dir, 60000);
+      return r.code === 0 ? { ok: true, summary: r.out.trim() || '已推送' } : { ok: false, error: gitErr(r.err) };
+    } catch (e: any) { return { ok: false, error: e.message || 'Push 失败' }; }
   });
 
   ipcMain.handle('git:branchSwitch', async (_e, root: string, name: string) => {

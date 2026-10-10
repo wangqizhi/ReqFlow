@@ -23,6 +23,8 @@ export type GitStatusInfo = {
   branch: string;
   ahead: number;
   behind: number;
+  /** 当前分支是否已关联上游（origin）；未关联时首次 Push 会用 -u 建立。 */
+  upstream: boolean;
   changes: GitChange[];
   branches: string[];
   log?: { hash: string; author: string; date: string; message: string }[];

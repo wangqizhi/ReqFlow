@@ -187,7 +187,7 @@ export default function App() {
     setForm(i
       ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n') }
       : {
-          ...emptyForm, scheduledDate: localDate(), aiValidation: p!.aiValidation,
+          ...emptyForm, aiValidation: p!.aiValidation,
           deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
             ? '说明改动、未解决的问题。' : p!.deliveryGuidance
         });
@@ -474,14 +474,20 @@ export default function App() {
             )}
 
             {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口"><button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button><button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button></div>}
-            {tab === 'generate' && <div className="schedule-filter"><label className="field">筛选日期<input type="date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} /></label><div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '指定日期'], ['all', '所有需求']].map(([mode, label]) => <button key={mode} aria-pressed={scheduleMode === mode} className={scheduleMode === mode ? 'on' : ''} onClick={() => setScheduleMode(mode)}>{label}</button>)}</div><span className="settings-hint">当前 {inProgress.length} / 全部 {allInProgress.length} 条；未设日期的旧需求归入「日期及之前」。顶部操作仅处理当前日期范围。</span></div>}
             {tab === 'generate' && (
               <div className="gen-panel">
-                <div className="gen-head">
-                  <h3>本轮排期</h3>
-                  <span>{batch
-                    ? `批次 ${String(batch.number).padStart(2, '0')} · ${batch.items.length} 条需求`
-                    : '暂无批次'}</span>
+                <div className="gen-top">
+                  <div className="gen-head">
+                    <h3>本轮排期</h3>
+                    <span>{batch
+                      ? `批次 ${String(batch.number).padStart(2, '0')} · ${batch.items.length} 条需求`
+                      : '暂无批次'}</span>
+                  </div>
+                  <div className="gen-filter">
+                    <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
+                    <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '指定日期'], ['all', '所有需求']].map(([mode, label]) => <button key={mode} aria-pressed={scheduleMode === mode} className={scheduleMode === mode ? 'on' : ''} onClick={() => setScheduleMode(mode)}>{label}</button>)}</div>
+                    <span className="gen-count" title="当前筛选范围内的待开发条数 / 全部待开发；未设日期的需求计入「日期及之前」，下方操作仅处理当前筛选范围。">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
+                  </div>
                 </div>
                 <div className="gen-actions"><button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
                   <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
@@ -489,9 +495,7 @@ export default function App() {
                   </button>
                 </div>
                 {stale && <p className="warning gen-warning">源内容已变化，请退回待执行后重新排期。</p>}
-                <p className="gen-hint">{batch
-                  ? '排期后由 ReqFlow Agent 读取需求执行；完成开发后提交验证。'
-                  : '到「待执行」勾选需求并排期。'}</p>
+                {!batch && <p className="gen-hint">到「待执行」勾选需求并排期。</p>}
               </div>
             )}
             {tab === 'generate' && inProgress.length > 0 && (

@@ -2,7 +2,7 @@
 // 纯 TypeScript、无平台依赖，GUI(IPC) 与 CLI 共用同一套规则。
 
 import { validateRemote, type RemoteSettings } from './remote';
-import { localDate, validateDate } from './dates';
+import { validateDate } from './dates';
 export type Attachment = { id: string; label: string; name: string; dataUrl: string; path?: string };
 
 export type Item = {
@@ -379,7 +379,8 @@ async function applyOperation(s: Workspace, a: any) {
       typeof x.dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(x.dataUrl) || x.dataUrl.length > 14 * 1024 * 1024
     ) || new Set(attachments.map((x) => x.label)).size !== attachments.length || new Set(attachments.map((x) => x.id)).size !== attachments.length)
       throw new Error('图片附件无效（最多 12 张，每张最多 10MB，支持 PNG/JPG/WebP/GIF）');
-    const scheduledDate = a.scheduledDate === undefined ? (existing?.scheduledDate ?? (existing ? undefined : localDate())) : validateDate(a.scheduledDate);
+    // 默认不带计划日期；只有调用方显式传入日期（如用户在日期控件点选）才记录
+    const scheduledDate = a.scheduledDate === undefined ? existing?.scheduledDate : validateDate(a.scheduledDate);
     const title = a.title === undefined ? (existing?.title ?? '') : String(a.title).trim();
     const body = a.body === undefined ? (existing?.body ?? '') : String(a.body);
     const type = a.type ?? existing?.type ?? 'feature';
