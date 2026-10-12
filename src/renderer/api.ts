@@ -9,6 +9,7 @@ import pkg from '../../package.json';
 import type { AIDraft } from '../core/ai';
 import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remote';
 import type { UpdateState } from '../core/update';
+import type { PublishLogSettings, PublishRequestLog } from '../core/publish-log';
 
 export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
@@ -55,6 +56,9 @@ export interface ReqFlowBridge {
   runPublish?(root: string, rel: string): Promise<{ ok: boolean; output?: string; error?: string }>;
   getAISettings(): Promise<{ ok: true; settings: AISettings } | { ok: false; error: string }>;
   getAIRequestLogs?(): Promise<{ ok: boolean; entries?: AIRequestLog[]; error?: string }>;
+  getPublishRequestLogs?(): Promise<{ ok: boolean; entries?: PublishRequestLog[]; error?: string }>;
+  getPublishLogSettings?(): Promise<{ ok: boolean; settings?: PublishLogSettings; error?: string }>;
+  savePublishLogSettings?(settings: PublishLogSettings): Promise<{ ok: boolean; error?: string }>;
   saveAISettings(settings: AISettings): Promise<{ ok: boolean; error?: string }>;
   optimizeCommitMessage?(project: string, message: string): Promise<{ ok: boolean; message?: string; error?: string }>;
   getWorkspace(): Promise<WorkspaceResult>;

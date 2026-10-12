@@ -20,7 +20,7 @@ try {
   assert.equal(lock.packages['node_modules/example'].version, '2.0.0');
   await assert.rejects(verifyReleaseVersion(temp, '1.11.2'), /不一致/);
   await assert.rejects(verifyReleaseVersion(temp, '1.11.1'), /缺少打包应用/);
-  for (const name of ['publish.mjs', 'release-version.mjs']) await copyFile(path.resolve('scripts', name), path.join(scripts, name));
+  for (const name of ['publish.mjs', 'release-version.mjs', 'release-trace.mjs']) await copyFile(path.resolve('scripts', name), path.join(scripts, name));
   const fakeNpm = path.join(bin, 'npm-fixture.cjs');
   await writeFile(fakeNpm, `const fs=require('node:fs');const path=require('node:path');const version=JSON.parse(fs.readFileSync('package.json')).version;const step=process.argv[3];fs.appendFileSync('steps.txt',step+':'+version+'\\n');if(step==='dist'){fs.mkdirSync('release',{recursive:true});for(const kind of ['Setup','Portable'])fs.writeFileSync(path.join('release','ReqFlow-'+kind+'-'+version+'.exe'),'MZ fixture');}`);
   await writeFile(path.join(bin, 'npm.cmd'), `@"${process.execPath}" "${fakeNpm}" %*\r\n`);

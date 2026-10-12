@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { traceStep } from './release-trace.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 function git(args) {
@@ -27,11 +28,11 @@ export function prepareReleaseGit(version) {
   if (changes) {
     console.log(`提交当前工作区变更：chore: release ${tag}`);
     git(['add', '--all']);
-    git(['commit', '-m', `chore: release ${tag}`]);
+    traceStep('提交发布版本', () => git(['commit', '-m', `chore: release ${tag}`]));
   }
   console.log(`推送分支：${branch}`);
-  git(['push', 'origin', `HEAD:refs/heads/${branch}`]);
+  traceStep('推送发布分支', () => git(['push', 'origin', `HEAD:refs/heads/${branch}`]));
   if (!existingTag) git(['tag', '-a', tag, '-m', `ReqFlow ${version}`]);
   console.log(`推送标签：${tag}`);
-  git(['push', 'origin', `refs/tags/${tag}`]);
+  traceStep('推送版本标签', () => git(['push', 'origin', `refs/tags/${tag}`]));
 }

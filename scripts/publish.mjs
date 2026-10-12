@@ -10,6 +10,7 @@
 // 产物：安装包与便携版输出到 release/；上传仓库读取 Git origin。
 import { readdirSync } from 'node:fs';
 import { prepareReleaseVersion } from './release-version.mjs';
+import { startStep } from './release-trace.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,17 +23,19 @@ if (process.argv.length > 2) {
 const version = prepareReleaseVersion(root);
 console.log(`发布版本：${version}（使用当前交付版本，不再次升版）`);
 
-const run = (cmd, args) => {
+const run = (stage, cmd, args) => {
+  const end = startStep(stage);
   console.log(`\n> ${cmd} ${args.join(' ')}`);
   const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: root, shell: true });
+  end(!r.error && r.status === 0);
   if (r.status !== 0) {
     console.error(`步骤失败：${cmd} ${args.join(' ')}（退出码 ${r.status}）`);
     process.exit(1);
   }
 };
 
-run('npm', ['run', 'build']);
-run('npm', ['run', 'dist']);
+run('构建代码', 'npm', ['run', 'build']);
+run('打包 Windows 安装版与便携版', 'npm', ['run', 'dist']);
 
 const release = path.join(root, 'release');
 const artifacts = readdirSync(release).filter((f) => f.includes(version) && f.endsWith('.exe'));

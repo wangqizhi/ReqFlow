@@ -79,6 +79,13 @@ export default function App() {
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
   const [publishing, setPublishing] = useState(false);
   const [publishStep, setPublishStep] = useState('');
+  const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
+  useEffect(() => {
+    if (!publishConfirm) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !publishing) setPublishConfirm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [publishConfirm, publishing]);
   const [completeConfirm, setCompleteConfirm] = useState<{ project: string; items: { id: string; version: number; number: string }[] } | null>(null);
   const completingRef = useRef(false);
   const [completing, setCompleting] = useState(false);
@@ -314,6 +321,7 @@ export default function App() {
   async function runPublish() {
     if (!p?.dir || !publishScript || publishing) return;
     if (!bridge.runPublish) { notify('发布仅桌面版支持（浏览器预览无本地脚本访问）', 'err'); return; }
+    setPublishConfirm(false);
     setPublishing(true);
     try {
       const r = await publishProject(p, publishScript, bridge, setPublishStep);
@@ -376,6 +384,8 @@ export default function App() {
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
   const allInProgress = (p?.items || []).filter((i) => !i.archived && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
+  // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
+  const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
   const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate));
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
@@ -589,7 +599,9 @@ export default function App() {
               <FolderOpen size={16} />{p?.dir ? '浏览项目' : '关联目录'}
             </button>
             {!!publishScript && p?.dir && (
-              <button className="btn accent" disabled={publishing} onClick={() => void runPublish()} title={'运行发布脚本：' + publishScript}>
+              <button className="btn accent" disabled={publishing}
+                onClick={() => { if (pendingVerifyItems.length) setPublishConfirm(true); else void runPublish(); }}
+                title={pendingVerifyItems.length ? `有 ${pendingVerifyItems.length} 条需求待验证，点击发布时先确认` : '运行发布脚本：' + publishScript}>
                 <Rocket size={16} />{publishing ? publishStep || '发布中…' : '发布'}
               </button>
             )}
@@ -607,8 +619,8 @@ export default function App() {
           <div className="guide-main">
             <h2>项目设置 <span>v{p?.guideVersion}</span></h2>
             <p>{p?.guidance}</p>
-            {p?.dir && <p className="linked-dir" title={p.dir}><FolderOpen size={13} />{p.dir}</p>}
             <div className="guide-settings-summary">
+              {p?.dir && <span className="linked-dir" title={p.dir}><FolderOpen size={13} />{p.dir}</span>}
               <span>AI 验证：{p?.aiValidation ? '开启' : '关闭'}</span>
               <span>新需求的默认设置</span>
             </div>
@@ -815,6 +827,26 @@ export default function App() {
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <p>{completeConfirm.items.map(i => i.number).join('、')}</p><div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button></div>
         </div></div>}
+      {publishConfirm && pendingVerifyItems.length > 0 && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="还有未验证的功能"
+          onClick={(e) => { if (!publishing && e.target === e.currentTarget) setPublishConfirm(false); }}>
+          <div className="dialog">
+            <div className="dialog-head">
+              <div>
+                <h3>还有未验证的功能</h3>
+                <p>当前项目有 {pendingVerifyItems.length} 条需求处于待验证，发布前建议先完成验证。</p>
+              </div>
+              <button className="icon-btn" aria-label="关闭确认框" onClick={() => setPublishConfirm(false)}><X size={18} /></button>
+            </div>
+            <p className="detail-body">{pendingVerifyItems.map((i) => (i.title ? `${i.number} · ${i.title}` : i.number)).join('、')}</p>
+            <div className="settings-actions">
+              <button className="btn" onClick={() => setPublishConfirm(false)}>取消</button>
+              <button className="btn" disabled={publishing} onClick={() => void runPublish()}>仍要发布</button>
+              <button className="btn primary" onClick={() => { setPublishConfirm(false); changeTab('pending_verification'); }}>去验证</button>
+            </div>
+          </div>
+        </div>
+      )}
       {publishResult && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) setPublishResult(null); }}>
           <div className="dialog publish-dialog">

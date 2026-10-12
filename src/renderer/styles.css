@@ -611,10 +611,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .background-editor { margin-top: 10px; width: min(600px, 100%); }
 .background-editor textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line-2); border-radius: 8px; font: inherit; font-size: 13px; resize: vertical; }
 .background-editor .settings-actions { margin-top: 8px; }
-.settings-dialog { width: min(760px, 100%); padding: 24px; }
-.settings-tabs { display: flex; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
-.settings-tabs button { padding: 9px 18px; border-radius: 8px; font-size: 13px; white-space: nowrap; }
-.settings-tabs button.on { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+.settings-dialog { width: min(760px, 100%); height: min(640px, calc(100vh - 80px)); padding: 24px; display: flex; flex-direction: column; overflow: hidden; }
+.settings-dialog > .dialog-head, .settings-dialog > .settings-tabs, .settings-dialog > .settings-footer, .settings-dialog > .settings-message { flex-shrink: 0; }
+.settings-dialog > .settings-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
+/* REQ-091：tab 做成独立按钮样式（边框 + 底色 + 悬停），收紧 tab 与内容的间距 */
+.settings-tabs { display: flex; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.settings-tabs button { padding: 8px 16px; border-radius: 8px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink-2); transition: 0.12s; }
+.settings-tabs button:hover:not(.on):not(:disabled) { border-color: var(--muted); color: var(--ink); }
+.settings-tabs button.on { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; border-color: var(--accent); }
 .settings-body .field { margin-bottom: 16px; }
 .settings-hint { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 .settings-columns { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; }
@@ -627,10 +631,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .settings-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .secondary-actions { margin-top: 16px; }
 .secondary-actions span { font-size: 12px; color: var(--muted); }
-.settings-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
+.settings-footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
 .settings-footer .open-config-dir { margin-right: auto; }
 .ai-log-terminal { margin-top: 16px; background: #211f1d; color: #eee9e1; border: 1px solid var(--line); border-radius: 8px; padding: 14px; height: 270px; overflow: auto; }
 .ai-log-terminal pre { margin: 0; white-space: pre; font: 12px/1.8 Consolas, 'Courier New', monospace; }
+.request-log-kind { margin-top: 14px; }
+.publish-log-terminal pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .settings-message, .backup-status { background: var(--bg); padding: 10px 12px; border-radius: 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .requirement-dialog { width: min(860px, 100%); overflow: hidden; }
 .requirement-dialog .choice-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px; gap: 12px; }
@@ -696,4 +702,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .gen-top .gen-actions { margin-left: auto; }
 .requirements > .gen-panel { margin: 10px 0 0; }
 .guidance .linked-dir { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 6px !important; font-size: 12px; }
+/* REQ-092：目录路径并入设置摘要行，与 AI 验证、默认设置同行显示，降低项目设置区域高度 */
+.guide-settings-summary { flex-wrap: wrap; align-items: center; }
+.guide-settings-summary > span { flex-shrink: 0; }
+.guide-settings-summary .linked-dir { margin: 0 !important; min-width: 0; max-width: 46%; flex: 0 1 auto; }
 @media (max-width: 1250px) { .gen-top { flex-wrap: wrap; } .gen-filter { flex-wrap: wrap; } }

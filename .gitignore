@@ -51,6 +51,10 @@ backup-settings.json
 backup-settings.json.*
 ai-request-log.json
 ai-request-log.json.*
+publish-request-log.json
+publish-request-log.json.*
+publish-log-settings.json
+publish-log-settings.json.*
 reqflow-backup.json
 backup-repos/
 data-dir.cfg

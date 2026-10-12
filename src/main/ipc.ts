@@ -10,6 +10,9 @@ import os from 'node:os';
 import { optimizeCommitMessage, requestAI, parseRequirementReply, validateAISettings, type AISettings } from '../core/ai';
 import { pendingCommitItems } from '../core/domain';
 import { AIRequestLogger } from './ai-log';
+import { PublishRequestLogger } from './publish-log';
+import type { PublishRequestLog } from '../core/publish-log';
+import { StringDecoder } from 'node:string_decoder';
 import { randomUUID } from 'node:crypto';
 import { WorkspaceService } from '../core/service';
 import { WorkspaceStore } from '../core/storage';
@@ -62,6 +65,16 @@ async function withinRoot(root: string, target: string): Promise<boolean> {
 
 export function registerIpc(dataDir: string) {
   registerUpdater();
+  const publishLogger = new PublishRequestLogger(dataDir);
+  ipcMain.handle('publish:logs:get', async () => {
+    try { return { ok: true, entries: await publishLogger.read() }; }
+    catch (error: any) { return { ok: false, error: error.message || '读取发布日志失败' }; }
+  });
+  ipcMain.handle('publish:logs:settings:get', async () => ({ ok: true, settings: await publishLogger.getSettings() }));
+  ipcMain.handle('publish:logs:settings:save', async (_event, value) => {
+    try { await publishLogger.saveSettings(value); return { ok: true }; }
+    catch (error: any) { return { ok: false, error: error.message || '保存发布日志设置失败' }; }
+  });
   ipcMain.handle('window:control', (event, action: string) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (action === 'minimize') win?.minimize();
@@ -186,7 +199,41 @@ export function registerIpc(dataDir: string) {
   }
 
   ipcMain.handle('publish:run', async (_e, root: string, rel: string) => {
+    await publishLogger.ready;
+    const started = performance.now();
+    const requestId = randomUUID().slice(0, 8);
+    const context = { requestId, project: typeof root === 'string' ? path.basename(path.resolve(root)) : '', script: typeof rel === 'string' ? rel : '' };
+    let stage = '执行发布脚本';
+    const record = (phase: PublishRequestLog['phase'], text?: string, durationMs?: number) => publishLogger.append({ ...context, time: new Date().toISOString(), phase, stage, elapsedMs: Math.round(performance.now() - started), durationMs, text });
+    record('request', '开始发布');
+    const streams = [0, 1].map(() => ({ decoder: new StringDecoder('utf8'), pending: '' }));
+    const line = (text: string) => {
+      const plain = text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').trimEnd();
+      if (!plain.trim()) return;
+      if (plain.startsWith('@@REQFLOW_PUBLISH ')) {
+        try {
+          const event = JSON.parse(plain.slice('@@REQFLOW_PUBLISH '.length));
+          if (typeof event.stage === 'string' && event.stage.length <= 120 && ['start', 'complete', 'error'].includes(event.phase)) {
+            stage = event.stage;
+            record(event.phase === 'start' ? 'stage_start' : event.phase === 'complete' ? 'stage_complete' : 'error', undefined,
+              Number.isFinite(event.elapsedMs) && event.elapsedMs >= 0 ? Math.round(event.elapsedMs) : undefined);
+            return;
+          }
+        } catch { /* 非有效阶段标记，作为普通输出记录。 */ }
+      }
+      record('output', plain);
+    };
     let output = '';
+    const consume = (text: string, index: number) => {
+      output += text;
+      if (output.length > PUBLISH_LIMIT) output = '…（前文已截断）…\n' + output.slice(-PUBLISH_LIMIT);
+      const stream = streams[index];
+      const lines = (stream.pending + text).split(/\r\n|\r|\n/);
+      stream.pending = lines.pop() || '';
+      for (const text of lines) line(text);
+      if (stream.pending.length > 8192) { line(stream.pending); stream.pending = ''; }
+    };
+    let heartbeat: NodeJS.Timeout | undefined;
     try {
       // 只执行检测名单内的 publish 脚本，且路径必须仍在项目目录内（防渲染端传入任意路径）
       if (typeof root !== 'string' || typeof rel !== 'string' || !rel.trim()) throw Error('发布脚本路径无效');
@@ -216,19 +263,31 @@ export function registerIpc(dataDir: string) {
           try { child.kill(); } catch { /* 忽略 */ }
           done({ code: -1, err: '发布脚本超时（20 分钟），已终止' });
         }, 20 * 60 * 1000);
-        child.stdout?.on('data', (d: any) => (output += d));
-        child.stderr?.on('data', (d: any) => (output += d));
+        heartbeat = setInterval(() => record('progress', '仍在执行'), 5000);
+        child.stdout?.on('data', (d: Buffer) => consume(streams[0].decoder.write(d), 0));
+        child.stderr?.on('data', (d: Buffer) => consume(streams[1].decoder.write(d), 1));
         child.on('error', (e: any) => done({ code: -1, err: e?.message || String(e) }));
         child.on('close', (code: number | null) => done({ code: code ?? -1, err: '' }));
       });
+      clearInterval(heartbeat);
+      streams.forEach((stream, index) => { consume(stream.decoder.end(), index); line(stream.pending); stream.pending = ''; });
       if (output.length > PUBLISH_LIMIT) output = '…（前文已截断）…\n' + output.slice(-PUBLISH_LIMIT);
       if (r.code !== 0) {
         const reason = r.err || (output.trim().split('\n').filter(Boolean).pop() || '发布脚本执行失败');
+        record('error', reason);
+        await publishLogger.flush();
         return { ok: false, error: reason, output };
       }
+      record('complete', '发布成功');
+      await publishLogger.flush();
       return { ok: true, output };
     } catch (e: any) {
-      return { ok: false, error: errText(e, '执行发布脚本失败'), output };
+      const error = errText(e, '执行发布脚本失败');
+      record('error', error);
+      await publishLogger.flush();
+      return { ok: false, error, output };
+    } finally {
+      clearInterval(heartbeat);
     }
   });
 

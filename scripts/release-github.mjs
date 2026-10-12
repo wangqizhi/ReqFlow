@@ -1,6 +1,7 @@
 // 上传指定版本产物前，自动提交工作区并推送分支及版本标签。
 import { releaseRepository, prepareReleaseGit } from './release-git.mjs';
 import { verifyReleaseVersion } from './release-version.mjs';
+import { traceStep } from './release-trace.mjs';
 import { readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -69,9 +70,9 @@ async function main() {
       if (magic.toString() !== 'MZ') throw Error(`产物不是 Windows 可执行文件：${path.basename(file)}`);
     } finally { await handle.close(); }
   }
-  await verifyReleaseVersion(root, version);
+  await traceStep('检查发布版本一致性', () => verifyReleaseVersion(root, version));
   console.log(`版本一致性检查通过：源码、锁文件、打包应用、安装版、便携版均为 ${version}`);
-  const sums = (await Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`))).join('\n') + '\n';
+  const sums = (await traceStep('计算安装包 SHA256', () => Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`)))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
   let notesFile = options.notes ? path.resolve(root, options.notes) : path.join(root, 'docs', `release-${version}.md`);
   const notesInfo = await stat(notesFile).catch(() => null);
@@ -81,11 +82,11 @@ async function main() {
   console.log(`附件：${[...names, path.basename(sumsFile)].join(', ')}`);
   console.log(`说明：${notesFile || '默认安装说明'}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
   if (options['dry-run']) { console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
-  gh(['auth', 'status', '--hostname', 'github.com'], { capture: true });
+  traceStep('检查 GitHub 登录', () => gh(['auth', 'status', '--hostname', 'github.com'], { capture: true }));
   prepareReleaseGit(version);
   // --verify-tag 阻止 gh 默认在远程默认分支上自动创建一个可能不匹配产物的标签。
-  gh(['api', `repos/${repo}/git/ref/tags/${tag}`], { capture: true });
-  const existing = gh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,assets'], { capture: true, allowFailure: true });
+  traceStep('检查远程版本标签', () => gh(['api', `repos/${repo}/git/ref/tags/${tag}`], { capture: true }));
+  const existing = traceStep('查询 GitHub Release', () => gh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,assets'], { capture: true, allowFailure: true }));
   if (existing.status !== 0 && !/release not found/i.test(existing.stderr)) throw Error(`无法查询 Release：${existing.stderr.trim()}`);
   if (existing.status === 0 && !options.clobber) {
     const remoteNames = new Set(JSON.parse(existing.stdout).assets.map(asset => asset.name));
@@ -94,11 +95,11 @@ async function main() {
   }
   await writeFile(sumsFile, sums, 'utf8');
   if (existing.status === 0) {
-    gh(['release', 'upload', tag, ...assets, sumsFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]);
+    traceStep('上传安装包到 GitHub', () => gh(['release', 'upload', tag, ...assets, sumsFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]));
   } else {
-    gh(['release', 'create', tag, ...assets, sumsFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
+    traceStep('创建 Release 并上传安装包到 GitHub', () => gh(['release', 'create', tag, ...assets, sumsFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
       ...(notesFile ? ['--notes-file', notesFile] : ['--notes', `ReqFlow ${version}\n\nWindows x64：Setup 为安装版，Portable 为便携版。下载后可用 SHA256SUMS 文件校验。`]),
-      ...(options.draft ? ['--draft'] : []), ...(version.includes('-') ? ['--prerelease'] : [])]);
+      ...(options.draft ? ['--draft'] : []), ...(version.includes('-') ? ['--prerelease'] : [])]));
   }
   console.log(`完成：https://github.com/${repo}/releases/tag/${tag}`);
 }
