@@ -18,6 +18,7 @@ import { validateRemote } from '../core/remote';
 import { prepareProjectDirectory } from './project-directory';
 import { checkoutNewProject, pullProject } from './git-checkout';
 import { emptyRemote, type RemoteSettings } from '../core/remote';
+import { registerUpdater } from './updater';
 
 // 浏览项目支持预览的图片格式（Chromium 可直接渲染的位图/矢量格式）
 const IMAGE_MIME: Record<string, string> = {
@@ -60,6 +61,7 @@ async function withinRoot(root: string, target: string): Promise<boolean> {
 }
 
 export function registerIpc(dataDir: string) {
+  registerUpdater();
   ipcMain.handle('window:control', (event, action: string) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (action === 'minimize') win?.minimize();

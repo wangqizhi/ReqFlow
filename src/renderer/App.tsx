@@ -13,6 +13,7 @@ import {
   Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Trash, X, ImageIcon, Settings
 } from './icons';
 import { HelpOverlay } from './help';
+import { UpdateButton } from './update';
 import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
@@ -535,9 +536,9 @@ export default function App() {
           <button className="btn plain" onClick={() => download(JSON.stringify(data, null, 2), 'reqflow-backup.json')}>
             <Download size={15} />导出全部数据
           </button>
-          <button className="btn plain" onClick={() => setHelpOpen(true)}>
-            <HelpCircle size={15} />帮助 · CLI 参考
-          </button>
+          <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
+            <HelpCircle size={15} />帮助
+          </button><UpdateButton /></div>
           <p className="side-hint">本地工作区 · 数据保存在本机</p>
         </div>
       </aside>

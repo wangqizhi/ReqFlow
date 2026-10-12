@@ -8,6 +8,7 @@ import { validateAISettings, type AISettings, type AIRequestLog } from '../core/
 import pkg from '../../package.json';
 import type { AIDraft } from '../core/ai';
 import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remote';
+import type { UpdateState } from '../core/update';
 
 export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
@@ -32,6 +33,10 @@ export type GitStatusInfo = {
 export type GitOpResult = { ok: true; summary?: string; warning?: string } | { ok: false; error: string };
 
 export interface ReqFlowBridge {
+  updateState?(): Promise<UpdateState>;
+  checkUpdate?(): Promise<UpdateState>;
+  downloadUpdate?(): Promise<UpdateState>;
+  installUpdate?(): Promise<UpdateState>;
   windowControl?(action: 'minimize' | 'close'): Promise<void>;
   aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[]): Promise<{ ok: boolean; reply?: string; items?: AIDraft[]; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
   gitPush?(root: string): Promise<GitOpResult>;

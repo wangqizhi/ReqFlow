@@ -4,6 +4,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('reqflow', {
+  updateState: () => ipcRenderer.invoke('update:state'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
   windowControl: (action: 'minimize' | 'close') => ipcRenderer.invoke('window:control', action),
   aiRequirements: (project: string, mode: string, instruction: string, discussion: any[]) => ipcRenderer.invoke('ai:requirements', project, mode, instruction, discussion),
   gitPush: (root: string) => ipcRenderer.invoke('git:push', root),
