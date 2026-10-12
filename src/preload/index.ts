@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('reqflow', {
   writeFile: (root: string, rel: string, content: string) => ipcRenderer.invoke('fs:write', root, rel, content),
   revealFile: (root: string, rel: string) => ipcRenderer.invoke('fs:reveal', root, rel),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  openCodexDeepLink: (url: string) => ipcRenderer.invoke('shell:openCodexDeepLink', url),
   gitAvailable: () => ipcRenderer.invoke('git:available'),
   gitStatus: (root: string) => ipcRenderer.invoke('git:status', root),
   gitInit: (root: string) => ipcRenderer.invoke('git:init', root),

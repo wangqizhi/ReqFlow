@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "reqflow-agent",
-  "version": "0.2.0",
-  "description": "按当前项目目录领取 ReqFlow AI 排期任务，实现后转入待验证。",
+  "version": "0.2.1",
+  "description": "仅 @ 即读取当前项目 ReqFlow AI 排期任务，开始实现并转入待验证。",
   "author": { "name": "ReqFlow" },
   "extensions": {
     "com.openai": {
@@ -10,7 +10,7 @@
       "interface": {
         "displayName": "ReqFlow Agent",
         "shortDescription": "读取需求并回写待验证",
-        "longDescription": "匹配当前目录的 ReqFlow 项目，读取有效AI 排期任务，完成实现后核对本轮快照并逐条进入待验证。保留人工验收。",
+        "longDescription": "仅 @ ReqFlow Agent 即匹配当前目录的 ReqFlow 项目，读取有效 AI 排期任务并开始实现，完成后核对本轮快照并逐条进入待验证。明确的查看、配置或插件更新指令优先。保留人工验收。",
         "developerName": "ReqFlow",
         "category": "Productivity",
         "capabilities": ["Read", "Write"],

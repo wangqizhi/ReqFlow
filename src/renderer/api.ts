@@ -79,6 +79,8 @@ export interface ReqFlowBridge {
   writeFile?(root: string, rel: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
   revealFile?(root: string, rel: string): Promise<{ ok: boolean; error?: string }>;
   openExternal?(url: string): Promise<{ ok: boolean; error?: string }>;
+  // 实验室：仅放行 codex://threads 深链，用于调起 Codex 桌面窗口
+  openCodexDeepLink?(url: string): Promise<{ ok: boolean; error?: string }>;
   // Git 支持：仅当主进程检测到本机 git 时可用（gitAvailable 返回 available=false 时界面不显示 Git 入口）
   gitAvailable?(): Promise<{ ok: boolean; available: boolean }>;
   gitStatus?(root: string): Promise<({ ok: true } & GitStatusInfo) | { ok: false; error: string }>;

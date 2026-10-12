@@ -59,6 +59,9 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .brand > div { font-weight: 650; font-size: 16px; line-height: 1.15; }
 .brand small { display: block; font-weight: 400; font-size: 11px; color: var(--side-muted); }
 .side-label { font-size: 11px; letter-spacing: 0.12em; color: var(--side-muted); padding: 12px 8px 4px; text-transform: uppercase; }
+.side-label-row { display: flex; align-items: center; justify-content: space-between; }
+.side-add-folder { width: 20px; height: 20px; border-radius: 6px; color: var(--side-muted); margin-right: -2px; }
+.side-add-folder:hover { background: rgba(255, 255, 255, 0.07); color: var(--side-ink); box-shadow: none; }
 .side-projects { display: flex; flex-direction: column; gap: 2px; }
 .side-project { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); text-align: left; width: 100%; min-width: 0; cursor: pointer; }
 .side-project:hover { background: rgba(255, 255, 255, 0.07); }
@@ -724,3 +727,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .help-panel > .settings-tabs { margin: 0 24px; flex-shrink: 0; }
 .local-agent-body > .settings-actions { margin-bottom: 16px; }
+.lab-target { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 13px; }
+.lab-target > span { flex-shrink: 0; color: var(--muted); }
+.lab-target code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-link { display: block; word-break: break-all; white-space: normal; }

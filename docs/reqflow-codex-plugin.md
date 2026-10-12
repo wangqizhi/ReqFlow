@@ -1,6 +1,6 @@
 # ReqFlow Codex 插件
 
-日期：2026-10-09。插件源码：`plugins/reqflow-agent/`，版本 0.2.0。
+日期：2026-10-09。插件源码：`plugins/reqflow-agent/`，版本 0.2.1。
 
 ## 工作方式
 
@@ -85,3 +85,9 @@ node E:\project\reqFlow\plugins\reqflow-agent\scripts\reqflow.mjs complete --cwd
 ## 0.2.0 执行方式
 
 新需求默认 executor=ai；人工任务使用 human，其他执行器使用 plugin:<id> 或 agent:<id>。旧需求未设置该字段时兼容为 ai。只领取有效排期中的 AI 任务，未排期、已退回、已取消、过期快照及其他执行器任务不领取。完成回写需要支持 scheduled-ai-complete 的新版 ReqFlow 桌面程序（1.10.3 起）；旧程序会被阻止回写。CLI complete 携带 --batch 和 --item-version 在存储操作内重新检查排期和版本。
+
+## 0.2.1 默认 @ 执行
+
+在已绑定目录的 Codex 项目聊天中，仅 @ ReqFlow Agent（只发送插件引用）即授权读取当前项目的 AI 排期需求，开始实现和验证，实际完成后回写待验证，无需再次选择“执行”或补充执行口令。明确要求仅查看、分析、规划、配置或更新插件时，以该指令为准。未配置时先恢复连接，再继续执行；缺少无法本机确定的信息时才询问。
+
+通过本地 marketplace 重新运行 `codex plugin add reqflow-agent@reqflow-local` 安装 0.2.1。安装不会后台轮询或自行创建聊天。

@@ -520,8 +520,11 @@ export default function App() {
 
       <aside className="side">
         <div className="brand"><img className="mark" src="./app-icon.png" alt="ReqFlow" /><div>ReqFlow<small>需求流{appVersion ? ` v${appVersion}` : ''}</small></div></div>
-        <div className="side-label">我的项目</div>
+        <div className="side-label side-label-row">我的项目
+          <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
+        </div>
         <nav className="side-projects">
+          {folderForm && <form className="folder-form" onSubmit={async (e) => { e.preventDefault(); if (await act({ op: "folder", name: folderName })) { setFolderName(""); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="btn sm" disabled={busy || !folderName.trim()}>创建</button></form>}
           {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} />{folder.name}</summary>{data.projects.filter((pr) => (pr.folderId || 'default') === folder.id).map((pr) => (
             <div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragStart={(e) => e.dataTransfer.setData('application/reqflow-project', pr.id)}
@@ -540,8 +543,6 @@ export default function App() {
               )}
             </div>
           ))}</details>)}
-          <button className="side-project add" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={16} />新建文件夹</button>
-          {folderForm && <form className="folder-form" onSubmit={async (e) => { e.preventDefault(); if (await act({ op: "folder", name: folderName })) { setFolderName(""); setFolderForm(false); } }}><label className="field"><input aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="btn sm" disabled={busy || !folderName.trim()}>创建</button></form>}
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span>新建项目</span>
           </button>
@@ -825,7 +826,7 @@ export default function App() {
       </main>
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
-      {modsOpen && <ModsOverlay initialTab={modsTab} onClose={() => setModsOpen(false)} />}
+      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>

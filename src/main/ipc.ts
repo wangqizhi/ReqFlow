@@ -571,6 +571,17 @@ export function registerIpc(dataDir: string) {
     }
   });
 
+  // 实验室：调起 Codex 桌面窗口，仅放行 codex://threads 深链（threads/new 支持目录与预填参数）
+  ipcMain.handle('shell:openCodexDeepLink', async (_e, url: string) => {
+    if (!/^codex:\/\/threads(\/|\?|$)/i.test(String(url))) return { ok: false, error: '仅支持 codex://threads 链接' };
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: errText(e, '调起失败，未检测到可用的 Codex 桌面应用') };
+    }
+  });
+
   // ---------- 浏览项目：Git 支持（检测到本机 git 才暴露，命令固定 + 参数数组，不经 shell） ----------
 
   let gitAvailableCache: boolean | null = null;

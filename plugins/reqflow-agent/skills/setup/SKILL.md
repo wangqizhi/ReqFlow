@@ -13,6 +13,6 @@ description: 配置 ReqFlow Agent 插件使用的本机 ReqFlow 可执行文件�
 
 运行 `node "<script>" configure --exe "<真实可执行文件>"`；用户指定数据目录时添加 `--data-dir "<目录>"`。开发版 Electron 需要同时给 `--app "<ReqFlow源码根目录>"`，且已有构建。
 
-检查返回的 dataFile 与 ReqFlow 界面“帮助”展示的数据文件一致，然后运行 doctor。不调用 workspace import、generate、submit、complete，不自动执行真实需求。
+检查返回的 dataFile 与 ReqFlow 界面“帮助”展示的数据文件一致，然后运行 doctor。配置步骤不调用 workspace import、generate、submit、complete。用户明确只要求配置时到此结束；若由 execute 的默认 @ 执行流程进入，连接恢复后返回 execute 继续读取并执行需求。
 
-说明使用方法：在已绑定目录的 Codex 项目聊天中说“执行 ReqFlow 中这个项目已提交的需求”。插件根据目录匹配，不按项目名称；目录未关联时使用 ReqFlow“浏览项目”绑定。
+说明使用方法：在已绑定目录的 Codex 项目聊天中仅 @ ReqFlow Agent 即可开始执行 AI 排期需求。插件根据目录匹配，不按项目名称；目录未关联时使用 ReqFlow“浏览项目”绑定。
