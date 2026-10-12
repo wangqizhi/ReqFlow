@@ -10,9 +10,10 @@ const output = path.resolve('out/update-review');
 try {
   await mkdir(output, { recursive: true });
   await build({ entryPoints: ['src/main/ipc.ts'], outfile: path.join(temp, 'ipc.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
+  await build({ entryPoints: ['src/main/updater.ts'], outfile: path.join(temp, 'updater.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
   await build({ entryPoints: ['src/core/update.ts'], outfile: path.join(temp, 'update.cjs'), bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' });
   const host = `
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, net, shell } = require('electron');
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
@@ -22,22 +23,23 @@ assert.equal(newerVersion('1.9.99', '1.10.5'), false);
 assert.equal(newerVersion('1.10.5', '1.10.5'), false);
 assert.equal(newerVersion('1.10.6-beta', '1.10.5'), false);
 app.setPath('userData', ${JSON.stringify(path.join(temp, 'profile'))});
-let bad = true, requestCount = 0, installCount = 0;
+let bad = true, offline = false, launchFails = true, requestCount = 0, installCount = 0, quits = 0;
+app.quit = ()=>{quits++;};
+shell.openPath = async file=>{installCount++;assert.equal(file,${JSON.stringify(path.join(temp, 'profile', 'updates', 'ReqFlow-Setup-99.0.0.exe'))});return launchFails ? 'Access denied' : '';};
 const bytes = Buffer.from('MZ updater integration fixture');
 const digest = createHash('sha256').update(bytes).digest('hex');
-global.fetch = async url => {
+net.fetch = async url => {
+ if(offline) throw TypeError('fetch failed');
  if(String(url).endsWith('/releases/latest')) return new Response(JSON.stringify({tag_name:'v99.0.0', assets:[{name:'ReqFlow-Setup-99.0.0.exe',size:bytes.length,digest:'sha256:'+digest,browser_download_url:'https://github.com/wangqizhi/ReqFlow/releases/download/v99.0.0/ReqFlow-Setup-99.0.0.exe'}]}));
  requestCount++;
  const payload = bad ? Buffer.alloc(bytes.length, 1) : bytes;
  return new Response(new ReadableStream({start(controller){controller.enqueue(payload.subarray(0,10));setTimeout(()=>{controller.enqueue(payload.subarray(10));controller.close();},1200);}}));
 };
+global.fetch = ()=>{throw Error('Updater must use Electron net.fetch');};
 app.whenReady().then(async()=>{
  let win;
  try {
   require('./ipc.cjs').registerIpc(${JSON.stringify(path.join(temp, 'data'))});
-  // Exercise the install button without launching an installer or quitting the test host.
-  ipcMain.removeHandler('update:install');
-  ipcMain.handle('update:install',()=>{installCount++;return {phase:'installing',version:'99.0.0'};});
   win = new BrowserWindow({width:1440,height:900,show:false,webPreferences:{preload:${JSON.stringify(path.resolve('dist/preload/index.js'))},sandbox:false,backgroundThrottling:false}});
   await win.loadFile(${JSON.stringify(path.resolve('dist/renderer/index.html'))});
   const js = source=>win.webContents.executeJavaScript(source);
@@ -56,8 +58,6 @@ app.whenReady().then(async()=>{
   await assert.rejects(fs.stat(${JSON.stringify(path.join(temp, 'profile', 'updates', 'ReqFlow-Setup-99.0.0.exe.part'))}));
   bad = false;
   await click();
-  await wait('document.querySelector(".update-button").textContent.includes("更新")');
-  await click();
   await wait('document.querySelector(".update-button").textContent.includes("下载")');
   await fs.writeFile(${JSON.stringify(path.join(output, 'downloading-1440.png'))},(await win.webContents.capturePage()).toPNG());
   await wait('document.querySelector(".update-button").textContent.trim()==="安装"');
@@ -72,10 +72,40 @@ app.whenReady().then(async()=>{
   }
   assert.equal(installCount,0);
   await click();
-  await wait('document.querySelector(".update-button").textContent.includes("启动安装")');
+  await wait('document.querySelector(".update-error")?.textContent.includes("Access denied")');
   assert.equal(installCount,1);
-  console.log('PASS: 版本比较、自动检测、红色更新/安装、下载进度、防重复下载、校验失败清理及重试、用户点击安装、1440x900/700 侧栏布局。');
- }catch(error){console.error(error);process.exitCode=1;}finally{win?.destroy();app.quit();}
+  assert.equal(quits,0);
+  await fs.rm(${JSON.stringify(path.join(temp, 'profile', 'updates', 'downloaded.json'))});
+  for(const channel of ['update:state','update:check','update:download','update:install']) ipcMain.removeHandler(channel);
+  require('./updater.cjs').registerUpdater();
+  assert.equal(await js('(async()=> (await window.reqflow.checkUpdate()).phase)()'),'ready');
+  assert.equal(requestCount,2);
+  // Register a fresh updater as after a restart: retain only the downloaded disk cache.
+  for(const channel of ['update:state','update:check','update:download','update:install']) ipcMain.removeHandler(channel);
+  require('./updater.cjs').registerUpdater();
+  offline = true;
+  assert.equal(await js('(async()=> (await window.reqflow.checkUpdate()).phase)()'),'ready');
+  assert.equal(requestCount,2);
+  launchFails = false;
+  await wait('!document.querySelector(".update-button").disabled');
+  await click();
+  await wait('document.querySelector(".update-button").textContent.includes("启动安装")');
+  await new Promise(r=>setTimeout(r,500));
+  assert.equal(installCount,2);
+  assert.equal(quits,1);
+  // Recheck integrity at installation time, even if the cache was valid earlier.
+  for(const channel of ['update:state','update:check','update:download','update:install']) ipcMain.removeHandler(channel);
+  require('./updater.cjs').registerUpdater();
+  assert.equal(await js('(async()=> (await window.reqflow.checkUpdate()).phase)()'),'ready');
+  await fs.writeFile(${JSON.stringify(path.join(temp, 'profile', 'updates', 'ReqFlow-Setup-99.0.0.exe'))},Buffer.alloc(bytes.length,0));
+  assert.equal(await js('(async()=> (await window.reqflow.installUpdate()).phase)()'),'error');
+  assert.equal(installCount,2);
+  assert.equal(quits,1);
+  const failure = await js('window.reqflow.downloadUpdate()');
+  assert.equal(failure.retry,'download');
+  assert.match(failure.error,/连接 GitHub 失败/);
+  console.log('PASS: 版本比较、下载进度、防重复、校验失败重试、离线重启恢复缓存、真实安装处理的启动失败不退出/成功才退出、安装前再次校验、1440x900/700 布局。');
+ }catch(error){console.error(error);process.exitCode=1;}finally{win?.destroy();app.exit(process.exitCode || 0);}
 });`;
   await writeFile(path.join(temp, 'host.cjs'), host);
   await new Promise((resolve, reject) => execFile(path.resolve('node_modules/electron/dist/electron.exe'), [path.join(temp, 'host.cjs')], { windowsHide: true, timeout: 60000 }, (error, stdout, stderr) => {

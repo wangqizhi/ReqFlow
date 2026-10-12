@@ -17,7 +17,7 @@ export function UpdateButton() {
   const working = pending || ['checking', 'downloading', 'installing'].includes(state.phase);
   const action = async () => {
     if (locked.current || working) return;
-    const method = state.phase === 'ready' ? bridge.installUpdate : state.phase === 'available' ? bridge.downloadUpdate : bridge.checkUpdate;
+    const method = state.phase === 'ready' ? bridge.installUpdate : state.phase === 'available' || (state.phase === 'error' && state.retry === 'download') ? bridge.downloadUpdate : bridge.checkUpdate;
     if (!method) return;
     locked.current = true;
     setPending(true);
@@ -27,7 +27,7 @@ export function UpdateButton() {
   };
   const label = {
     idle: '检测更新', checking: '检测中…', latest: '已是最新', available: '更新',
-    downloading: `下载 ${state.progress || 0}%`, ready: '安装', installing: '启动安装…', error: '重试检测',
+    downloading: `下载 ${state.progress || 0}%`, ready: '安装', installing: '启动安装…', error: state.retry === 'download' ? '重试下载' : '重试检测',
   }[state.phase];
   const title = !bridge.checkUpdate ? '在线更新仅桌面版提供' : state.error || (state.version ? `版本 ${state.version}` : '检测 GitHub 最新版本');
   return <div className="update-control">

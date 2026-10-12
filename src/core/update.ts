@@ -5,6 +5,7 @@ export type UpdateState = {
   downloaded?: number;
   total?: number;
   error?: string;
+  retry?: 'check' | 'download';
 };
 
 export function newerVersion(candidate: string, current: string): boolean {
