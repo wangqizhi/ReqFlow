@@ -89,7 +89,7 @@ npm run dist            # 打包 Windows x64 安装版与便携版
 
 1. 交付时运行 `npm version <版本> --no-git-tag-version`，同步源码及锁文件版本，准备 `docs/release-<版本>.md`。
 2. 登录 GitHub CLI：`gh auth login`。
-3. 运行 `node scripts/publish.mjs`，使用该版本构建、打包、检查内部版本并上传；脚本也会修正锁文件根包的版本。
+3. 运行 `node scripts/publish.mjs`，使用该版本构建、打包、检查内部版本并上传；脚本也会修正锁文件根包的版本。构建前会先查询 GitHub：该版本已发布且附件齐全时立即报错退出，需要替换附件时改用 `npm run release:github -- --version <版本> --clobber`。
 
 已有当前版本安装包时，可预览后直接上传，上传失败也可如此重试：
 

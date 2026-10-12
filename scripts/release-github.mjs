@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const help = `用法：npm run release:github -- [选项]
@@ -33,6 +33,25 @@ async function hash(file) {
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(file)) digest.update(chunk);
   return digest.digest('hex');
+}
+
+/**
+ * 发布前预检：查询 GitHub 上该版本的 Release 状态。
+ * 供 publish.mjs 在构建打包前调用，版本已发布且附件齐全时直接终止，避免白等构建。
+ * 查询失败（未登录、网络错误等）抛出错误，由调用方决定是否终止。
+ */
+export function checkReleasePublished(version) {
+  const repo = releaseRepository();
+  const tag = `v${version}`;
+  const expected = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`, `SHA256SUMS-${version}.txt`];
+  const result = gh(['release', 'view', tag, '--repo', repo, '--json', 'isDraft,assets'], { capture: true, allowFailure: true });
+  if (result.status !== 0 && !/release not found/i.test(result.stderr)) {
+    throw Error(`无法查询 GitHub Release：${result.stderr.trim() || `退出码 ${result.status}`}。请检查 gh auth login 与网络后重试`);
+  }
+  if (result.status !== 0) return { repo, tag, exists: false, complete: false };
+  const info = JSON.parse(result.stdout);
+  const remoteNames = new Set((info.assets || []).map(asset => asset.name));
+  return { repo, tag, exists: true, draft: !!info.isDraft, complete: expected.every(name => remoteNames.has(name)), missing: expected.filter(name => !remoteNames.has(name)) };
 }
 
 async function main() {
@@ -104,4 +123,6 @@ async function main() {
   console.log(`完成：https://github.com/${repo}/releases/tag/${tag}`);
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+// 仅在作为脚本直接运行时执行发布流程；被 import 复用导出函数时不触发。
+const invokedAsScript = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (invokedAsScript) main().catch(error => { console.error(error.message); process.exitCode = 1; });
