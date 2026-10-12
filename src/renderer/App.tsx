@@ -18,7 +18,7 @@ import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
-import { AssignmentOverlay } from './assignment';
+import { executorLabel, useLocalAgents, agentName } from './assignment';
 import { ModsOverlay } from './mods';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -68,7 +68,6 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const [modsTab, setModsTab] = useState('protocol');
-  const [assignIds, setAssignIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -97,6 +96,8 @@ export default function App() {
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [completeConfirm]);
+  // REQ-101：指派入口移入提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
+  const { agents: localAgents } = useLocalAgents(!!completeConfirm);
   const [publishResult, setPublishResult] = useState<{ ok: boolean; output: string; error?: string } | null>(null);
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
@@ -435,6 +436,11 @@ export default function App() {
   async function completeBatch() {
     if (inProgress.length) setCompleteConfirm({ project: p!.id, items: inProgress.map(({ id, version, number }) => ({ id, version, number })) });
   }
+  // 指派 / 取消指派（恢复默认 AI 执行）都在提交验证弹窗内完成，不关闭弹窗
+  async function assignItems(ids: string[], executor: string) {
+    if (await act({ op: 'assign', ids, executor }, true))
+      notify(executor === 'ai' ? '已取消指派，恢复 AI 执行' : '已指派给 ' + executorLabel(executor));
+  }
   async function confirmComplete() {
     if (!completeConfirm || busyRef.current || completingRef.current) return;
     const request = completeConfirm;
@@ -461,7 +467,7 @@ export default function App() {
   async function revertItem(i: Item) {
     if (await act({ op: 'revert', id: i.id })) {
       setTab('feature');
-      notify('已退回待执行，可编辑后重新生成 Prompt');
+      notify('已退回需求池，可编辑后重新排期');
     }
   }
   function changeTab(v: string) {
@@ -728,7 +734,7 @@ export default function App() {
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
                         <span className={'status ' + i.status}>{labels[i.status]}</span>
-                        <span className="revision">v{i.version}</span><span className="revision">{!i.executor || i.executor === 'ai' ? 'AI 执行' : i.executor === 'human' ? '人工执行' : i.executor}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
+                        <span className="revision">v{i.version}</span><span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
                       <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
@@ -749,7 +755,7 @@ export default function App() {
                       </div>
                       <div className="next-step">
                         {i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
-                          : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回待执行重新编辑。'
+                          : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回需求池重新编辑。'
                           : i.status === 'pending_verification' ? '验证完成后，直接记录通过或未通过。'
                           : '已归档，历史记录仍可查看。'}
                       </div>
@@ -764,8 +770,7 @@ export default function App() {
                           setEditing(i); setModal('deleteItem');
                         }}><Trash size={14} />删除</button>}
                         {i.status === 'in_progress' && <button className="btn primary" disabled={busy} onClick={() => submitItem(i)}>提交验证</button>}
-                        {tab === 'generate' && <button className="btn" disabled={busy} onClick={() => setAssignIds([i.id])}>指派</button>}
-                        {i.status === 'in_progress' && <button className="btn" disabled={busy} onClick={() => revertItem(i)}>退回待执行</button>}
+                        {i.status === 'in_progress' && <button className="btn" disabled={busy} onClick={() => revertItem(i)}>退回需求池</button>}
                         {i.status === 'pending_verification' && (
                           <>
                             <button className="btn accent" disabled={busy} onClick={() => recordPass(i)}>通过并归档</button>
@@ -803,10 +808,9 @@ export default function App() {
                   <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
                     <Check size={15} />提交验证 · 全部{inProgress.length > 0 ? ` ${inProgress.length} 条` : ''}
                   </button>
-                  <button className="btn" disabled={busy || !inProgress.length} onClick={() => setAssignIds(inProgress.map(i => i.id))}>指派</button>
                 </div>
                 </div>
-                {stale && <p className="warning gen-warning">源内容已变化，请退回待执行后重新排期。</p>}
+                {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
                 {!batch && <p className="gen-hint">到「待执行」勾选需求并排期。</p>}
               </div>
             )}
@@ -821,12 +825,39 @@ export default function App() {
       </main>
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
-      {assignIds.length > 0 && <AssignmentOverlay onClose={() => setAssignIds([])} configure={() => { setAssignIds([]); setModsTab('agents'); setModsOpen(true); }} assign={async executor => { if (await act({ op: 'assign', ids: assignIds, executor })) setAssignIds([]); }} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
-          <p>{completeConfirm.items.map(i => i.number).join('、')}</p><div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button></div>
+          <div className="assign-list">
+            {completeConfirm.items.map((item) => {
+              const fresh = p?.items.find((i) => i.id === item.id);
+              const executor = fresh?.executor || 'ai';
+              return (
+                <div className="assign-row" key={item.id}>
+                  <div className="assign-row-info">
+                    <code>{item.number}</code>
+                    {fresh?.title && <span className="assign-title" title={fresh.title}>{fresh.title}</span>}
+                    <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
+                  </div>
+                  <div className="assign-row-actions">
+                    {(localAgents || []).map((id) => (
+                      <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
+                        title={executor === 'agent:' + id ? '当前已指派给 ' + agentName(id) : '指派给 ' + agentName(id) + ' 执行'}
+                        onClick={() => void assignItems([item.id], 'agent:' + id)}>指派给 {agentName(id)}</button>
+                    ))}
+                    {executor !== 'ai' && (
+                      <button className="btn sm" disabled={busy || completing} title="取消指派，恢复默认 AI 执行"
+                        onClick={() => void assignItems([item.id], 'ai')}>取消指派</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
+          {!!localAgents?.length && <p className="settings-hint">指派决定需求由哪个 Agent 领取执行；取消指派恢复默认 AI 执行。</p>}
+          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button><button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button></div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="还有未验证的功能"
