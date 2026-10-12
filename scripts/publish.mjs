@@ -6,8 +6,8 @@
 //   例：node scripts/publish.mjs 6   →  1.8.4 升至 1.9.0
 //
 // 依赖：Node >= 22；项目根目录已执行 npm install；GitHub CLI 已通过 gh auth login 登录。
-// 上传前需将对应源码及升版后的 v<版本> 标签推送到 GitHub；本脚本不会提交源码或推送标签。
-// 产物：安装包与便携版输出到 release/，随后上传到 GitHub Release（默认 wangqizhi/2Pi）。
+// 打包后自动提交工作区变更、推送当前分支及版本标签，再上传 GitHub Release。
+// 产物：安装包与便携版输出到 release/；上传仓库读取 Git origin。
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

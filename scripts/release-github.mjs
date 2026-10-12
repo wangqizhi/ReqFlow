@@ -1,4 +1,5 @@
-// 手动运行；只上传指定版本的安装版、便携版与 SHA256 校验文件。
+// 上传指定版本产物前，自动提交工作区并推送分支及版本标签。
+import { releaseRepository, prepareReleaseGit } from './release-git.mjs';
 import { readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -10,13 +11,13 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const help = `用法：npm run release:github -- [选项]
   --dry-run          检查产物并预览，不访问 GitHub、不写文件
   --version <版本>  默认读取 package.json 的版本
-  --repo <仓库>     默认 wangqizhi/2Pi
+  --repo <仓库>     默认读取 Git origin（须与 origin 一致）
   --notes <文件>    发布说明；默认 docs/release-<版本>.md（存在时）
   --draft           新建为草稿（已有 Release 保持其发布状态）
   --clobber         允许替换已有同名附件
   --help            显示帮助
-发布前：构建打包，将对应源码及 v<版本> 标签推送到 GitHub，并运行 gh auth login。
-脚本不会提交源码、绑定远程仓库或推送标签。`;
+发布前：构建打包，并运行 gh auth login。
+上传时自动提交当前工作区变更，推送当前分支及 v<版本> 标签；不会强制推送或覆盖标签。`;
 
 function gh(args, { capture = false, allowFailure = false } = {}) {
   const result = spawnSync('gh', args, { cwd: root, encoding: 'utf8', windowsHide: true,
@@ -50,8 +51,10 @@ async function main() {
   const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const version = options.version || pkg.version;
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw Error('版本格式应为 x.y.z 或 x.y.z-预发布版本');
-  const repo = options.repo || 'wangqizhi/2Pi';
+  const originRepo = releaseRepository();
+  const repo = options.repo || originRepo;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw Error('仓库格式应为 owner/repo');
+  if (repo.toLowerCase() !== originRepo.toLowerCase()) throw Error('--repo 必须与 Git origin 仓库一致，以确保标签与源码匹配');
   const tag = `v${version}`;
   const names = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`];
   const assets = names.map(name => path.join(root, 'release', name));
@@ -76,6 +79,7 @@ async function main() {
   console.log(`说明：${notesFile || '默认安装说明'}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
   if (options['dry-run']) { console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
   gh(['auth', 'status', '--hostname', 'github.com'], { capture: true });
+  prepareReleaseGit(version);
   // --verify-tag 阻止 gh 默认在远程默认分支上自动创建一个可能不匹配产物的标签。
   gh(['api', `repos/${repo}/git/ref/tags/${tag}`], { capture: true });
   const existing = gh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,assets'], { capture: true, allowFailure: true });
