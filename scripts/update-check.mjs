@@ -23,14 +23,14 @@ assert.equal(newerVersion('1.9.99', '1.10.5'), false);
 assert.equal(newerVersion('1.10.5', '1.10.5'), false);
 assert.equal(newerVersion('1.10.6-beta', '1.10.5'), false);
 app.setPath('userData', ${JSON.stringify(path.join(temp, 'profile'))});
-let bad = true, offline = false, launchFails = true, requestCount = 0, installCount = 0, quits = 0;
+let latest = true, bad = true, offline = false, launchFails = true, requestCount = 0, installCount = 0, quits = 0;
 app.quit = ()=>{quits++;};
 shell.openPath = async file=>{installCount++;assert.equal(file,${JSON.stringify(path.join(temp, 'profile', 'updates', 'ReqFlow-Setup-99.0.0.exe'))});return launchFails ? 'Access denied' : '';};
 const bytes = Buffer.from('MZ updater integration fixture');
 const digest = createHash('sha256').update(bytes).digest('hex');
 net.fetch = async url => {
  if(offline) throw TypeError('fetch failed');
- if(String(url).endsWith('/releases/latest')) return new Response(JSON.stringify({tag_name:'v99.0.0', assets:[{name:'ReqFlow-Setup-99.0.0.exe',size:bytes.length,digest:'sha256:'+digest,browser_download_url:'https://github.com/wangqizhi/ReqFlow/releases/download/v99.0.0/ReqFlow-Setup-99.0.0.exe'}]}));
+ if(String(url).endsWith('/releases/latest')) return new Response(JSON.stringify({tag_name: latest ? 'v'+app.getVersion() : 'v99.0.0', assets:[{name:'ReqFlow-Setup-99.0.0.exe',size:bytes.length,digest:'sha256:'+digest,browser_download_url:'https://github.com/wangqizhi/ReqFlow/releases/download/v99.0.0/ReqFlow-Setup-99.0.0.exe'}]}));
  requestCount++;
  const payload = bad ? Buffer.alloc(bytes.length, 1) : bytes;
  return new Response(new ReadableStream({start(controller){controller.enqueue(payload.subarray(0,10));setTimeout(()=>{controller.enqueue(payload.subarray(10));controller.close();},1200);}}));
@@ -42,9 +42,27 @@ app.whenReady().then(async()=>{
   require('./ipc.cjs').registerIpc(${JSON.stringify(path.join(temp, 'data'))});
   win = new BrowserWindow({width:1440,height:900,show:false,webPreferences:{preload:${JSON.stringify(path.resolve('dist/preload/index.js'))},sandbox:false,backgroundThrottling:false}});
   await win.loadFile(${JSON.stringify(path.resolve('dist/renderer/index.html'))});
+  // Hidden Chromium windows can pause CSS transitions; inspect final colors and layout.
+  await win.webContents.insertCSS('* { transition: none !important; animation: none !important; }');
   const js = source=>win.webContents.executeJavaScript(source);
   const wait = async source=>{for(let i=0;i<160;i++){if(await js(source))return;await new Promise(r=>setTimeout(r,50));}throw Error('UI timeout: '+source);};
   const click = ()=>js('document.querySelector(".update-button").click()');
+  await wait('!!document.querySelector(".update-dot") && !document.querySelector(".update-button").disabled');
+  assert.equal(await js('document.querySelector(".side-help-update > button").textContent.trim()'),'帮助 · CLI 参考');
+  assert.equal(await js('document.querySelector(".update-button").textContent.trim()'),'');
+  assert.equal(await js('document.querySelector(".update-button").classList.contains("danger")'),false);
+  for(const height of [900,700]){
+   win.setSize(1440,height);
+   await new Promise(r=>setTimeout(r,350));
+   assert.equal(await js('(()=>{const row=document.querySelector(".side-help-update");const [help,control]=row.children;const h=help.getBoundingClientRect(),u=control.getBoundingClientRect();return h.right<=u.left && u.right<=row.getBoundingClientRect().right && u.bottom<=innerHeight;})()'),true);
+   await fs.writeFile(${JSON.stringify(path.join(output, 'latest-'))} + height + '.png',(await win.webContents.capturePage()).toPNG());
+  }
+  await js('document.querySelector(".side-help-update > button").click()');
+  await wait('!!document.querySelector(".help-panel")');
+  await js('document.querySelector(".help-panel .icon-btn").click()');
+  await wait('!document.querySelector(".help-panel")');
+  latest = false;
+  await click();
   await wait('document.querySelector(".update-button")?.textContent.includes("更新")');
   assert.equal(await js('document.querySelector(".update-button").classList.contains("danger")'),true);
   await fs.writeFile(${JSON.stringify(path.join(output, 'available-1440.png'))},(await win.webContents.capturePage()).toPNG());
@@ -67,7 +85,10 @@ app.whenReady().then(async()=>{
   for(const height of [900,700]){
    win.setSize(1440,height);
    await new Promise(r=>setTimeout(r,350));
-   assert.equal(await js('(()=>{const row=document.querySelector(".side-help-update");const [help,control]=row.children;const h=help.getBoundingClientRect(),u=control.getBoundingClientRect();return Math.abs(h.top-u.top)<2 && u.right<=row.getBoundingClientRect().right && u.bottom<=innerHeight;})()'),true);
+   const layout = await js('(()=>{const row=document.querySelector(".side-help-update");const [help,control]=row.children;const b=document.querySelector(".update-button");return {help:help.getBoundingClientRect().toJSON(),control:control.getBoundingClientRect().toJSON(),row:row.getBoundingClientRect().toJSON(),color:getComputedStyle(b).color,background:getComputedStyle(b).backgroundColor,height:innerHeight};})()');
+   assert.ok(layout.help.bottom <= layout.control.top && layout.control.right <= layout.row.right && layout.control.bottom <= layout.height,JSON.stringify(layout));
+   assert.equal(layout.color,'rgb(255, 255, 255)');
+   assert.equal(layout.background,'rgb(185, 28, 28)');
    await fs.writeFile(${JSON.stringify(path.join(output, 'ready-'))} + height + '.png',(await win.webContents.capturePage()).toPNG());
   }
   assert.equal(installCount,0);
@@ -104,7 +125,7 @@ app.whenReady().then(async()=>{
   const failure = await js('window.reqflow.downloadUpdate()');
   assert.equal(failure.retry,'download');
   assert.match(failure.error,/连接 GitHub 失败/);
-  console.log('PASS: 版本比较、下载进度、防重复、校验失败重试、离线重启恢复缓存、真实安装处理的启动失败不退出/成功才退出、安装前再次校验、1440x900/700 布局。');
+  console.log('PASS: 最新绿点、完整帮助文案及打开帮助、红色按钮对比度、1440x900/700 无覆盖、版本比较、下载进度、防重复、校验失败重试、离线缓存、安装启动失败/成功退出、安装前再次校验。');
  }catch(error){console.error(error);process.exitCode=1;}finally{win?.destroy();app.exit(process.exitCode || 0);}
 });`;
   await writeFile(path.join(temp, 'host.cjs'), host);

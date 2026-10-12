@@ -311,12 +311,21 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .toast.err { background: var(--danger); }
 
 /* ---------- 帮助页 ---------- */
-.side-help-update { display: flex; align-items: flex-start; gap: 10px; padding: 4px 8px; }
-.side-help-update > .btn { padding-left: 0; padding-right: 0; white-space: nowrap; }
+.side-help-update { display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; gap: 6px 10px; padding: 4px 0; }
+.side-help-update > .btn { justify-self: start; white-space: nowrap; }
 .update-control { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.update-control.compact { grid-column: 2; grid-row: 1; }
+.update-control.expanded { grid-column: 1 / -1; margin: 0 10px 6px; }
+.update-control.expanded > .btn { justify-content: center; }
+.side .update-indicator { width: 28px; height: 28px; border-color: transparent; color: var(--side-ink); background: transparent; }
+.side .update-indicator:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.update-dot { width: 8px; height: 8px; background: #4ade80; border-radius: 50%; box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.12); }
+.update-spinning { animation: update-spin 1s linear infinite; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .update-spinning { animation: none; } }
 .update-button { white-space: nowrap; flex-shrink: 0; }
-.update-control small { color: var(--side-muted); font-size: 12px; overflow-wrap: anywhere; max-width: 140px; }
-.update-control .update-error { color: var(--danger); }
+.update-control small { color: var(--side-ink); font-size: 12px; overflow-wrap: anywhere; }
+.update-control .update-error { color: #fca5a5; }
 .update-control progress { width: 100%; height: 5px; accent-color: var(--accent); }
 .help-panel { background: var(--panel); border-radius: 16px; width: min(860px, 100%); max-height: calc(100vh - 60px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 64px rgba(28, 25, 23, 0.3); }
 .help-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 24px; border-bottom: 1px solid var(--line); }

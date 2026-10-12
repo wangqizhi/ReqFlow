@@ -1,5 +1,6 @@
 // 上传指定版本产物前，自动提交工作区并推送分支及版本标签。
 import { releaseRepository, prepareReleaseGit } from './release-git.mjs';
+import { verifyReleaseVersion } from './release-version.mjs';
 import { readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -10,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const help = `用法：npm run release:github -- [选项]
   --dry-run          检查产物并预览，不访问 GitHub、不写文件
-  --version <版本>  默认读取 package.json 的版本
+  --version <版本>  默认读取 package.json，必须与源码及打包内部版本一致
   --repo <仓库>     默认读取 Git origin（须与 origin 一致）
   --notes <文件>    发布说明；默认 docs/release-<版本>.md（存在时）
   --draft           新建为草稿（已有 Release 保持其发布状态）
@@ -68,6 +69,8 @@ async function main() {
       if (magic.toString() !== 'MZ') throw Error(`产物不是 Windows 可执行文件：${path.basename(file)}`);
     } finally { await handle.close(); }
   }
+  await verifyReleaseVersion(root, version);
+  console.log(`版本一致性检查通过：源码、锁文件、打包应用、安装版、便携版均为 ${version}`);
   const sums = (await Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
   let notesFile = options.notes ? path.resolve(root, options.notes) : path.join(root, 'docs', `release-${version}.md`);

@@ -537,7 +537,7 @@ export default function App() {
             <Download size={15} />导出全部数据
           </button>
           <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
-            <HelpCircle size={15} />帮助
+            <HelpCircle size={15} />帮助 · CLI 参考
           </button><UpdateButton /></div>
           <p className="side-hint">本地工作区 · 数据保存在本机</p>
         </div>

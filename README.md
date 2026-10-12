@@ -8,7 +8,7 @@ ReqFlow 是面向个人开发者的 Windows 桌面工作台，使用 Electron、
 
 ## 下载与安装
 
-前往 [GitHub Releases](https://github.com/wangqizhi/2Pi/releases) 下载已发布的 Windows x64 安装包：
+前往 [GitHub Releases](https://github.com/wangqizhi/ReqFlow/releases) 下载已发布的 Windows x64 安装包：
 
 | 文件 | 用途 |
 | --- | --- |
@@ -85,12 +85,13 @@ npm run dist            # 打包 Windows x64 安装版与便携版
 
 ## 手动发布到 GitHub Releases
 
-需要发布时，再运行发布脚本。默认目标为 `wangqizhi/2Pi`，不依赖本地 `origin` 配置，也不会自动提交源码或推送标签。
+发布版本以 `package.json` 为准，交付时只设定一次；发布和失败重试不会再次升版。目标仓库读取 Git `origin`，发布时会自动提交工作区变更、推送当前分支和同版本标签。
 
-1. 更新 `package.json` 与锁文件中的版本，准备 `docs/release-<版本>.md` 发布说明。
-2. 执行检查、`npm run build` 和 `npm run dist`。
-3. 将对应源码提交并推送至目标仓库，创建并推送同版本标签，例如 `v1.5.0`。
-4. 登录 GitHub CLI，预览后发布：
+1. 交付时运行 `npm version <版本> --no-git-tag-version`，同步源码及锁文件版本，准备 `docs/release-<版本>.md`。
+2. 登录 GitHub CLI：`gh auth login`。
+3. 运行 `node scripts/publish.mjs`，使用该版本构建、打包、检查内部版本并上传；脚本也会修正锁文件根包的版本。
+
+已有当前版本安装包时，可预览后直接上传，上传失败也可如此重试：
 
 ```powershell
 gh auth login
@@ -98,7 +99,7 @@ npm run release:github -- --dry-run
 npm run release:github
 ```
 
-标签必须已存在于目标 GitHub 仓库，脚本才会上传。新建 Release 默认公开发布；需要先检查线上草稿时使用：
+上传前自动创建并推送标签；已有标签与当前源码不一致时会停止，不强制覆盖。新建 Release 默认公开发布；需要先检查线上草稿时使用：
 
 ```powershell
 npm run release:github -- --draft
@@ -111,12 +112,12 @@ npm run release:github -- --draft
 其他用法：
 
 ```powershell
-npm run release:github -- --version 1.4.0 --dry-run
+npm run release:github -- --version 1.11.1 --dry-run
 npm run release:github -- --repo owner/repo --notes docs/my-release.md
 npm run release:github -- --help
 ```
 
-源码版本可能先于已发布安装包；脚本不会自动把旧安装包当作当前版本发布。参数依据 [GitHub CLI 发布文档](https://cli.github.com/manual/gh_release_create) 与 [附件上传文档](https://cli.github.com/manual/gh_release_upload)。
+`--version` 必须与当前源码、锁文件及安装包内部版本一致，`--repo` 必须与 `origin` 一致。上传前会检查版本，避免把旧安装包当作当前版本发布。参数依据 [GitHub CLI 发布文档](https://cli.github.com/manual/gh_release_create) 与 [附件上传文档](https://cli.github.com/manual/gh_release_upload)。
 
 ## 目录
 

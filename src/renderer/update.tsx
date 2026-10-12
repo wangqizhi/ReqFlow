@@ -29,8 +29,14 @@ export function UpdateButton() {
     idle: '检测更新', checking: '检测中…', latest: '已是最新', available: '更新',
     downloading: `下载 ${state.progress || 0}%`, ready: '安装', installing: '启动安装…', error: state.retry === 'download' ? '重试下载' : '重试检测',
   }[state.phase];
-  const title = !bridge.checkUpdate ? '在线更新仅桌面版提供' : state.error || (state.version ? `版本 ${state.version}` : '检测 GitHub 最新版本');
-  return <div className="update-control">
+  const title = state.error || (state.phase === 'latest' ? `已是最新版本 ${state.version}，点击重新检测` : state.version ? `新版本 ${state.version}` : '检测 GitHub 最新版本');
+  if (!bridge.checkUpdate) return null;
+  if (['idle', 'checking', 'latest'].includes(state.phase)) return <div className="update-control compact">
+    <button className="icon-btn update-indicator update-button" disabled={working} onClick={() => void action()} title={title} aria-label={title}>
+      {state.phase === 'latest' ? <span className="update-dot" /> : <RefreshCw size={15} className={state.phase === 'checking' ? 'update-spinning' : ''} />}
+    </button>
+  </div>;
+  return <div className="update-control expanded">
     <button className={'btn sm update-button' + (['available', 'ready'].includes(state.phase) ? ' danger' : '')}
       disabled={!bridge.checkUpdate || working} onClick={() => void action()} title={title} aria-label={title}>
       {['available', 'downloading', 'ready'].includes(state.phase) ? <Download size={14} /> : <RefreshCw size={14} />}{label}
