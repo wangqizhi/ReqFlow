@@ -134,8 +134,7 @@ try {
 
   r = rf('item', 'add', '--project', pid, '--title', '需要验证的需求', '--ai-validation', 'true');
   r = rf('generate', '--project', pid, '--items', r.item.id);
-  ok('显式 --ai-validation true 时 Prompt 含验证要求', r.ok &&
-    r.prompt.includes('AI 测试验证（仅适用于 ' + r.batch.items[0].number + '）：'));
+  ok('已移除的 --ai-validation 参数不再生成测试要求', r.ok && !r.prompt.includes('AI 测试验证（'));
 
   const err = rfFail('verify', '--project', pid, '--id', id1, '--pass', 'true');
   ok('对非待验证需求 verify 报错且 ok=false', err && err.ok === false);

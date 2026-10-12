@@ -106,7 +106,7 @@ export const DEFAULT_PUBLISH_TEMPLATE = [
 ].join('\n');
 
 export function requirementSettings(p: Project, i: Item) {
-  const aiValidation = i.aiValidation ?? p.aiValidation;
+  const aiValidation = false;
   const delivery = i.deliveryGuidance ?? p.deliveryGuidance;
   return {
     aiValidation,
@@ -188,13 +188,6 @@ export function buildPrompt(p: Project, items: Item[]) {
     .join('\n\n');
   // 交付引导 / AI 测试验证在多条需求间常会重复：按内容去重合并到末尾，相同内容只出现一次
   const tail: string[] = [];
-  const validationNums = items.filter((_, n) => settings[n].aiValidation).map((i) => i.number);
-  if (validationNums.length)
-    tail.push(
-      'AI 测试验证（仅适用于 ' +
-        validationNums.join('、') +
-        '）：\n完成对应需求后执行适合本次改动的检查或测试，并如实说明结果；无法执行时说明原因。'
-    );
   const deliveryGroups: { text: string; nums: string[] }[] = [];
   items.forEach((i, n) => {
     const text = settings[n].deliveryGuidance;
@@ -295,7 +288,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => key === 'path' ? undefined : value));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!localOps.includes(a?.op) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -404,10 +397,7 @@ async function applyOperation(s: Workspace, a: any) {
     const text = needed(a.text, '项目引导词');
     const delivery =
       a.deliveryGuidance === undefined ? p.deliveryGuidance : needed(a.deliveryGuidance, '交付引导');
-    if (a.aiValidation !== undefined && typeof a.aiValidation !== 'boolean')
-      throw new Error('AI 验证设置无效');
-    const nextValidation = a.aiValidation === undefined ? p.aiValidation : a.aiValidation;
-    if (text === p.guidance && delivery === p.deliveryGuidance && nextValidation === p.aiValidation) return;
+    if (text === p.guidance && delivery === p.deliveryGuidance) return;
     p.guideHistory.unshift({
       version: p.guideVersion,
       text: p.guidance,
@@ -428,7 +418,7 @@ async function applyOperation(s: Workspace, a: any) {
       }
     }
     p.deliveryGuidance = delivery;
-    p.aiValidation = a.aiValidation === undefined ? p.aiValidation : a.aiValidation;
+    // Legacy aiValidation values remain readable; the retired flag no longer changes behavior.
     p.guideVersion++;
     const scheduledIds = new Set(p.items.filter(item => !item.archived && item.status === 'in_progress').map(item => item.id));
     for (const item of p.items) {
@@ -482,6 +472,21 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
 
+  if (a.op === 'assign') {
+    if (typeof a.executor !== 'string' || !/^(ai|human|(?:plugin|agent):[a-zA-Z0-9_.-]+)$/.test(a.executor)) throw Error('执行方式无效');
+    if (!Array.isArray(a.ids) || a.ids.some((id: unknown) => typeof id !== 'string')) throw Error('可指派需求已变化');
+    const items = p.items.filter(i => a.ids.includes(i.id));
+    if (!items.length || items.length !== new Set(a.ids).size || items.some(i => !['ready', 'in_progress', 'pending_verification'].includes(i.status) || i.archived)) throw Error('可指派需求已变化');
+    for (const i of items) {
+      if ((i.executor || 'ai') === a.executor) continue;
+      i.executor = a.executor;
+      for (const b of p.batches) if (b.mode === 'develop' && b.status !== 'cancelled') {
+        const snapshot = b.items.find(x => x.id === i.id && x.version === i.version);
+        if (snapshot) { snapshot.executor = a.executor; b.hash = await sha256Hex(JSON.stringify(b.items) + b.text); }
+      }
+    }
+    return;
+  }
   if (a.op === 'item') {
     const existing = p.items.find((i) => i.id === a.id);
     // 部分编辑：未传的字段回退到已有值（新增时回退到默认值），标题选填，留空时 Prompt 中仅显示需求编号
@@ -506,7 +511,7 @@ async function applyOperation(s: Workspace, a: any) {
     const priority = a.priority ?? existing?.priority ?? 'P1';
     const executor = a.executor ?? existing?.executor ?? 'ai';
     if (typeof executor !== 'string' || !/^(ai|human|(?:plugin|agent):[a-zA-Z0-9_.-]+)$/.test(executor)) throw Error('执行方式无效');
-    const aiValidation = a.aiValidation ?? existing?.aiValidation ?? p.aiValidation;
+    const aiValidation = false;
     if (typeof aiValidation !== 'boolean') throw new Error('AI 测试验证设置无效');
     const deliveryGuidance =
       a.deliveryGuidance === undefined

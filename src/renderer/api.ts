@@ -33,7 +33,11 @@ export type GitStatusInfo = {
 };
 export type GitOpResult = { ok: true; summary?: string; warning?: string } | { ok: false; error: string };
 
+export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export interface ReqFlowBridge {
+  getLocalAgents?(): Promise<{ ok: boolean; enabled?: string[]; error?: string }>;
+  saveLocalAgents?(enabled: string[]): Promise<{ ok: boolean; error?: string }>;
+  detectLocalAgents?(): Promise<{ ok: boolean; agents?: LocalAgent[]; error?: string }>;
   updateState?(): Promise<UpdateState>;
   checkUpdate?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;

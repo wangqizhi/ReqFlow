@@ -21,6 +21,7 @@ import { validateRemote } from '../core/remote';
 import { prepareProjectDirectory } from './project-directory';
 import { checkoutNewProject, pullProject } from './git-checkout';
 import { emptyRemote, type RemoteSettings } from '../core/remote';
+import { registerLocalAgents } from './local-agents';
 import { registerUpdater } from './updater';
 
 // 浏览项目支持预览的图片格式（Chromium 可直接渲染的位图/矢量格式）
@@ -65,6 +66,7 @@ async function withinRoot(root: string, target: string): Promise<boolean> {
 
 export function registerIpc(dataDir: string) {
   registerUpdater();
+  registerLocalAgents(dataDir);
   const publishLogger = new PublishRequestLogger(dataDir);
   ipcMain.handle('publish:logs:get', async () => {
     try { return { ok: true, entries: await publishLogger.read() }; }

@@ -18,6 +18,7 @@ import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
+import { AssignmentOverlay } from './assignment';
 import { ModsOverlay } from './mods';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -64,9 +65,10 @@ export default function App() {
   const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
-  const [aiValidation, setAiValidation] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
+  const [modsTab, setModsTab] = useState('protocol');
+  const [assignIds, setAssignIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -276,8 +278,8 @@ export default function App() {
     setForm(i
       ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n') }
       : {
-          ...emptyForm, aiValidation: p!.aiValidation,
-          deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
+          ...emptyForm, aiValidation: false,
+          deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
             ? '说明改动、未解决的问题。' : p!.deliveryGuidance
         });
     setAdvanced(false); setNewMenu(false);
@@ -291,8 +293,8 @@ export default function App() {
     clearTimeout(autoRef.current);
     setEditing(null);
     setForm({
-      ...emptyForm, type: 'improvement', aiValidation: p!.aiValidation,
-      deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
+      ...emptyForm, type: 'improvement', aiValidation: false,
+      deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
         ? '说明改动、未解决的问题。' : p!.deliveryGuidance,
       body: p!.baselineTemplate || data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE
     });
@@ -308,8 +310,8 @@ export default function App() {
     clearTimeout(autoRef.current);
     setEditing(null);
     setForm({
-      ...emptyForm, title: '创建发布脚本', type: 'improvement', aiValidation: p!.aiValidation,
-      deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
+      ...emptyForm, title: '创建发布脚本', type: 'improvement', aiValidation: false,
+      deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
         ? '说明改动、未解决的问题。' : p!.deliveryGuidance,
       body: data?.publishTemplate || DEFAULT_PUBLISH_TEMPLATE
     });
@@ -541,7 +543,7 @@ export default function App() {
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
         <div className="side-foot">
-          <button className="btn plain" onClick={() => setModsOpen(true)}><Layers />插件/MOD</button>
+          <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
           <button className="btn plain" onClick={() => setSettingsOpen(true)}><Settings />设置</button>
           <button className="btn plain" onClick={() => download(JSON.stringify(data, null, 2), 'reqflow-backup.json')}>
             <Download size={15} />导出全部数据
@@ -621,12 +623,11 @@ export default function App() {
             <p>{p?.guidance}</p>
             <div className="guide-settings-summary">
               {p?.dir && <span className="linked-dir" title={p.dir}><FolderOpen size={13} />{p.dir}</span>}
-              <span>AI 验证：{p?.aiValidation ? '开启' : '关闭'}</span>
               <span>新需求的默认设置</span>
             </div>
           </div>
           <button className="btn plain" onClick={() => {
-            setGuide(p!.guidance); setDelivery(p!.deliveryGuidance); setAiValidation(p!.aiValidation);
+            setGuide(p!.guidance); setDelivery(p!.deliveryGuidance);
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
             setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
@@ -746,9 +747,6 @@ export default function App() {
                         {i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} />{c}</p>)
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
-                      <div className="requirement-settings-summary">
-                        AI 测试验证：{requirementSettings(p!, i).aiValidation ? '需要' : '不需要'}
-                      </div>
                       <div className="next-step">
                         {i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
                           : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回待执行重新编辑。'
@@ -766,6 +764,7 @@ export default function App() {
                           setEditing(i); setModal('deleteItem');
                         }}><Trash size={14} />删除</button>}
                         {i.status === 'in_progress' && <button className="btn primary" disabled={busy} onClick={() => submitItem(i)}>提交验证</button>}
+                        {tab === 'generate' && <button className="btn" disabled={busy} onClick={() => setAssignIds([i.id])}>指派</button>}
                         {i.status === 'in_progress' && <button className="btn" disabled={busy} onClick={() => revertItem(i)}>退回待执行</button>}
                         {i.status === 'pending_verification' && (
                           <>
@@ -804,6 +803,7 @@ export default function App() {
                   <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
                     <Check size={15} />提交验证 · 全部{inProgress.length > 0 ? ` ${inProgress.length} 条` : ''}
                   </button>
+                  <button className="btn" disabled={busy || !inProgress.length} onClick={() => setAssignIds(inProgress.map(i => i.id))}>指派</button>
                 </div>
                 </div>
                 {stale && <p className="warning gen-warning">源内容已变化，请退回待执行后重新排期。</p>}
@@ -821,7 +821,8 @@ export default function App() {
       </main>
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
-      {modsOpen && <ModsOverlay onClose={() => setModsOpen(false)} />}
+      {assignIds.length > 0 && <AssignmentOverlay onClose={() => setAssignIds([])} configure={() => { setAssignIds([]); setModsTab('agents'); setModsOpen(true); }} assign={async executor => { if (await act({ op: 'assign', ids: assignIds, executor })) setAssignIds([]); }} />}
+      {modsOpen && <ModsOverlay initialTab={modsTab} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
@@ -878,7 +879,7 @@ export default function App() {
       )}
       {modal && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) void closeModal(); }}>
-          <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : '')}>
+          <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : modal === 'guide' ? ' project-guide-dialog' : '')}>
             <div className="dialog-head">
               <div>
                 <h3>{({ item: editing ? '编辑需求' : '记录新需求', project: '创建项目', guide: '项目与交付设置', detail: editing ? (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '', verify: editing ? '未通过退回 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '记录未通过的问题', regress: editing ? '重新打开 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '重新打开归档需求', deleteProject: '删除项目', moveItem: '迁移需求', deleteItem: '删除需求' } as any)[modal]}</h3>
@@ -983,26 +984,6 @@ export default function App() {
                 <label className="field">验收条件（选填）· 每行一项
                   <textarea rows={3} value={form.criteria} onChange={(e) => change({ ...form, criteria: e.target.value })} />
                 </label>
-                <div className="validation-setting">
-                  <div>
-                    <label htmlFor="item-ai-validation">需要 AI 测试验证</label>
-                    <p>只对本条需求生效。关闭后，Prompt 不添加 AI 测试要求。</p>
-                  </div>
-                  <label className="switch">
-                    <input id="item-ai-validation" type="checkbox" checked={!!form.aiValidation}
-                      onChange={(e) => {
-                        const v = e.target.checked;
-                        change({
-                          ...form, aiValidation: v,
-                          deliveryGuidance:
-                            !v && form.deliveryGuidance === DEFAULT_DELIVERY ? '说明改动、未解决的问题。'
-                              : v && form.deliveryGuidance === '说明改动、未解决的问题。' ? DEFAULT_DELIVERY
-                              : form.deliveryGuidance
-                        });
-                      }} />
-                    <span className="slider" /><span className="switch-state">{form.aiValidation ? '已开启' : '已关闭'}</span>
-                  </label>
-                </div>
                 <label className="field">交付引导
                   <textarea required rows={2} value={form.deliveryGuidance || ''} onChange={(e) => change({ ...form, deliveryGuidance: e.target.value })}
                     placeholder="填写这条需求完成后希望 AI 交付的内容" />
@@ -1018,16 +999,6 @@ export default function App() {
             {modal === 'guide' && (
               <>
                 <label className="field">项目引导词<textarea className="guide-edit" rows={4} value={guide} onChange={(e) => setGuide(e.target.value)} /></label>
-                <div className="validation-setting">
-                  <div>
-                    <label htmlFor="ai-validation">新需求默认需要 AI 验证</label>
-                    <p>新需求会使用这里的默认值；每条需求仍可在编辑页单独修改。</p>
-                  </div>
-                  <label className="switch">
-                    <input id="ai-validation" type="checkbox" checked={aiValidation} onChange={(e) => setAiValidation(e.target.checked)} />
-                    <span className="slider" /><span className="switch-state">{aiValidation ? '已开启' : '已关闭'}</span>
-                  </label>
-                </div>
                 <label className="field">默认交付引导<textarea rows={3} value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder="填写希望 AI 交付时提供的内容" /></label>
                 <label className="field">基线需求模板（选填）<textarea rows={4} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE} /></label>
                 <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
@@ -1063,8 +1034,8 @@ export default function App() {
                     if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
                     if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
                     if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
-                    const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance || aiValidation !== p!.aiValidation;
-                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, aiValidation }, true)) return;
+                    const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
+                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery }, true)) return;
                     setModal('');
                     if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
                     else notify('设置已保存');
@@ -1079,7 +1050,6 @@ export default function App() {
                     <button className="btn" onClick={() => {
                       setGuide(g.text);
                       if (g.deliveryGuidance !== undefined) setDelivery(g.deliveryGuidance);
-                      if (g.aiValidation !== undefined) setAiValidation(g.aiValidation);
                     }}>载入此版本</button>
                   </details>
                 ))}

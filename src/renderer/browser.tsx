@@ -423,7 +423,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   return (
     <div className="fb-overlay" role="dialog" aria-label="浏览项目文件"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      {remoteOpen && <ProjectRemoteOverlay project={project} save={saveRemote} onClose={() => setRemoteOpen(false)} notify={notify} />}
+      {remoteOpen && <ProjectRemoteOverlay project={project} save={saveRemote} syncDisabled={gitBusy || aiBusy || dirty} onSynced={async () => { await refreshGit(); setTree({}); await loadDir(''); if (file && !dirty) await openFile(file); }} onClose={() => setRemoteOpen(false)} notify={notify} />}
       {commitEditor && <div className="overlay commit-editor" onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) setCommitEditor(false); }}>
         <div className="dialog" role="dialog" aria-label="编辑完整提交信息"><h3>编辑完整提交信息</h3><label className="field"><span>提交文案</span><textarea autoFocus rows={12} value={commitMsg} disabled={gitBusy || aiBusy} onChange={(e) => setCommitMsg(e.target.value)} /></label>{!stagedChanges.length && <p className="commit-status">请先 Add 暂存变动，再生成提交文案</p>}
                       {aiBusy && <p className="commit-status" role="status">AI 正在生成提交文案…</p>}{aiError && <p className="commit-status error" role="alert">{aiError}</p>}<div className="dialog-foot"><button className="btn" disabled={gitBusy || aiBusy || !pendingItems.length} onClick={() => { setCommitMsg(suggestedMessage); setAiError(''); }}>填入需求</button><button className="btn" disabled={gitBusy || aiBusy || !stagedChanges.length || !bridge.optimizeCommitMessage} onClick={generateCommitMessage}><Wand />{aiBusy ? '生成中…' : 'AI 优化'}</button><button className="btn primary" disabled={aiBusy} onClick={() => setCommitEditor(false)}>完成编辑</button></div></div>
@@ -597,7 +597,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                         )}
                       </div>
 
-                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span><button className="btn sm" title="从当前分支上游快进拉取；有本地变动时拒绝操作" disabled={gitBusy || aiBusy || dirty || !bridge.gitPull} onClick={() => gitOp(() => bridge.gitPull?.(root), { tree: true })}>Pull</button><button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button></div>
+                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span><button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button></div>
                       {!(git.log || []).length && <p className="fb-git-empty">暂无提交记录</p>}
                       <div className="fb-git-logs">{(git.log || []).map((entry) => <div key={entry.hash} className="fb-git-log" title={entry.hash + '\n' + entry.author + ' · ' + entry.date + '\n\n' + entry.message}><code>{entry.hash.slice(0, 7)}</code><span>{entry.message.split('\n')[0]}</span></div>)}</div>
 

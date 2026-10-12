@@ -145,8 +145,6 @@ export class Cli {
       case 'guidance set': {
         const action: any = { op: 'guidance', project: a.project, text: a.text };
         if (a.delivery !== undefined) action.deliveryGuidance = a.delivery;
-        const bv = this.boolArg(a['ai-validation']);
-        if (bv !== undefined) action.aiValidation = bv;
         const r = await this.service(a).mutate(action, null);
         const p = this.findProject(r.state, a.project);
         return { guideVersion: p.guideVersion, version: r.version };
@@ -163,8 +161,6 @@ export class Cli {
         if (a.type !== undefined) action.type = a.type;
         if (a.priority !== undefined) action.priority = a.priority;
         if (a.criteria !== undefined) action.criteria = a.criteria.split(/[;\n]/).map((s: string) => s.trim()).filter(Boolean).join('\n');
-        const bv = this.boolArg(a['ai-validation']);
-        if (bv !== undefined) action.aiValidation = bv;
         if (a.delivery !== undefined) action.deliveryGuidance = a.delivery;
         if (a.date !== undefined) action.scheduledDate = a.date;
         if (a.executor !== undefined) action.executor = a.executor;

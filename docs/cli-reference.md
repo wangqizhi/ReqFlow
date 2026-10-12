@@ -40,7 +40,7 @@ ReqFlow.exe --cli <command> [options]
 | `project create` | `--name <名称> [--description <背景>]` | 新建项目并返回其 id<br/>例：`ReqFlow.exe --cli project create --name "官网改版"` |
 | `project delete` | `--project <id>` | 删除项目及其全部需求、批次与历史（不可恢复；至少保留一个项目，删除前建议 workspace export 备份）<br/>例：`ReqFlow.exe --cli project delete --project <id>` |
 | `project show` | `--project <id>` | 项目详情：背景、引导词、默认交付引导、AI 验证默认值<br/>例：`ReqFlow.exe --cli project show --project <id>` |
-| `guidance set` | `--project <id> --text <引导词> [--delivery <交付引导>] [--ai-validation <true|false>]` | 更新项目引导词（guideVersion +1，旧版本进入历史）；旧批次快照会提示失效<br/>例：`ReqFlow.exe --cli guidance set --project <id> --text "遵循现有架构"` |
+| `guidance set` | `--project <id> --text <引导词> [--delivery <交付引导>]` | 更新项目引导词（guideVersion +1，旧版本进入历史）；旧批次快照会提示失效<br/>例：`ReqFlow.exe --cli guidance set --project <id> --text "遵循现有架构"` |
 
 ## 需求
 
@@ -48,10 +48,10 @@ ReqFlow.exe --cli <command> [options]
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `item add` | `--project <id> [--title <标题>] [--body <说明>] [--type feature|improvement|bug] [--priority P0|P1|P2] [--criteria <条件>] [--ai-validation <bool>] [--delivery <交付引导>] [--date YYYY-MM-DD] [--executor ai|human|plugin:<id>|agent:<id>]` | 新增需求（保存后即为待执行）。标题选填，留空时 Prompt 中仅显示需求编号；type/priority 缺省为 feature/P1；executor 缺省为 ai；ai-validation 缺省沿用项目设置（默认关闭）；criteria 用分号或换行分隔多条验收条件<br/>例：`ReqFlow.exe --cli item add --project <id> --title "登录限流" --type bug --priority P0 --criteria "连续失败5次锁定;解锁需管理员"` |
+| `item add` | `--project <id> [--title <标题>] [--body <说明>] [--type feature|improvement|bug] [--priority P0|P1|P2] [--criteria <条件>] [--delivery <交付引导>] [--date YYYY-MM-DD] [--executor ai|human|plugin:<id>|agent:<id>]` | 新增需求（保存后即为待执行）。标题选填，留空时 Prompt 中仅显示需求编号；type/priority 缺省为 feature/P1；executor 缺省为 ai；criteria 用分号或换行分隔多条验收条件<br/>例：`ReqFlow.exe --cli item add --project <id> --title "登录限流" --type bug --priority P0 --criteria "连续失败5次锁定;解锁需管理员"` |
 | `item list` | `[--project <id>] [--status <状态>] [--search <关键词>] [--executor <执行器>]` | 需求列表（默认排除已归档；不传 --project 时返回全部项目并附 projectId）<br/>例：`ReqFlow.exe --cli item list --status ready` |
 | `item show` | `--project <id> --id <需求ID>` | 需求详情（含验收条件、版本、未解决问题）<br/>例：`ReqFlow.exe --cli item show --project <id> --id <需求ID>` |
-| `item edit` | `--project <id> --id <需求ID> [--title/--body/--type/--priority/--criteria/--ai-validation/--delivery/--date/--executor]` | 编辑待执行需求，只改传入的字段（未传字段保留原值）；每次编辑版本 +1<br/>例：`ReqFlow.exe --cli item edit --project <id> --id <需求ID> --priority P0` |
+| `item edit` | `--project <id> --id <需求ID> [--title/--body/--type/--priority/--criteria/--delivery/--date/--executor]` | 编辑待执行需求，只改传入的字段（未传字段保留原值）；每次编辑版本 +1<br/>例：`ReqFlow.exe --cli item edit --project <id> --id <需求ID> --priority P0` |
 | `item history` | `--project <id> --id <需求ID>` | 需求的操作与验证历史<br/>例：`ReqFlow.exe --cli item history --project <id> --id <需求ID>` |
 
 ## Prompt 批次

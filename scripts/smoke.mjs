@@ -63,9 +63,9 @@ async function test() {
   assert.ok(batch.text.includes('# 项目：官网改版'));
   assert.ok(batch.text.includes('REQ-001 · 登录限流 [bug / P0]'));
   assert.ok(batch.text.includes('- [ ] 锁定后提示剩余时间'));
-  assert.ok(batch.text.includes('AI 测试验证（仅适用于 REQ-001）：'), 'AI 测试验证仅列出显式开启的需求');
+  assert.ok(!batch.text.includes('AI 测试验证（'), '旧的 AI 验证设置不再生成测试要求');
   assert.ok(!batch.text.includes('AI 测试验证（仅适用于 REQ-001、REQ-002'), '默认关闭的需求不进入 AI 测试验证');
-  assert.equal((batch.text.match(/AI 测试验证（/g) || []).length, 1, 'AI 测试验证只出现一次');
+  assert.equal((batch.text.match(/AI 测试验证（/g) || []).length, 0, 'AI 测试验证只出现一次');
   assert.ok(batch.text.includes('交付引导（本轮全部需求）：\n说明改动与测试结果。'), '相同交付引导合并为本轮一块');
   assert.equal((batch.text.match(/交付引导（/g) || []).length, 1, '交付引导只出现一次');
   assert.match(batch.hash, /^[0-9a-f]{64}$/, 'SHA-256');
@@ -259,6 +259,15 @@ async function test() {
   const scheduledItem = sp.items[0].id;
   sp = await settingsOp({ op: 'generate', ids: [scheduledItem], mode: 'develop' });
   sp = await settingsOp({ op: 'submit', batch: sp.batches[0].id });
+  const originalHash = sp.batches[0].hash;
+  sp = await settingsOp({ op: 'assign', ids: [scheduledItem], executor: 'agent:opencode' });
+  assert.equal(sp.items[0].executor, 'agent:opencode');
+  assert.equal(sp.batches[0].items[0].executor, 'agent:opencode');
+  assert.notEqual(sp.batches[0].hash, originalHash, '指派后旧领取快照失效');
+  assert.equal(sp.items[0].status, 'in_progress', '指派不退回排期');
+  await assert.rejects(() => settingsOp({ op: 'assign', ids: [scheduledItem, 'missing'], executor: 'agent:pi' }), /已变化/);
+  assert.equal((await settingsSvc.get()).state.projects[0].items[0].executor, 'agent:opencode', '失败的批量指派不部分写入');
+  sp = await settingsOp({ op: 'assign', ids: [scheduledItem], executor: 'ai' });
   const guideVersion = sp.guideVersion;
   sp = await settingsOp({ op: 'publishScript', script: 'scripts/deploy.mjs' });
   assert.equal(sp.publishScript, 'scripts/deploy.mjs');

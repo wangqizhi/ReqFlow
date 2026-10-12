@@ -4,6 +4,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('reqflow', {
+  getLocalAgents: () => ipcRenderer.invoke('agents:get'),
+  saveLocalAgents: (enabled: string[]) => ipcRenderer.invoke('agents:save', enabled),
+  detectLocalAgents: () => ipcRenderer.invoke('agents:detect'),
   updateState: () => ipcRenderer.invoke('update:state'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: () => ipcRenderer.invoke('update:download'),
