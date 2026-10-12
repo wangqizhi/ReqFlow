@@ -3,13 +3,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  DEFAULT_DELIVERY, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
+  DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
   type Item, type Project, type Workspace
 } from '../core/domain';
 import { bridge } from './api';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Plus, RefreshCw, Search, Trash, X, ImageIcon, Settings
+  Layers, Play, Plus, RefreshCw, Search, Trash, X, ImageIcon, Settings
 } from './icons';
 import { HelpOverlay } from './help';
 import { ProjectBrowser } from './browser';
@@ -43,6 +43,8 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [batchId, setBatchId] = useState('');
   const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [archiveDate, setArchiveDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState('已保存');
@@ -55,6 +57,9 @@ export default function App() {
   const [note, setNote] = useState('');
   const [fixedIdx, setFixedIdx] = useState<number[]>([]); // 二次退回时确认「已修复」的旧问题下标
   const [delivery, setDelivery] = useState('');
+  const [verifyKind, setVerifyKind] = useState<'none' | 'exe' | 'url'>('none'); // 验证源类型（REQ-060）
+  const [verifyValue, setVerifyValue] = useState('');
+  const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
   const [aiValidation, setAiValidation] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
@@ -92,7 +97,7 @@ export default function App() {
   function switchProject(id: string) {
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
-    setBrowserOpen(false);
+    setBrowserOpen(false); setTypeFilter('all'); setArchiveDate('');
   }
 
   // 浏览项目：未关联目录先弹出系统目录选择框，关联后打开文件浏览器
@@ -148,6 +153,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  // REQ-062：Esc 关闭当前弹窗（复用关闭按钮逻辑：编辑中内容自动保存，保存中不打断）
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void closeModal(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal, editing]);
+
   async function act(a: any, quiet = false): Promise<(Workspace & { createdProjectId?: string }) | false> {
     if (busyRef.current) {
       if (!quiet) notify('正在保存，请稍后再试', 'err');
@@ -192,6 +206,22 @@ export default function App() {
             ? '说明改动、未解决的问题。' : p!.deliveryGuidance
         });
     setAdvanced(false); setNewMenu(false);
+    setModal('item');
+  }
+
+  // 基线需求（REQ-064）：按项目模板（未配置时用默认模板）预填一条新需求，用户确认后保存
+  function editBaseline() {
+    setNewMenu(false);
+    dirtyRef.current = false;
+    clearTimeout(autoRef.current);
+    setEditing(null);
+    setForm({
+      ...emptyForm, type: 'improvement', aiValidation: p!.aiValidation,
+      deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
+        ? '说明改动、未解决的问题。' : p!.deliveryGuidance,
+      body: p!.baselineTemplate || DEFAULT_BASELINE_TEMPLATE
+    });
+    setAdvanced(false);
     setModal('item');
   }
 
@@ -242,12 +272,21 @@ export default function App() {
     (tab === 'archived' ? !!i.archived
       : !i.archived && (tab === 'feature' ? i.status === 'ready' : tab === 'generate' ? i.status === 'in_progress' : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
+    && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const archivedDate = (i: Item) => {
+    const time = i.history.find(h => h.event === '归档')?.time;
+    return time && Number.isFinite(Date.parse(time)) ? localDate(new Date(time)) : '日期未知';
+  };
+  const archiveDates = [...new Set(visible.map(archivedDate))].sort().reverse();
+  const shownItems = tab === 'archived' ? visible.filter(i => archivedDate(i) === archiveDate) : visible;
+  const windowBar = bridge.windowControl && <div className="window-bar"><span>ReqFlow · 需求流</span><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
+  // 各 tab 的说明文字统一显示在底部「ReqFlow · 需求流」后的信息区
   const helpText =
     viewingHistory ? '历史排期快照保留在这里，点击批次可到排期表查看。' : tab === 'feature' ? '勾选本轮需求，点击排期转入待开发'
       : tab === 'pending_verification' ? '你验证完成后，点击「通过并归档」即可；未通过可退回待执行。'
       : tab === 'archived' ? '已归档的需求与验证记录保存在这里，发现问题可重新打开。'
-      : '';
+      : '本轮排期的需求在这里跟踪，开发完成后提交验证。';
   const batch = p?.batches.find((b) => b.id === batchId) || p?.batches.find((b) => b.mode === 'develop');
   const stale = !!batch && !!p && (
     batch.guideVersion !== p.guideVersion ||
@@ -326,6 +365,7 @@ export default function App() {
   if (!data) {
     return (
       <div className="boot">
+        {windowBar}
         <img className="mark" src="./app-icon.png" alt="ReqFlow" />
         <h1>ReqFlow · 需求流</h1>
         <p>{error || '正在打开你的工作区…'}</p>
@@ -335,7 +375,8 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={"app" + (bridge.windowControl ? " desktop-app" : "")}>
+      {windowBar}
       {toast && <div className={'toast ' + toast.kind}>{toast.text}</div>}
 
       <aside className="side">
@@ -431,7 +472,7 @@ export default function App() {
             <button className="btn" onClick={browseProject} title={p?.dir ? '浏览项目文件：' + p.dir : '关联本地项目目录并浏览文件'}>
               <FolderOpen size={16} />{p?.dir ? '浏览项目' : '关联目录'}
             </button>
-            <div className="new-requirement-split"><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button></div>}</div>
+            <div className="new-requirement-split"><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button></div>}</div>
           </div>
         </section>
 
@@ -446,7 +487,10 @@ export default function App() {
             </div>
           </div>
           <button className="btn plain" onClick={() => {
-            setGuide(p!.guidance); setDelivery(p!.deliveryGuidance); setAiValidation(p!.aiValidation); setModal('guide');
+            setGuide(p!.guidance); setDelivery(p!.deliveryGuidance); setAiValidation(p!.aiValidation);
+            setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
+            setBaselineTpl(p!.baselineTemplate || '');
+            setModal('guide');
           }}>编辑设置</button>
         </section>
 
@@ -462,18 +506,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-            {helpText && (
-              <div className="workflow-help">
-                <p>{helpText}</p>
-                {tab === 'feature' && picked.length > 0 && (
-                  <button className="btn primary" disabled={busy} onClick={() => generate()}>
-                    排期 · 已选 {picked.length} 条
-                  </button>
-                )}
-              </div>
-            )}
 
-            {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口"><button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button><button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button></div>}
             {tab === 'generate' && (
               <div className="gen-panel">
                 <div className="gen-top">
@@ -501,23 +534,36 @@ export default function App() {
             {tab === 'generate' && inProgress.length > 0 && (
               <h3 className="gen-sub">待开发 <span>{inProgress.length} 条等待 AI 完成</span></h3>
             )}
-            {!viewingHistory && (
-              <div className="list-tools">
-                {(tab === 'feature') && (
-                  <label className="check-label">
-                    <input type="checkbox"
-                      checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every((i) => selected.includes(i.id))}
-                      onChange={(e) => setSelected(e.target.checked
-                        ? [...new Set([...selected, ...visible.filter(eligible).map((i) => i.id)])]
-                        : selected.filter((id) => !visible.some((i) => i.id === id)))} />
-                    选择本轮需求
-                  </label>
-                )}
-                <div className="search"><Search size={15} />
-                  <input aria-label="搜索需求" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索需求" />
+            <div className="list-tools">
+              {(tab === 'feature') && (
+                <label className="check-label">
+                  <input type="checkbox"
+                    checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every((i) => selected.includes(i.id))}
+                    onChange={(e) => setSelected(e.target.checked
+                      ? [...new Set([...selected, ...visible.filter(eligible).map((i) => i.id)])]
+                      : selected.filter((id) => !visible.some((i) => i.id === id)))} />
+                  选择本轮需求
+                </label>
+              )}
+              {tab === 'archived' && (
+                <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
+                  <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button>
+                  <button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button>
                 </div>
+              )}
+              <div className="list-tools-side">
+                {tab === 'feature' && picked.length > 0 && (
+                  <button className="btn primary" disabled={busy} onClick={() => generate()}>
+                    排期 · 已选 {picked.length} 条
+                  </button>
+                )}
+                {!viewingHistory && (
+                  <><div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div><div className="search"><Search size={15} />
+                    <input aria-label="搜索需求" value={query} onChange={(e) => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" />
+                  </div></>
+                )}
               </div>
-            )}
+            </div>
             <div className="list-scroll">
               {viewingHistory ? (
               <div className="batch-list">
@@ -550,7 +596,8 @@ export default function App() {
                 )}
 
                 {tab === 'feature' && <div className="requirement-sort segmented" role="group" aria-label="需求排序">{[['desc', '最新在前'], ['asc', '最早在前'], ['priority', '优先级']].map(([id, label]) => <button key={id} aria-pressed={sort === id} className={sort === id ? 'on' : ''} onClick={() => setSort(id)}>{label}</button>)}</div>}
-                {[...visible].sort(tab === 'archived' ? compareArchivedItems : tab === 'feature' && sort !== 'priority' ? (a, b) => (sort === 'desc' ? -1 : 1) * (Number(a.number.replace('REQ-', '')) - Number(b.number.replace('REQ-', ''))) : (a, b) => a.priority.localeCompare(b.priority)).map((i) => (
+                {tab === 'archived' && <div className="archive-folders"><button className="btn sm" onClick={() => setArchiveDate('')} disabled={!archiveDate}>全部日期</button>{archiveDate && <span className="muted">{archiveDate}</span>}{!archiveDate && archiveDates.map(date => <button key={date} className="archive-folder" onClick={() => setArchiveDate(date)}><FolderOpen size={24} /><strong>{date}</strong><span>{visible.filter(i => archivedDate(i) === date).length} 条需求</span></button>)}</div>}
+                {[...shownItems].sort(tab === 'archived' ? compareArchivedItems : tab === 'feature' && sort !== 'priority' ? (a, b) => (sort === 'desc' ? -1 : 1) * (Number(a.number.replace('REQ-', '')) - Number(b.number.replace('REQ-', ''))) : (a, b) => a.priority.localeCompare(b.priority)).map((i) => (
                   <article key={i.id} className={'req-card' + (selected.includes(i.id) ? ' chosen' : '')}>
                     {tab === 'feature' && eligible(i) && (
                       <div className="card-selection">
@@ -566,8 +613,8 @@ export default function App() {
                         <span className={'status ' + i.status}>{labels[i.status]}</span>
                         <span className="revision">v{i.version}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
-                      {i.title && <button className="item-title" onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
-                      <p className="body-copy">{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
+                      {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
+                      <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
                       {unresolvedFailures(i).length > 0 && (
                         <div className="failure-content">
                           <strong>未通过的问题</strong>
@@ -606,6 +653,15 @@ export default function App() {
                         {i.status === 'in_progress' && <button className="btn" disabled={busy} onClick={() => revertItem(i)}>退回待执行</button>}
                         {i.status === 'pending_verification' && (
                           <>
+                            {p!.verifySource && (
+                              <button className="btn" disabled={busy}
+                                title={'运行验证源：' + p!.verifySource.value}
+                                onClick={async () => {
+                                  if (!bridge.openVerifySource) { notify('运行验证源仅桌面版支持', 'err'); return; }
+                                  const r = await bridge.openVerifySource(p!.verifySource!);
+                                  if (!r.ok) notify(r.error || '打开验证源失败', 'err');
+                                }}><Play size={14} />运行</button>
+                            )}
                             <button className="btn accent" disabled={busy} onClick={() => recordPass(i)}>通过并归档</button>
                             <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setFixedIdx([]); setModal('verify'); }}>未通过，退回</button>
                           </>
@@ -617,7 +673,7 @@ export default function App() {
                   </article>
                 ))}
                 <footer className="list-foot">
-                  <span>{visible.length} 条需求</span>
+                  <span>{tab === 'archived' && !archiveDate ? visible.length : shownItems.length} 条需求{tab === 'archived' && !archiveDate ? ` · ${archiveDates.length} 个日期文件夹` : ''}</span>
                   <span>{tab === 'archived' ? '归档时间倒序' : '优先级排序'}{tab === 'feature' ? ` · 已选择 ${picked.length} 条` : ''}</span>
                 </footer>
               </>
@@ -629,7 +685,7 @@ export default function App() {
         </div>
 
         <footer className="page-foot">
-          ReqFlow · 需求流 <span>让需求、执行与验收保持连贯。</span>
+          ReqFlow · 需求流 <span className="page-help">{helpText}</span>
         </footer>
       </main>
 
@@ -784,8 +840,39 @@ export default function App() {
                   </label>
                 </div>
                 <label className="field">默认交付引导<textarea rows={3} value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder="填写希望 AI 交付时提供的内容" /></label>
-                <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim()}
-                  onClick={async () => { if (await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, aiValidation })) setModal(''); }}>
+                <label className="field">基线需求模板（选填）<textarea rows={4} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={DEFAULT_BASELINE_TEMPLATE} /></label>
+                <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空使用上方占位里的默认模板。</p>
+                <div className="field"><span>验证源</span>
+                  <div className="segmented" role="group" aria-label="验证源类型">
+                    {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (
+                      <button type="button" key={v} aria-pressed={verifyKind === v} className={verifyKind === v ? 'on' : ''}
+                        onClick={() => { setVerifyKind(v as 'none' | 'exe' | 'url'); if (v === 'none') setVerifyValue(''); }}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+                {verifyKind !== 'none' && (
+                  <label className="field">{verifyKind === 'exe' ? '验证程序路径' : '验证网页地址'}
+                    <div className="input-action">
+                      <input value={verifyValue} onChange={(e) => setVerifyValue(e.target.value)}
+                        placeholder={verifyKind === 'exe' ? '选择或填写可执行程序的绝对路径' : 'https://example.com/preview'} />
+                      {verifyKind === 'exe' && (
+                        <button type="button" className="icon-btn" aria-label="选择验证程序" title="浏览本地验证程序"
+                          disabled={!bridge.pickVerifyProgram}
+                          onClick={async () => { const r = await bridge.pickVerifyProgram?.(); if (r?.path) setVerifyValue(r.path); }}>
+                          <FolderOpen />
+                        </button>
+                      )}
+                    </div>
+                  </label>
+                )}
+                <p className="settings-hint">配置验证源后，「待验证」列表会显示「运行」按钮，一键打开验证程序或网页。</p>
+                <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim())}
+                  onClick={async () => {
+                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, aiValidation }, true)) return;
+                    if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
+                    if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
+                    setModal(''); notify('设置已保存');
+                  }}>
                   保存设置
                 </button>
                 <h4 className="modal-section">版本历史</h4>

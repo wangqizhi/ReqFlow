@@ -1,7 +1,7 @@
 {
   "name": "reqflow-desktop",
   "productName": "ReqFlow",
-  "version": "1.6.0",
+  "version": "1.8.3",
   "description": "ReqFlow · 需求流 — 个人需求管理与 Prompt 工作台（本地 Electron 版）",
   "private": true,
   "main": "dist/main/index.js",

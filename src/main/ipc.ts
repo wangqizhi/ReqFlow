@@ -56,6 +56,11 @@ async function withinRoot(root: string, target: string): Promise<boolean> {
 }
 
 export function registerIpc(dataDir: string) {
+  ipcMain.handle('window:control', (event, action: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (action === 'minimize') win?.minimize();
+    else if (action === 'close') win?.close();
+  });
   const store = new WorkspaceStore(path.join(dataDir, 'workspace.json'));
   const service = new WorkspaceService(store);
   const backup = new BackupManager(dataDir);
@@ -96,8 +101,50 @@ export function registerIpc(dataDir: string) {
     } catch (e: any) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('ssh:pick', async () => {
-    const result = await dialog.showOpenDialog({ title: '选择 SSH 私钥文件', properties: ['openFile'] });
+    const win = BrowserWindow.getAllWindows()[0];
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择 SSH 私钥文件',
+      properties: ['openFile'],
+      // 默认定位到当前用户的 .ssh 目录（不存在时对话框自动回退到默认位置）
+      defaultPath: path.join(os.homedir(), '.ssh')
+    };
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return { ok: true, path: result.canceled ? '' : result.filePaths[0] };
+  });
+
+  // 验证源：选择本地程序（REQ-060）
+  ipcMain.handle('file:pickProgram', async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择验证程序',
+      properties: ['openFile'],
+      filters: [{ name: '可执行程序', extensions: ['exe', 'bat', 'cmd', 'lnk'] }]
+    };
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    return { ok: true, path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0] };
+  });
+
+  // 验证源：打开 exe 或 url（REQ-060）。路径与协议在主进程校验，渲染端只传配置值。
+  ipcMain.handle('verify:open', async (_e, source: { kind?: string; value?: string }) => {
+    try {
+      if (!source || typeof source.value !== 'string' || !source.value.trim()) throw Error('未配置验证源');
+      const value = source.value.trim();
+      if (source.kind === 'url') {
+        if (!/^https?:\/\//i.test(value)) throw Error('验证源仅支持 http(s) 网页地址');
+        await shell.openExternal(value);
+        return { ok: true };
+      }
+      if (source.kind === 'exe') {
+        if (!path.isAbsolute(value)) throw Error('请配置可执行程序的绝对路径');
+        await fs.access(value);
+        const failure = await shell.openPath(value);
+        if (failure) throw Error('启动失败：' + failure);
+        return { ok: true };
+      }
+      throw Error('验证源类型无效');
+    } catch (e: any) {
+      return { ok: false, error: e?.message || '打开验证源失败' };
+    }
   });
 
   const aiSettingsFile = path.join(dataDir, 'ai-settings.json');

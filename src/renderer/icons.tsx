@@ -95,3 +95,6 @@ export const ExternalLink = ({ size = 16, className }: P) => (
 export const Trash = ({ size = 16, className }: P) => (
   <svg {...svgProps(size)} className={className}><path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6" /><path d="M10 11v6M14 11v6" /></svg>
 );
+export const Play = ({ size = 16, className }: P) => (
+  <svg {...svgProps(size)} className={className}><path d="M7 4.8v14.4a.9.9 0 0 0 1.37.77l11.3-7.2a.9.9 0 0 0 0-1.54L8.37 4.03A.9.9 0 0 0 7 4.8Z" /></svg>
+);

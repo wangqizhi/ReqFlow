@@ -4,6 +4,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('reqflow', {
+  windowControl: (action: 'minimize' | 'close') => ipcRenderer.invoke('window:control', action),
   aiRequirements: (project: string, mode: string, instruction: string, discussion: any[]) => ipcRenderer.invoke('ai:requirements', project, mode, instruction, discussion),
   gitPush: (root: string) => ipcRenderer.invoke('git:push', root),
   gitPull: (root: string) => ipcRenderer.invoke('git:pull', root),
@@ -13,6 +14,8 @@ contextBridge.exposeInMainWorld('reqflow', {
   testRemote: (settings: any) => ipcRenderer.invoke('remote:test', settings),
   applyRemote: (project: string) => ipcRenderer.invoke('remote:apply', project),
   pickSSHKey: () => ipcRenderer.invoke('ssh:pick'),
+  pickVerifyProgram: () => ipcRenderer.invoke('file:pickProgram'),
+  openVerifySource: (source: any) => ipcRenderer.invoke('verify:open', source),
   getAISettings: () => ipcRenderer.invoke('ai:settings:get'),
   getAIRequestLogs: () => ipcRenderer.invoke('ai:logs:get'),
   optimizeCommitMessage: (project: string, message: string) => ipcRenderer.invoke('ai:commit:optimize', project, message),

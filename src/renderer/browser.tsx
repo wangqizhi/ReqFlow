@@ -219,7 +219,8 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     gitOp(async () => {
       const r = await bridge.gitCommit?.(root, commitMsg, project.id, pendingItems.map((i) => ({ id: i.id, version: i.version })));
       if (r?.ok) { setCommitMsg(''); await onCommitted(); notify(r.warning || '提交成功', r.warning ? 'err' : 'ok'); }
-      return r;
+      // 提交成功只提示“提交成功”：抹掉 summary，避免 gitOp 再把完整 git 输出弹成大段提示
+      return r?.ok ? { ...r, summary: '' } : r;
     });
   }
   function switchBranch(name: string) {

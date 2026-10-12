@@ -196,7 +196,7 @@ export class Cli {
         const { state } = await this.service(a).get();
         const p = this.findProject(state, a.project);
         const i = this.findItem(p, a.id);
-        return { item: { ...this.itemSummary(i), history: i.history, unresolvedFailures: unresolvedFailures(i) } };
+        return { item: { ...this.itemSummary(i), history: i.history, flowEvents: i.flowEvents, unresolvedFailures: unresolvedFailures(i) } };
       }
       case 'item history': {
         const { state } = await this.service(a).get();

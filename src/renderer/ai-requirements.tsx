@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AIDraft } from '../core/ai';
 import type { Project } from '../core/domain';
 import { bridge } from './api';
@@ -12,6 +12,12 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [context, setContext] = useState('本次请求将使用项目背景、最近 40 条需求、近 7 天 Git Log 与项目说明文件。');
+  // REQ-062：Esc 关闭 AI 需求弹窗（AI 处理中不打断，与关闭按钮一致）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
   async function generate() {
     if (busy) return;
     setBusy(true); setError('');

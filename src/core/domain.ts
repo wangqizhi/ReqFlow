@@ -16,6 +16,8 @@ export type Item = {
   criteria: string[];
   version: number;
   history: any[];
+  // UTC ISO 时间；重复开发、退回、归档均保留独立步骤，供后续统计。
+  flowEvents?: { operation: string; stage: string; time: string; version: number; from?: string; source?: 'history' }[];
   aiValidation?: boolean;
   deliveryGuidance?: string;
   link?: string;
@@ -41,6 +43,9 @@ export type Batch = {
   submittedAt?: string;
 };
 
+/** 待验证「运行」按钮使用的验证源：本地程序（绝对路径）或网页地址。 */
+export type VerifySource = { kind: 'exe' | 'url'; value: string };
+
 export type Project = {
   id: string;
   name: string;
@@ -55,6 +60,8 @@ export type Project = {
   nextNumber: number;
   dir?: string; // 关联的本地项目目录（「浏览项目」查看/编辑项目文件用）
   remote?: RemoteSettings;
+  verifySource?: VerifySource; // 验证源：待验证需求一键打开的程序或网页
+  baselineTemplate?: string; // 基线需求模板（留空使用 DEFAULT_BASELINE_TEMPLATE）
   folderId?: string;
   revision?: number;
 };
@@ -64,6 +71,17 @@ export type Workspace = { projects: Project[]; folders?: { id: string; name: str
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
 export const DEFAULT_GUIDANCE =
   '请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。';
+
+/** 「基线需求」默认模板（REQ-064）：检查忽略规则/输出目录，补齐 scripts/ 下的编译与发布脚本。 */
+export const DEFAULT_BASELINE_TEMPLATE = [
+  '完善项目基线配置：',
+  '1. 检查 .gitignore：构建产物、依赖与运行时生成目录（如 node_modules、dist、release、日志等）应已被忽略；',
+  '2. 安装包输出：如项目会生成安装包，指定固定的生成目录，并确认该目录的忽略策略正确；',
+  '3. 运行包：如项目有可独立运行的运行包/绿色版，指定固定的输出或运行目录；',
+  '4. 编译与发布脚本：在固定位置 scripts/ 下提供编译脚本与发布脚本（可直接运行，注明用法与依赖）；',
+  '5. 核对以上配置与当前项目结构一致，缺失或失效的项请补齐或修正。',
+  '完成后说明改动、脚本用法与未解决的问题。'
+].join('\n');
 
 export function requirementSettings(p: Project, i: Item) {
   const aiValidation = i.aiValidation ?? p.aiValidation;
@@ -188,7 +206,19 @@ export function normalizeWorkspace(s: Workspace) {
     if (typeof p.deliveryGuidance !== 'string') p.deliveryGuidance = DEFAULT_DELIVERY;
     if (typeof p.aiValidation !== 'boolean') p.aiValidation = false;
     if (typeof p.dir !== 'string' || !p.dir.trim()) p.dir = undefined;
+    if (typeof p.baselineTemplate === 'string' && p.baselineTemplate.trim()) p.baselineTemplate = p.baselineTemplate.trim();
+    else p.baselineTemplate = undefined;
+    if (p.verifySource && ((p.verifySource.kind !== 'exe' && p.verifySource.kind !== 'url')
+      || typeof p.verifySource.value !== 'string' || !p.verifySource.value.trim())) p.verifySource = undefined;
+    else if (p.verifySource) p.verifySource = { kind: p.verifySource.kind, value: p.verifySource.value.trim() };
     for (const i of p.items) {
+      if (!i.flowEvents) {
+        const stages: Record<string, string> = { '创建': 'ready', '标记待提交': 'ready', '取消执行': 'ready', '退回待执行': 'ready', '验证失败': 'ready', '回归退回': 'ready', '实现完成': 'pending_verification', '归档': 'archived', '验证通过': 'archived' };
+        i.flowEvents = i.history.slice().reverse().flatMap(h => {
+          const stage = String(h.event).startsWith('确认提交') ? 'in_progress' : stages[h.event];
+          return stage && Number.isFinite(Date.parse(h.time)) ? [{ operation: h.event, stage, time: h.time, version: h.version ?? h.snapshot?.version ?? 0, source: 'history' as const }] : [];
+        });
+      }
       if (i.archived || i.status === 'verified') {
         i.status = 'archived';
         i.archived = true;
@@ -229,7 +259,7 @@ async function sha256Hex(text: string) {
 
 /**
  * 对工作区应用一次操作。op 取值：
- * project / deleteProject / projectDir / guidance / item / moveItem / deleteItem / generate / submit / cancel / complete / revert / verify / regress / archive
+ * project / deleteProject / projectDir / guidance / verifySource / baselineTemplate / item / moveItem / deleteItem / generate / submit / cancel / complete / revert / verify / regress / archive
  *（ready 为历史接口，保留兼容。）
  */
 export async function projectConcurrencyToken(p: Project): Promise<string> {
@@ -238,14 +268,24 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => key === 'path' ? undefined : value));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'baselineTemplate', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!localOps.includes(a?.op) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
 export async function apply(s: Workspace, a: any) {
   normalizeWorkspace(s);
   const before = new Map(s.projects.map(p => [p.id, { json: JSON.stringify(p), revision: p.revision || 0 }]));
+  const previousItems = new Map(s.projects.flatMap(p => p.items.map(i => [i.id, { status: i.status, historyTime: i.history[0]?.time, historyEvent: i.history[0]?.event, events: i.flowEvents?.length || 0 }] as const)));
   await applyOperation(s, a);
+  for (const p of s.projects) for (const i of p.items) {
+    const old = previousItems.get(i.id);
+    const h = i.history[0];
+    // aiItems 的内部 apply 已记录步骤，外层不重复记账。
+    if ((i.flowEvents?.length || 0) > (old?.events || 0)) continue;
+    if (!old || old.status !== i.status || old.historyTime !== h?.time || old.historyEvent !== h?.event) {
+      (i.flowEvents ||= []).push({ operation: a.op, stage: i.status, from: old?.status, time: h?.time || new Date().toISOString(), version: i.version });
+    }
+  }
   for (const p of s.projects) {
     const old = before.get(p.id);
     if (!old || JSON.stringify(p) !== old.json) p.revision = (old?.revision || 0) + 1;
@@ -352,6 +392,25 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
 
+  if (a.op === 'verifySource') {
+    // 验证源独立于引导词保存：不递增 guideVersion、不影响进行中的批次
+    if (a.source === null || a.source === undefined || a.source === '') {
+      p.verifySource = undefined;
+      return;
+    }
+    const kind = (a.source as any).kind, value = String((a.source as any).value || '').trim();
+    if ((kind !== 'exe' && kind !== 'url') || !value) throw new Error('验证源配置无效：请选择类型并填写程序路径或网页地址');
+    p.verifySource = { kind, value };
+    return;
+  }
+
+  if (a.op === 'baselineTemplate') {
+    // 基线需求模板独立保存：不影响引导词版本与进行中的批次
+    const text = String(a.text || '').trim();
+    p.baselineTemplate = text || undefined;
+    return;
+  }
+
   if (a.op === 'gitCommitted') {
     for (const snapshot of a.items || []) {
       const item = p.items.find((i) => i.id === snapshot.id);
@@ -441,6 +500,7 @@ async function applyOperation(s: Workspace, a: any) {
       items.some((i: Item) => !i || i.archived || (i.status !== 'ready' && i.status !== 'in_progress'))
     )
       throw new Error('请选择待执行或执行中的需求');
+    for (const i of items as Item[]) (i.flowEvents ||= []).push({ operation: 'generate', stage: i.status, time: now, version: i.version });
     const snapshots = items.map((i: Item) => ({
       ...structuredClone(i),
       ...requirementSettings(p, i)

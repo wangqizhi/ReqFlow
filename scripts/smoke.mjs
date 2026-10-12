@@ -105,6 +105,12 @@ async function test() {
   r = await svc.mutate({ op: 'regress', project: pid, id: itemA.id, note: '线上复现' }, null);
   assert.equal(r.state.projects[1].items[0].status, 'ready');
 
+  const events = r.state.projects[1].items[0].flowEvents;
+  assert.deepEqual(events.map(e => e.stage), ['ready', 'ready', 'in_progress', 'pending_verification', 'ready', 'ready', 'in_progress', 'pending_verification', 'archived', 'ready'], '两轮开发及回归保留完整步骤');
+  assert.ok(events.every(e => Number.isFinite(Date.parse(e.time))), '每个步骤包含有效时间');
+  const persisted = await svc.get();
+  assert.deepEqual(persisted.state.projects[1].items[0].flowEvents, events, '流转时间落盘后保持不变');
+
   // 9b. 二次退回的问题标识：区分「此前未修复」与「本轮新问题」，确认已修复的不再带入
   r = await svc.mutate({ op: 'item', project: pid, title: '二次退回标识', type: 'feature', priority: 'P1' }, null);
   const itemD = r.state.projects[1].items[r.state.projects[1].items.length - 1];

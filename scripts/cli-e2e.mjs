@@ -45,7 +45,7 @@ try {
   const id1 = r.item.id;
   r = rf('item', 'add', '--project', pid, '--title', '暗色模式', '--type', 'feature', '--priority', 'P2');
   const id2 = r.item.id;
-  ok('未传 --date 默认本地日期', /^\d{4}-\d{2}-\d{2}$/.test(r.item.scheduledDate));
+  ok('未传 --date 默认不带计划日期', r.item.scheduledDate === undefined);
   const badDate = rfFail('item', 'add', '--project', pid, '--body', 'invalid date', '--date', '2027-02-29');
   ok('无效日期失败且不新增需求', badDate?.ok === false && badDate.error.includes('日期'));
 

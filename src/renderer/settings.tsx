@@ -38,9 +38,15 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
   useEffect(() => {
     bridge.getAISettings().then((r) => { if (!r.ok) throw Error(r.error); setForm(r.settings); setLoaded(true); }).catch((e) => notify(e.message, 'err'));
     bridge.getBackupSettings?.().then((r) => { if (r.ok) { setBackup(r.settings); setStatus(r.status); setBackupLoaded(true); } }).catch((e) => notify(e.message, 'err'));
-    const timer = setInterval(() => { bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}); }, 3000);
+    const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
+  // REQ-062：Esc 关闭设置弹窗（保存中不打断，与关闭按钮一致）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
   async function perform(action: () => Promise<any>, success: string) {
     setBusy(true); setMessage('');
     try { const r = await action(); if (!r?.ok) throw Error(r?.error || '操作失败'); setMessage(success); notify(success); }

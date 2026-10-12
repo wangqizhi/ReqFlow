@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../core/domain';
 import { emptyRemote, validateRemote, type RemoteSettings } from '../core/remote';
 import { RemoteFields } from './settings';
@@ -8,6 +8,12 @@ export function ProjectRemoteOverlay({ project, save, onClose, notify }: { proje
   const [remote, setRemote] = useState(project.remote || { ...emptyRemote });
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState(false);
   const lock = useRef(false);
+  // REQ-062：Esc 关闭远程仓库设置（操作进行中不打断）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !lock.current) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   async function perform(operation: () => Promise<string>) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setMessage(''); setError(false);
