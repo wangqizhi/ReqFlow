@@ -26,6 +26,10 @@ const IMAGE_MIME: Record<string, string> = {
 };
 const TEXT_LIMIT = 2 * 1024 * 1024;   // 文本查看/编辑上限 2MB
 const IMAGE_LIMIT = 20 * 1024 * 1024; // 图片预览上限 20MB
+const PUBLISH_LIMIT = 200 * 1024;     // 发布脚本输出保留上限（超出截断前段，保留末尾）
+
+/** 可识别的发布脚本扩展名（REQ-070）：检测 scripts/ 与项目根目录下的 publish.<ext>，执行与检测共用同一份名单。 */
+const PUBLISH_EXTS = ['mjs', 'js', 'cjs', 'bat', 'cmd', 'ps1', 'sh', 'py'];
 
 function errText(e: any, fallback: string) {
   if (e?.code === 'ENOENT') return '文件或目录不存在（可能已被移动或删除）';
@@ -144,6 +148,85 @@ export function registerIpc(dataDir: string) {
       throw Error('验证源类型无效');
     } catch (e: any) {
       return { ok: false, error: e?.message || '打开验证源失败' };
+    }
+  });
+
+  // ---------- 发布脚本（REQ-070）：检测项目目录内的 publish 脚本，供界面显示「发布」按钮并执行 ----------
+
+  ipcMain.handle('publish:detect', async (_e, root: string) => {
+    try {
+      if (typeof root !== 'string' || !root.trim()) return { ok: true, script: '' };
+      // 优先 scripts/ 下的脚本，其次项目根目录
+      for (const ext of PUBLISH_EXTS) {
+        for (const rel of [`scripts/publish.${ext}`, `publish.${ext}`]) {
+          const file = safeJoin(root, rel);
+          if (!file || !(await withinRoot(root, file))) continue;
+          const st = await fs.stat(file).catch(() => null);
+          if (st?.isFile()) return { ok: true, script: rel };
+        }
+      }
+      return { ok: true, script: '' };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || '检测发布脚本失败' };
+    }
+  });
+
+  /** 按扩展名确定发布脚本的启动方式；js/mjs/cjs 用 Electron 自带的 Node 运行时（打包后无需本机安装 Node）。 */
+  function publishSpawn(file: string): { cmd: string; args: string[]; verbatim?: boolean; asNode?: boolean } | null {
+    const ext = path.extname(file).slice(1).toLowerCase();
+    if (ext === 'mjs' || ext === 'js' || ext === 'cjs') return { cmd: process.execPath, args: [file], asNode: true };
+    // cmd 引号规则：不加 /S、自行包引号并原样传参（windowsVerbatimArguments），路径含空格才能整串执行
+    if (ext === 'bat' || ext === 'cmd') return { cmd: 'cmd.exe', args: ['/d', '/c', '"' + file + '"'], verbatim: true };
+    if (ext === 'ps1') return { cmd: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file] };
+    if (ext === 'sh') return { cmd: 'bash', args: [file] };
+    if (ext === 'py') return { cmd: 'python', args: [file] };
+    return null;
+  }
+
+  ipcMain.handle('publish:run', async (_e, root: string, rel: string) => {
+    let output = '';
+    try {
+      // 只执行检测名单内的 publish 脚本，且路径必须仍在项目目录内（防渲染端传入任意路径）
+      if (typeof root !== 'string' || typeof rel !== 'string' || !rel.trim()) throw Error('发布脚本路径无效');
+      const file = safeJoin(root, rel);
+      if (!file || !(await withinRoot(root, file))) throw Error('路径超出项目目录范围');
+      const st = await fs.stat(file);
+      if (!st.isFile()) throw Error('发布脚本不存在（可能已被移动或删除）');
+      const command = publishSpawn(file);
+      if (!command) throw Error('不支持的发布脚本类型：' + path.extname(file));
+      const r = await new Promise<{ code: number; err: string }>((resolve) => {
+        let settled = false;
+        const done = (result: { code: number; err: string }) => { if (settled) return; settled = true; clearTimeout(timer); resolve(result); };
+        let child: any;
+        try {
+          child = spawn(command.cmd, command.args, {
+            cwd: path.dirname(file),
+            windowsHide: true,
+            windowsVerbatimArguments: command.verbatim === true,
+            env: command.asNode ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env
+          });
+        } catch (e: any) {
+          resolve({ code: -1, err: e?.message || '无法启动发布脚本' });
+          return;
+        }
+        // 发布含构建与打包，耗时较长：20 分钟超时，超时终止进程
+        const timer = setTimeout(() => {
+          try { child.kill(); } catch { /* 忽略 */ }
+          done({ code: -1, err: '发布脚本超时（20 分钟），已终止' });
+        }, 20 * 60 * 1000);
+        child.stdout?.on('data', (d: any) => (output += d));
+        child.stderr?.on('data', (d: any) => (output += d));
+        child.on('error', (e: any) => done({ code: -1, err: e?.message || String(e) }));
+        child.on('close', (code: number | null) => done({ code: code ?? -1, err: '' }));
+      });
+      if (output.length > PUBLISH_LIMIT) output = '…（前文已截断）…\n' + output.slice(-PUBLISH_LIMIT);
+      if (r.code !== 0) {
+        const reason = r.err || (output.trim().split('\n').filter(Boolean).pop() || '发布脚本执行失败');
+        return { ok: false, error: reason, output };
+      }
+      return { ok: true, output };
+    } catch (e: any) {
+      return { ok: false, error: errText(e, '执行发布脚本失败'), output };
     }
   });
 

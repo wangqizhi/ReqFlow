@@ -3,13 +3,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
-  type Item, type Project, type Workspace
+  DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
+  scheduledBatch, type Item, type Project, type Workspace
 } from '../core/domain';
 import { bridge } from './api';
+import { publishProject } from './publish';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Play, Plus, RefreshCw, Search, Trash, X, ImageIcon, Settings
+  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Trash, X, ImageIcon, Settings
 } from './icons';
 import { HelpOverlay } from './help';
 import { ProjectBrowser } from './browser';
@@ -27,7 +28,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const emptyForm = { title: '', body: '', criteria: '', type: 'feature', priority: 'P1' };
+const emptyForm = { title: '', body: '', criteria: '', type: 'feature', priority: 'P1', executor: 'ai' };
 // 上次使用的项目（REQ-029）：启动时恢复；项目切换即记录，关闭程序时最近一次选择已保存
 const LAST_PROJECT_KEY = 'reqflow-last-project';
 
@@ -60,6 +61,8 @@ export default function App() {
   const [verifyKind, setVerifyKind] = useState<'none' | 'exe' | 'url'>('none'); // 验证源类型（REQ-060）
   const [verifyValue, setVerifyValue] = useState('');
   const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
+  const [publishMode, setPublishMode] = useState('auto');
+  const [publishPath, setPublishPath] = useState('');
   const [aiValidation, setAiValidation] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
@@ -72,12 +75,28 @@ export default function App() {
   const [advanced, setAdvanced] = useState(false);
   const [newMenu, setNewMenu] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
+  const [publishing, setPublishing] = useState(false);
+  const [publishStep, setPublishStep] = useState('');
+  const [completeConfirm, setCompleteConfirm] = useState<{ project: string; items: { id: string; version: number; number: string }[] } | null>(null);
+  const completingRef = useRef(false);
+  const [completing, setCompleting] = useState(false);
+  useEffect(() => {
+    if (!completeConfirm) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && !completingRef.current) setCompleteConfirm(null); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [completeConfirm]);
+  const [publishResult, setPublishResult] = useState<{ ok: boolean; output: string; error?: string } | null>(null);
+  const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
+  const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
   const [sort, setSort] = useState('desc');
   const [folderName, setFolderName] = useState('');
   const [folderForm, setFolderForm] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [backgroundEditing, setBackgroundEditing] = useState(false);
   const imageInput = useRef<HTMLInputElement>(null);
+  const bodyInput = useRef<HTMLTextAreaElement>(null); // 需求说明输入框（REQ-074 溢出检测）
 
   const versionRef = useRef(0);
   const workspaceRef = useRef<Workspace | null>(null);
@@ -98,6 +117,7 @@ export default function App() {
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate('');
+    void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
   }
 
   // 浏览项目：未关联目录先弹出系统目录选择框，关联后打开文件浏览器
@@ -114,12 +134,13 @@ export default function App() {
     setBrowserOpen(true);
   }
 
-  async function load() {
+  async function load(opts: { quiet?: boolean } = {}) {
     try {
       const r = await bridge.getWorkspace();
       if (!r.ok) throw Error(r.error);
       setData(r.state); workspaceRef.current = r.state; setVersion(r.version); versionRef.current = r.version; setError('');
     } catch (e: any) {
+      if (opts.quiet) return; // 后台自动刷新失败时保持现状，不打扰用户（手动刷新仍会提示）
       setError(e.message);
     }
   }
@@ -127,6 +148,16 @@ export default function App() {
     load();
     bridge.appInfo().then((i) => setAppVersion(i.version)).catch(() => { /* 取不到版本号时仅不显示 */ });
   }, []);
+
+  // REQ-076：flow 状态自动更新 —— 每 15 秒静默轮询，窗口重获焦点时也刷新；
+  // 切换模块（changeTab）与切换项目（switchProject）会各自立即刷新。
+  // 弹窗打开或保存进行中时跳过，避免打断编辑或引发版本冲突
+  useEffect(() => {
+    const refresh = () => { if (!busyRef.current && !modal) void load({ quiet: true }); };
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [modal]);
 
   // REQ-029：首次数据加载后恢复上次使用的项目（项目已被删除时回退第一个）
   const restoredRef = useRef(false);
@@ -153,14 +184,50 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // REQ-062：Esc 关闭当前弹窗（复用关闭按钮逻辑：编辑中内容自动保存，保存中不打断）
+  // REQ-062：Esc 关闭当前弹窗（复用关闭按钮逻辑：编辑中内容自动保存，保存中不打断）；
+  // REQ-074：需求说明处于放大编辑时，Esc 先收起放大框而不关闭整个弹窗
   useEffect(() => {
     if (!modal) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void closeModal(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (bodyExpanded) { setBodyExpanded(false); return; }
+      void closeModal();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal, editing]);
+  }, [modal, editing, bodyExpanded]);
+
+  // REQ-074：需求说明超出输入框高度时，在「展开更多设置」旁显示「放大编辑」按钮
+  useEffect(() => {
+    if (modal !== 'item') { setBodyOverflows(false); return; }
+    const el = bodyInput.current;
+    setBodyOverflows(!!el && el.scrollHeight > el.clientHeight + 1);
+  }, [modal, form.body]);
+
+  // 发布脚本检测（REQ-070）：检测到 scripts/ 或项目根目录下的 publish 脚本时，「浏览项目」旁显示「发布」按钮，
+  // 菜单不再显示「发布功能需求」。脚本常由 AI 在应用外创建，窗口重获焦点或关闭文件浏览器时重查。
+  useEffect(() => {
+    let cancelled = false;
+    const detect = async () => {
+      if (p?.publishScript !== undefined) { setPublishScript(p.publishScript); return; }
+      if (!p?.dir || !bridge.detectPublish) { setPublishScript(''); return; }
+      const r = await bridge.detectPublish(p.dir);
+      if (!cancelled && r.ok) setPublishScript(r.script || '');
+    };
+    void detect();
+    window.addEventListener('focus', detect);
+    return () => { cancelled = true; window.removeEventListener('focus', detect); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.dir, p?.publishScript, browserOpen]);
+
+  // REQ-070：Esc 关闭发布输出弹窗
+  useEffect(() => {
+    if (!publishResult) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPublishResult(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [publishResult]);
 
   async function act(a: any, quiet = false): Promise<(Workspace & { createdProjectId?: string }) | false> {
     if (busyRef.current) {
@@ -209,7 +276,7 @@ export default function App() {
     setModal('item');
   }
 
-  // 基线需求（REQ-064）：按项目模板（未配置时用默认模板）预填一条新需求，用户确认后保存
+  // 基线需求（REQ-064）：项目模板 > 全局模板（REQ-071，设置中统一配置）> 默认模板
   function editBaseline() {
     setNewMenu(false);
     dirtyRef.current = false;
@@ -219,10 +286,52 @@ export default function App() {
       ...emptyForm, type: 'improvement', aiValidation: p!.aiValidation,
       deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
         ? '说明改动、未解决的问题。' : p!.deliveryGuidance,
-      body: p!.baselineTemplate || DEFAULT_BASELINE_TEMPLATE
+      body: p!.baselineTemplate || data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE
     });
     setAdvanced(false);
     setModal('item');
+  }
+
+  // 发布功能需求（REQ-070）：预填一条在 scripts/ 下创建 publish 发布脚本的需求；
+  // AI 完成后应用检测到脚本，「浏览项目」旁出现「发布」按钮，菜单里此项随之隐藏
+  function editPublish() {
+    setNewMenu(false);
+    dirtyRef.current = false;
+    clearTimeout(autoRef.current);
+    setEditing(null);
+    setForm({
+      ...emptyForm, title: '创建发布脚本', type: 'improvement', aiValidation: p!.aiValidation,
+      deliveryGuidance: !p!.aiValidation && p!.deliveryGuidance === DEFAULT_DELIVERY
+        ? '说明改动、未解决的问题。' : p!.deliveryGuidance,
+      body: data?.publishTemplate || DEFAULT_PUBLISH_TEMPLATE
+    });
+    setAdvanced(false);
+    setModal('item');
+  }
+
+  // 执行发布脚本（REQ-070）：运行项目目录下的 publish 脚本，完成后弹窗展示输出（含产物位置）
+  async function runPublish() {
+    if (!p?.dir || !publishScript || publishing) return;
+    if (!bridge.runPublish) { notify('发布仅桌面版支持（浏览器预览无本地脚本访问）', 'err'); return; }
+    setPublishing(true);
+    try {
+      const r = await publishProject(p, publishScript, bridge, setPublishStep);
+      setPublishResult({ ok: !!r.ok, output: r.output || '', error: r.error });
+    } catch (e: any) {
+      setPublishResult({ ok: false, output: '', error: e?.message || '执行发布脚本失败' });
+    } finally {
+      setPublishing(false);
+      setPublishStep('');
+      void load({ quiet: true });
+    }
+  }
+
+  // 运行验证源（REQ-077）：按钮移到顶部「浏览项目 / 发布」旁，仅项目配置了验证源时出现
+  async function runVerifySource() {
+    if (!p?.verifySource) return;
+    if (!bridge.openVerifySource) { notify('运行验证源仅桌面版支持', 'err'); return; }
+    const r = await bridge.openVerifySource(p.verifySource);
+    if (!r.ok) notify(r.error || '打开验证源失败', 'err');
   }
 
   async function uploadImages(files: FileList | File[] | null) {
@@ -265,14 +374,14 @@ export default function App() {
   const eligible = (i: Item) => !i.archived && (i.status === 'ready' || i.status === 'in_progress');
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
-  const allInProgress = (p?.items || []).filter((i) => !i.archived && i.status === 'in_progress');
+  const allInProgress = (p?.items || []).filter((i) => !i.archived && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
   const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate));
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
     (tab === 'archived' ? !!i.archived
-      : !i.archived && (tab === 'feature' ? i.status === 'ready' : tab === 'generate' ? i.status === 'in_progress' : i.status === tab))
+      : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledBatch(p!, i) : tab === 'generate' ? allInProgress.some(item => item.id === i.id) : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
-    && (typeFilter === 'all' || i.type === typeFilter)
+    && (tab === 'generate' || typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
   const archivedDate = (i: Item) => {
     const time = i.history.find(h => h.event === '归档')?.time;
@@ -307,18 +416,28 @@ export default function App() {
 
   // 单条提交：AI 完成这一条后，单独把它送入待验证，不影响同批其他需求
   async function submitItem(i: Item) {
-    if (await act({ op: 'complete', id: i.id }, true)) {
-      notify('已提交 AI，需求进入待验证');
-    }
+    setCompleteConfirm({ project: p!.id, items: [{ id: i.id, version: i.version, number: i.number }] });
   }
 
   async function completeBatch() {
-    // 顶部「提交验证」一次提交全部执行中的需求（不限当前批次：多轮生成的需求一并进入待验证）
-    for (const i of inProgress) {
-      if (!await act({ op: 'complete', id: i.id }, true)) return;
-    }
-    setTab('pending_verification'); setSelected([]);
-    notify(`已提交 ${inProgress.length} 条需求进入待验证，验证后点击「通过并归档」`);
+    if (inProgress.length) setCompleteConfirm({ project: p!.id, items: inProgress.map(({ id, version, number }) => ({ id, version, number })) });
+  }
+  async function confirmComplete() {
+    if (!completeConfirm || busyRef.current || completingRef.current) return;
+    const request = completeConfirm;
+    const current = workspaceRef.current?.projects.find(project => project.id === request.project);
+    if (p?.id !== request.project || request.items.some(old => {
+      const item = current?.items.find(i => i.id === old.id);
+      return !item || item.version !== old.version || item.archived || !['ready', 'in_progress'].includes(item.status);
+    })) { setCompleteConfirm(null); notify('需求已变化，请刷新后重新提交验证', 'err'); return; }
+    completingRef.current = true; setCompleting(true);
+    try {
+      for (const item of request.items) {
+        if (!await act({ op: 'complete', id: item.id }, true)) { setCompleteConfirm(null); return; }
+      }
+      setCompleteConfirm(null); setTab('pending_verification'); setSelected([]);
+      notify(`已提交 ${request.items.length} 条需求进入待验证`);
+    } finally { completingRef.current = false; setCompleting(false); }
   }
   async function recordPass(i: Item) {
     if (await act({ op: 'verify', id: i.id, pass: true })) {
@@ -334,6 +453,7 @@ export default function App() {
   }
   function changeTab(v: string) {
     setTab(v);
+    void load({ quiet: true }); // REQ-076：切换模块时立即刷新 flow 状态
     if (v === 'generate') { setScheduleMode('through'); setScheduleDate(localDate()); }
     if (v === 'archived') setArchiveView('items');
     if (v !== 'feature' && v !== 'generate') setSelected([]);
@@ -369,7 +489,7 @@ export default function App() {
         <img className="mark" src="./app-icon.png" alt="ReqFlow" />
         <h1>ReqFlow · 需求流</h1>
         <p>{error || '正在打开你的工作区…'}</p>
-        {error && <button className="btn primary" onClick={load}>重试</button>}
+        {error && <button className="btn primary" onClick={() => void load()}>重试</button>}
       </div>
     );
   }
@@ -443,13 +563,13 @@ export default function App() {
           </div>
           <div className="save">
             <Check size={14} />{saved}
-            <button className="icon-btn" aria-label="刷新数据" onClick={load}><RefreshCw size={15} /></button>
+            <button className="icon-btn" aria-label="刷新数据" title="数据每 15 秒自动刷新，点击立即刷新" onClick={() => void load()}><RefreshCw size={15} /></button>
           </div>
         </header>
 
         {error && (
           <div className="error">
-            {error} <button className="btn plain" onClick={load}>刷新数据</button>
+            {error} <button className="btn plain" onClick={() => void load()}>刷新数据</button>
             <p>当前编辑内容会保留在编辑框中，请确认最新内容后再保存。</p>
           </div>
         )}
@@ -462,25 +582,31 @@ export default function App() {
               <textarea autoFocus aria-label="项目背景" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setBackgroundEditing(false); }} />
               <div className="settings-actions"><button className="btn sm primary" disabled={busy}>保存背景</button><button type="button" className="btn sm" onClick={() => setBackgroundEditing(false)}>取消</button></div>
             </form> : <button className="project-background" title="点击编辑项目背景" onClick={() => { setDescription(p?.description || ''); setBackgroundEditing(true); }}>{p?.description || '点击添加项目背景、技术栈与运行方式'}</button>}
-            {p?.dir && (
-              <p className="linked-dir" title={p.dir}>
-                <FolderOpen size={13} />{p.dir}
-              </p>
-            )}
           </div>
           <div className="title-actions">
             <button className="btn" onClick={browseProject} title={p?.dir ? '浏览项目文件：' + p.dir : '关联本地项目目录并浏览文件'}>
               <FolderOpen size={16} />{p?.dir ? '浏览项目' : '关联目录'}
             </button>
-            <div className="new-requirement-split"><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button></div>}</div>
+            {!!publishScript && p?.dir && (
+              <button className="btn accent" disabled={publishing} onClick={() => void runPublish()} title={'运行发布脚本：' + publishScript}>
+                <Rocket size={16} />{publishing ? publishStep || '发布中…' : '发布'}
+              </button>
+            )}
+            {!!p?.verifySource && (
+              <button className="btn run" onClick={runVerifySource} title={'运行验证源：' + p.verifySource.value}>
+                <Play size={16} />运行
+              </button>
+            )}
+            <div className="new-requirement-split"><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
           </div>
         </section>
 
         <section className="guidance">
           <div className="guide-symbol"><FileText size={20} /></div>
           <div className="guide-main">
-            <h2>项目引导词 <span>v{p?.guideVersion}</span></h2>
+            <h2>项目设置 <span>v{p?.guideVersion}</span></h2>
             <p>{p?.guidance}</p>
+            {p?.dir && <p className="linked-dir" title={p.dir}><FolderOpen size={13} />{p.dir}</p>}
             <div className="guide-settings-summary">
               <span>AI 验证：{p?.aiValidation ? '开启' : '关闭'}</span>
               <span>新需求的默认设置</span>
@@ -489,6 +615,7 @@ export default function App() {
           <button className="btn plain" onClick={() => {
             setGuide(p!.guidance); setDelivery(p!.deliveryGuidance); setAiValidation(p!.aiValidation);
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
+            setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
             setModal('guide');
           }}>编辑设置</button>
@@ -507,42 +634,18 @@ export default function App() {
               ))}
             </div>
 
-            {tab === 'generate' && (
-              <div className="gen-panel">
-                <div className="gen-top">
-                  <div className="gen-head">
-                    <h3>本轮排期</h3>
-                    <span>{batch
-                      ? `批次 ${String(batch.number).padStart(2, '0')} · ${batch.items.length} 条需求`
-                      : '暂无批次'}</span>
-                  </div>
-                  <div className="gen-filter">
-                    <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
-                    <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '指定日期'], ['all', '所有需求']].map(([mode, label]) => <button key={mode} aria-pressed={scheduleMode === mode} className={scheduleMode === mode ? 'on' : ''} onClick={() => setScheduleMode(mode)}>{label}</button>)}</div>
-                    <span className="gen-count" title="当前筛选范围内的待开发条数 / 全部待开发；未设日期的需求计入「日期及之前」，下方操作仅处理当前筛选范围。">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
-                  </div>
-                </div>
-                <div className="gen-actions"><button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
-                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
-                    <Check size={15} />提交验证 · 全部{inProgress.length > 0 ? ` ${inProgress.length} 条` : ''}
-                  </button>
-                </div>
-                {stale && <p className="warning gen-warning">源内容已变化，请退回待执行后重新排期。</p>}
-                {!batch && <p className="gen-hint">到「待执行」勾选需求并排期。</p>}
-              </div>
-            )}
             {tab === 'generate' && inProgress.length > 0 && (
               <h3 className="gen-sub">待开发 <span>{inProgress.length} 条等待 AI 完成</span></h3>
             )}
-            <div className="list-tools">
+            {tab !== 'generate' && <div className="list-tools">
               {(tab === 'feature') && (
                 <label className="check-label">
                   <input type="checkbox"
                     checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every((i) => selected.includes(i.id))}
-                    onChange={(e) => setSelected(e.target.checked
-                      ? [...new Set([...selected, ...visible.filter(eligible).map((i) => i.id)])]
-                      : selected.filter((id) => !visible.some((i) => i.id === id)))} />
-                  选择本轮需求
+                  onChange={(e) => setSelected(e.target.checked
+                    ? [...new Set([...selected, ...visible.filter(eligible).map((i) => i.id)])]
+                    : selected.filter((id) => !visible.some((i) => i.id === id)))} />
+                  全选需求
                 </label>
               )}
               {tab === 'archived' && (
@@ -563,7 +666,7 @@ export default function App() {
                   </div></>
                 )}
               </div>
-            </div>
+            </div>}
             <div className="list-scroll">
               {viewingHistory ? (
               <div className="batch-list">
@@ -611,7 +714,7 @@ export default function App() {
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
                         <span className={'status ' + i.status}>{labels[i.status]}</span>
-                        <span className="revision">v{i.version}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
+                        <span className="revision">v{i.version}</span><span className="revision">{!i.executor || i.executor === 'ai' ? 'AI 执行' : i.executor === 'human' ? '人工执行' : i.executor}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
                       <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
@@ -653,15 +756,6 @@ export default function App() {
                         {i.status === 'in_progress' && <button className="btn" disabled={busy} onClick={() => revertItem(i)}>退回待执行</button>}
                         {i.status === 'pending_verification' && (
                           <>
-                            {p!.verifySource && (
-                              <button className="btn" disabled={busy}
-                                title={'运行验证源：' + p!.verifySource.value}
-                                onClick={async () => {
-                                  if (!bridge.openVerifySource) { notify('运行验证源仅桌面版支持', 'err'); return; }
-                                  const r = await bridge.openVerifySource(p!.verifySource!);
-                                  if (!r.ok) notify(r.error || '打开验证源失败', 'err');
-                                }}><Play size={14} />运行</button>
-                            )}
                             <button className="btn accent" disabled={busy} onClick={() => recordPass(i)}>通过并归档</button>
                             <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setFixedIdx([]); setModal('verify'); }}>未通过，退回</button>
                           </>
@@ -679,6 +773,30 @@ export default function App() {
               </>
               )}
             </div>
+            {tab === 'generate' && (
+              <div className="gen-panel">
+                <div className="gen-top">
+                  <div className="gen-head">
+                    <h3>本轮排期</h3>
+                    <span>{batch
+                      ? `批次 ${String(batch.number).padStart(2, '0')} · ${batch.items.length} 条需求`
+                      : '暂无批次'}</span>
+                  </div>
+                  <div className="gen-filter">
+                    <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
+                    <div className="search"><Search size={15} /><input aria-label="搜索排期需求" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索需求" /></div>
+                    <span className="gen-count" title="当前筛选范围内的待开发条数 / 全部待开发；未设日期的需求计入「日期及之前」，下方操作仅处理当前筛选范围。">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
+                  </div>
+                <div className="gen-actions"><button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
+                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
+                    <Check size={15} />提交验证 · 全部{inProgress.length > 0 ? ` ${inProgress.length} 条` : ''}
+                  </button>
+                </div>
+                </div>
+                {stale && <p className="warning gen-warning">源内容已变化，请退回待执行后重新排期。</p>}
+                {!batch && <p className="gen-hint">到「待执行」勾选需求并排期。</p>}
+              </div>
+            )}
           </section>
 
 
@@ -691,7 +809,40 @@ export default function App() {
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
       {modsOpen && <ModsOverlay onClose={() => setModsOpen(false)} />}
-      {settingsOpen && <SettingsOverlay onClose={() => setSettingsOpen(false)} notify={notify} />}
+      {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} />}
+      {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
+        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
+          <p>{completeConfirm.items.map(i => i.number).join('、')}</p><div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button></div>
+        </div></div>}
+      {publishResult && (
+        <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) setPublishResult(null); }}>
+          <div className="dialog publish-dialog">
+            <div className="dialog-head">
+              <div>
+                <h3>{publishResult.ok ? '发布完成' : '发布失败'}</h3>
+                <p>{publishResult.ok ? '发布脚本已执行完毕，产物位置见输出末尾。' : (publishResult.error || '发布脚本执行失败') + '，修正后可重试。'}</p>
+              </div>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setPublishResult(null)}><X size={18} /></button>
+            </div>
+            <pre className="publish-output">{publishResult.output || publishResult.error || '（脚本无输出）'}</pre>
+          </div>
+        </div>
+      )}
+      {bodyExpanded && modal === 'item' && (
+        <div className="overlay body-expand-overlay" role="dialog" aria-label="放大编辑需求说明" onClick={(e) => { if (e.target === e.currentTarget) setBodyExpanded(false); }}>
+          <div className="dialog body-expand-dialog">
+            <div className="dialog-head">
+              <div>
+                <h3>需求说明</h3>
+                <p>放大编辑需求正文，改动即时同步回表单并自动保存。</p>
+              </div>
+              <button className="icon-btn" aria-label="收起放大编辑" onClick={() => setBodyExpanded(false)}><X size={18} /></button>
+            </div>
+            <textarea className="body-expand-input" autoFocus value={form.body} onChange={(e) => change({ ...form, body: e.target.value })}
+              placeholder={form.type === 'bug' ? '复现步骤、实际表现与预期行为' : '描述要实现的行为、约束或目标指标'} />
+          </div>
+        </div>
+      )}
       {modal && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) void closeModal(); }}>
           <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : '')}>
@@ -775,8 +926,10 @@ export default function App() {
                   </div>
                   <label className="field requirement-date"><span>日期</span><input type="date" aria-label="需求计划日期" value={form.scheduledDate || ''} onChange={e => change({ ...form, scheduledDate: e.target.value })} /></label>
                 </div>
+                <div className="field"><span>执行方式</span><div className="segmented" role="group" aria-label="需求执行方式">{[['ai', 'AI 执行'], ['human', '人工执行'], ['other', '其他执行器']].map(([id, label]) => <button type="button" key={id} aria-pressed={id === 'other' ? !['ai', 'human'].includes(form.executor || 'ai') : (form.executor || 'ai') === id} className={(id === 'other' ? !['ai', 'human'].includes(form.executor || 'ai') : (form.executor || 'ai') === id) ? 'on' : ''} onClick={() => change({ ...form, executor: id === 'other' ? 'agent:custom' : id })}>{label}</button>)}</div></div>
+                {!['ai', 'human'].includes(form.executor || 'ai') && <label className="field">执行器标识<input value={form.executor} onChange={e => change({ ...form, executor: e.target.value })} placeholder="plugin:名称 或 agent:名称" /></label>}
                 <label className="field">需求说明 · Ctrl+V 可粘贴截图
-                  <textarea rows={4} value={form.body} onChange={(e) => change({ ...form, body: e.target.value })}
+                  <textarea ref={bodyInput} rows={4} value={form.body} onChange={(e) => change({ ...form, body: e.target.value })}
                     onPaste={(e) => {
                       const images = Array.from(e.clipboardData.items).filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter((file): file is File => !!file);
                       if (!images.length) return;
@@ -784,7 +937,10 @@ export default function App() {
                     }}
                     placeholder={form.type === 'bug' ? '复现步骤、实际表现与预期行为' : '描述要实现的行为、约束或目标指标'} />
                 </label>
-                <button type="button" className="btn secondary advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><ChevronDown size={16} />{advanced ? '收起更多设置' : '展开更多设置 · 图片、标题、验收与交付'}</button>
+                <div className="advanced-row">
+                  <button type="button" className="btn secondary advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><ChevronDown size={16} />{advanced ? '收起更多设置' : '展开更多设置 · 图片、标题、验收与交付'}</button>
+                  {bodyOverflows && <button type="button" className="btn secondary body-expand-toggle" aria-label="放大编辑需求说明" title="需求说明较长，打开更大的输入框编辑" onClick={() => setBodyExpanded(true)}><Maximize2 size={16} />放大编辑</button>}
+                </div>
                 {advanced && <div className="requirement-advanced">
                 <div className="image-settings"><input className="visually-hidden" ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple disabled={uploading} onChange={(e) => { uploadImages(e.target.files); e.target.value = ''; }} /><button type="button" className="btn sm" disabled={uploading} onClick={() => imageInput.current?.click()}><ImageIcon />{uploading ? '读取中…' : '选择参考图片'}</button>
                 <p>最多 12 张，每张 10MB；正文可引用“图片1”等标识。</p>
@@ -840,8 +996,8 @@ export default function App() {
                   </label>
                 </div>
                 <label className="field">默认交付引导<textarea rows={3} value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder="填写希望 AI 交付时提供的内容" /></label>
-                <label className="field">基线需求模板（选填）<textarea rows={4} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={DEFAULT_BASELINE_TEMPLATE} /></label>
-                <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空使用上方占位里的默认模板。</p>
+                <label className="field">基线需求模板（选填）<textarea rows={4} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE} /></label>
+                <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
                 <div className="field"><span>验证源</span>
                   <div className="segmented" role="group" aria-label="验证源类型">
                     {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (
@@ -865,13 +1021,20 @@ export default function App() {
                     </div>
                   </label>
                 )}
-                <p className="settings-hint">配置验证源后，「待验证」列表会显示「运行」按钮，一键打开验证程序或网页。</p>
-                <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim())}
+                <p className="settings-hint">配置验证源后，顶部「浏览项目」旁会出现绿色「运行」按钮，一键打开验证程序或网页。</p>
+                <div className="field"><span>发布脚本</span><div className="segmented" role="group" aria-label="发布设置">{[['auto', '自动检测'], ['script', '指定脚本'], ['none', '不使用']].map(([id, label]) => <button type="button" key={id} className={publishMode === id ? 'on' : ''} aria-pressed={publishMode === id} onClick={() => setPublishMode(id)}>{label}</button>)}</div></div>
+                {publishMode === 'script' && <label className="field">发布脚本路径<input value={publishPath} onChange={e => setPublishPath(e.target.value)} placeholder="项目内相对路径，如 scripts/deploy.mjs" /></label>}
+                <p className="settings-hint">支持 mjs、js、cjs、bat、cmd、ps1、sh、py。自动检测 publish 脚本；指定脚本后，顶部「发布」按钮执行该脚本。</p>
+                <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
                   onClick={async () => {
-                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, aiValidation }, true)) return;
+                    if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
                     if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
                     if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
-                    setModal(''); notify('设置已保存');
+                    const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance || aiValidation !== p!.aiValidation;
+                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, aiValidation }, true)) return;
+                    setModal('');
+                    if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
+                    else notify('设置已保存');
                   }}>
                   保存设置
                 </button>

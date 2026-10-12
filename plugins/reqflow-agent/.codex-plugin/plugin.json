@@ -1,13 +1,13 @@
 {
   "name": "reqflow-agent",
-  "version": "0.1.0",
-  "description": "按当前项目目录领取 ReqFlow 已提交需求，实现后转入待验证。",
+  "version": "0.2.0",
+  "description": "按当前项目目录领取 ReqFlow AI 排期任务，实现后转入待验证。",
   "author": { "name": "ReqFlow" },
   "skills": "./skills/",
   "interface": {
     "displayName": "ReqFlow Agent",
     "shortDescription": "读取需求并回写待验证",
-    "longDescription": "匹配当前目录的 ReqFlow 项目，读取有效已提交需求，完成实现后核对本轮快照并逐条进入待验证。保留人工验收。",
+    "longDescription": "匹配当前目录的 ReqFlow 项目，读取有效AI 排期任务，完成实现后核对本轮快照并逐条进入待验证。保留人工验收。",
     "developerName": "ReqFlow",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

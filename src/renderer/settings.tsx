@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { bridge } from './api';
 import type { AISettings, AIRequestLog } from '../core/ai';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
+import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
 import { Eye, X, FolderOpen } from './icons';
 
 export function RemoteFields({ value, change, disabled }: { value: RemoteSettings; change(v: RemoteSettings): void; disabled: boolean }) {
@@ -25,6 +26,19 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
   const [message, setMessage] = useState('');
   const [logs, setLogs] = useState<AIRequestLog[]>([]);
   const [logError, setLogError] = useState('');
+  const [baselineTpl, setBaselineTpl] = useState(''); // 全局基准需求模板（REQ-071）
+  const [publishTpl, setPublishTpl] = useState('');
+  const [templateKind, setTemplateKind] = useState('baseline');
+  const [templateVersion, setTemplateVersion] = useState<number | null>(null); // 保存时做乐观并发校验
+  useEffect(() => {
+    bridge.getWorkspace().then((r) => {
+      if (!r.ok) return;
+      // REQ-071 验证退回：默认模板要直接预填成可编辑的正文，而不是灰色占位文字
+      setBaselineTpl(r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE);
+      setPublishTpl(r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE);
+      setTemplateVersion(r.version);
+    }).catch(() => { /* 读取失败时模板tab仍可查看，保存时报错 */ });
+  }, []);
   useEffect(() => {
     if (tab !== 'logs') return;
     let cancelled = false;
@@ -55,8 +69,8 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
   }
   return <div className="overlay" onClick={(e) => { if (!busy && e.target === e.currentTarget) onClose(); }}>
     <div className="dialog settings-dialog" role="dialog" aria-label="设置">
-      <div className="dialog-head"><div><h3>设置</h3><p>配置 AI 与数据备份；项目仓库请从浏览目录中设置</p></div><button className="icon-btn" disabled={busy} aria-label="关闭设置" onClick={onClose}><X /></button></div>
-      <div className="settings-tabs" role="tablist">{[['ai', 'AI 供应商'], ['backup', '同步备份'], ['logs', '请求日志']].map(([id, title]) => <button key={id} role="tab" aria-selected={tab === id} disabled={busy} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(''); }}>{title}</button>)}</div>
+      <div className="dialog-head"><div><h3>设置</h3><p>配置 AI、需求模板与数据备份；项目仓库请从浏览目录中设置</p></div><button className="icon-btn" disabled={busy} aria-label="关闭设置" onClick={onClose}><X /></button></div>
+      <div className="settings-tabs" role="tablist">{[['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志']].map(([id, title]) => <button key={id} role="tab" aria-selected={tab === id} disabled={busy} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(''); }}>{title}</button>)}</div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); void perform(() => bridge.saveAISettings(form), 'AI 设置已保存'); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -66,6 +80,21 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
           <label className="field">模型名称 · 可填写或修改<input aria-label="模型名称" value={form.model || ''} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="例如 deepseek-flash" /></label>
           <label className="field">API Key<div className="input-action"><input autoComplete="off" type={visible ? 'text' : 'password'} value={form.apiKey} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /><button type="button" className="icon-btn" aria-label={visible ? '隐藏 API Key' : '显示 API Key'} aria-pressed={visible} onClick={() => setVisible(!visible)}><Eye />{visible && <span className="eye-slash" />}</button></div></label>
           <div className="settings-actions"><button className="btn primary" disabled={busy || !loaded}>保存 AI 设置</button></div>
+        </form>}
+        {tab === 'template' && <form onSubmit={(e) => {
+          e.preventDefault();
+          void perform(async () => {
+            const r = await bridge.apply({ op: templateKind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text: templateKind === 'publish' ? publishTpl : baselineTpl, expectedVersion: templateVersion === null ? undefined : templateVersion });
+            if (!r.ok) throw Error(r.error || '保存失败');
+            setTemplateVersion(r.version);
+            return r;
+          }, templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
+        }}>
+          <div className="segmented" role="group" aria-label="需求模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
+          <p className="settings-hint">{templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
+          <label className="field">{templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateKind === 'publish' ? publishTpl : baselineTpl} disabled={busy} onChange={(e) => templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
+          <div className="settings-actions"><button className="btn primary" disabled={busy || templateVersion === null}>保存全局模板</button></div>
+          <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。</p>
         </form>}
         {tab === 'logs' && <>
           <div className="validation-setting"><div><label htmlFor="ai-request-logging">记录 AI 请求日志</label><p>默认开启，记录请求时间、模型、响应状态和耗时；关闭后停止新增记录。</p></div><label className="switch"><input id="ai-request-logging" type="checkbox" checked={form.requestLogging ?? true} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, requestLogging: e.target.checked })} /><span className="slider" /><span className="switch-state">{form.requestLogging === false ? '已关闭' : '已开启'}</span></label></div>

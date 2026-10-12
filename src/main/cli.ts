@@ -74,6 +74,7 @@ export class Cli {
       case 'version':
         return {
           app: 'ReqFlow',
+          capabilities: ['scheduled-ai-complete'],
           version: this.appVersion,
           dataFile: this.storeFor(a).filePath,
           protocol: 'workspace-json-v1'
@@ -166,6 +167,7 @@ export class Cli {
         if (bv !== undefined) action.aiValidation = bv;
         if (a.delivery !== undefined) action.deliveryGuidance = a.delivery;
         if (a.date !== undefined) action.scheduledDate = a.date;
+        if (a.executor !== undefined) action.executor = a.executor;
         const r = await this.service(a).mutate(action, null);
         const p = this.findProject(r.state, a.project);
         const item = command === 'item edit' ? p.items.find((i: any) => i.id === a.id) : p.items[p.items.length - 1];
@@ -184,6 +186,7 @@ export class Cli {
             else items.push(this.itemSummary(i as any));
           }
         const filtered = items.filter((i) => {
+          if (a.executor && i.executor !== a.executor) return false;
           if (status === 'archived') { if (!i.archived) return false; }
           else if (status) { if (i.archived || i.status !== status) return false; }
           else if (i.archived) return false;
@@ -236,7 +239,7 @@ export class Cli {
         return { version: r.version };
       }
       case 'complete': {
-        const r = await this.service(a).mutate({ op: 'complete', project: a.project, id: a.id, link: a.link || '', note: a.note || '' }, null);
+        const r = await this.service(a).mutate({ op: 'complete', project: a.project, id: a.id, batch: a.batch, version: a['item-version'] === undefined ? undefined : Number(a['item-version']), link: a.link || '', note: a.note || '' }, null);
         return { version: r.version };
       }
       case 'revert': {
@@ -315,7 +318,7 @@ export class Cli {
     return {
       id: i.id, number: i.number, title: i.title, type: i.type, priority: i.priority,
       status: i.status, archived: !!i.archived, version: i.version,
-      executionVersion: i.executionVersion, scheduledDate: i.scheduledDate, aiValidation: i.aiValidation,
+      executionVersion: i.executionVersion, scheduledDate: i.scheduledDate, executor: i.executor || 'ai', aiValidation: i.aiValidation,
       deliveryGuidance: i.deliveryGuidance, link: i.link,
       criteria: i.criteria, bodyPreview: String(i.body || '').slice(0, 120)
     };

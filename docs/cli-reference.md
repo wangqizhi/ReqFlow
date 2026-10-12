@@ -48,10 +48,10 @@ ReqFlow.exe --cli <command> [options]
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `item add` | `--project <id> [--title <标题>] [--body <说明>] [--type feature|improvement|bug] [--priority P0|P1|P2] [--criteria <条件>] [--ai-validation <bool>] [--delivery <交付引导>] [--date YYYY-MM-DD]` | 新增需求（保存后即为待执行）。标题选填，留空时 Prompt 中仅显示需求编号；type/priority 缺省为 feature/P1；ai-validation 缺省沿用项目设置（默认关闭）；criteria 用分号或换行分隔多条验收条件<br/>例：`ReqFlow.exe --cli item add --project <id> --title "登录限流" --type bug --priority P0 --criteria "连续失败5次锁定;解锁需管理员"` |
-| `item list` | `[--project <id>] [--status <状态>] [--search <关键词>]` | 需求列表（默认排除已归档；不传 --project 时返回全部项目并附 projectId）<br/>例：`ReqFlow.exe --cli item list --status ready` |
+| `item add` | `--project <id> [--title <标题>] [--body <说明>] [--type feature|improvement|bug] [--priority P0|P1|P2] [--criteria <条件>] [--ai-validation <bool>] [--delivery <交付引导>] [--date YYYY-MM-DD] [--executor ai|human|plugin:<id>|agent:<id>]` | 新增需求（保存后即为待执行）。标题选填，留空时 Prompt 中仅显示需求编号；type/priority 缺省为 feature/P1；executor 缺省为 ai；ai-validation 缺省沿用项目设置（默认关闭）；criteria 用分号或换行分隔多条验收条件<br/>例：`ReqFlow.exe --cli item add --project <id> --title "登录限流" --type bug --priority P0 --criteria "连续失败5次锁定;解锁需管理员"` |
+| `item list` | `[--project <id>] [--status <状态>] [--search <关键词>] [--executor <执行器>]` | 需求列表（默认排除已归档；不传 --project 时返回全部项目并附 projectId）<br/>例：`ReqFlow.exe --cli item list --status ready` |
 | `item show` | `--project <id> --id <需求ID>` | 需求详情（含验收条件、版本、未解决问题）<br/>例：`ReqFlow.exe --cli item show --project <id> --id <需求ID>` |
-| `item edit` | `--project <id> --id <需求ID> [--title/--body/--type/--priority/--criteria/--ai-validation/--delivery/--date]` | 编辑待执行需求，只改传入的字段（未传字段保留原值）；每次编辑版本 +1<br/>例：`ReqFlow.exe --cli item edit --project <id> --id <需求ID> --priority P0` |
+| `item edit` | `--project <id> --id <需求ID> [--title/--body/--type/--priority/--criteria/--ai-validation/--delivery/--date/--executor]` | 编辑待执行需求，只改传入的字段（未传字段保留原值）；每次编辑版本 +1<br/>例：`ReqFlow.exe --cli item edit --project <id> --id <需求ID> --priority P0` |
 | `item history` | `--project <id> --id <需求ID>` | 需求的操作与验证历史<br/>例：`ReqFlow.exe --cli item history --project <id> --id <需求ID>` |
 
 ## Prompt 批次
@@ -72,7 +72,7 @@ ReqFlow.exe --cli <command> [options]
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `complete` | `--project <id> --id <需求ID> [--link <链接>] [--note <说明>]` | 实现完成：执行中 → 待验证<br/>例：`ReqFlow.exe --cli complete --project <id> --id <需求ID>` |
+| `complete` | `--project <id> --id <需求ID> [--link <链接>] [--note <说明>] [--batch <排期批次ID> --item-version <版本>]` | 实现完成：执行中或有效排期 → 待验证；带 batch/item-version 时原子核对 AI 执行标识及排期版本<br/>例：`ReqFlow.exe --cli complete --project <id> --id <需求ID>` |
 | `revert` | `--project <id> --id <需求ID> [--note <原因>]` | 退回待执行：执行中 → 待执行（退回后可编辑，同批次其他需求不受影响）<br/>例：`ReqFlow.exe --cli revert --project <id> --id <需求ID>` |
 | `verify` | `--project <id> --id <需求ID> --pass <true|false> [--note <原因>]` | 人工验证：通过 → 归档；未通过 → 退回待执行并记录原因<br/>例：`ReqFlow.exe --cli verify --project <id> --id <需求ID> --pass false --note "样式未生效"` |
 | `regress` | `--project <id> --id <需求ID> [--note <回归原因>]` | 归档需求回归：退回待执行，原因带入下一轮 Prompt<br/>例：`ReqFlow.exe --cli regress --project <id> --id <需求ID> --note "线上复现"` |

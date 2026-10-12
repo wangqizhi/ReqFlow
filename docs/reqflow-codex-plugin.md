@@ -1,10 +1,10 @@
 # ReqFlow Codex 插件
 
-日期：2026-10-09。插件源码：`plugins/reqflow-agent/`，版本 0.1.0。
+日期：2026-10-09。插件源码：`plugins/reqflow-agent/`，版本 0.2.0。
 
 ## 工作方式
 
-Codex 在目标代码项目的聊天中执行插件技能：按当前 cwd 的 realpath 匹配 ReqFlow 的 Project.dir → 从已提交批次领取 in_progress 需求 → 实现与检查 → 逐条 complete → pending_verification。不会代替用户 verify 或归档。
+Codex 在目标代码项目的聊天中执行插件技能：按当前 cwd 的 realpath 匹配 ReqFlow 的 Project.dir → 从有效排期（draft 或 submitted）领取 executor=ai 的 ready/in_progress 需求，无需点击提交 → 实现与检查 → 逐条 complete → pending_verification。不会代替用户 verify 或归档。
 
 同名项目依目录区分；在项目子目录中调用时选择最长匹配根目录，同目录多项目报错。不同 worktree 必须在 ReqFlow 分别关联目录。没有目录绑定时请点击 ReqFlow 项目的“浏览项目”。
 
@@ -12,7 +12,7 @@ Codex 在目标代码项目的聊天中执行插件技能：按当前 cwd 的 re
 
 ## 安装
 
-源码包含 root plugin.json、Codex 兼容 manifest、execute / setup 技能和零依赖 Node 桥接脚本。仓库 marketplace 位于 `.agents/plugins/marketplace.json`；插件打包 ZIP 位于 `out/reqflow-agent-0.1.0.zip`。
+源码包含 root plugin.json、Codex 兼容 manifest、execute / setup 技能和零依赖 Node 桥接脚本。仓库 marketplace 位于 `.agents/plugins/marketplace.json`；插件打包 ZIP 位于 `out/reqflow-agent-0.2.0.zip`。
 
 需要 Node >= 22；无需 npm install。当前 Codex CLI 0.153.0 支持：
 
@@ -81,3 +81,7 @@ node E:\project\reqFlow\plugins\reqflow-agent\scripts\reqflow.mjs complete --cwd
 运行 `node scripts/plugin-e2e.mjs`：临时构建主进程，使用真实 Electron CLI 和独立临时 workspace，覆盖中文路径、同名 / 重复 / 嵌套目录、状态筛选、正文读取、部分完成、重试、同版本新批次、需求编辑和引导词变更。测试不操作真实用户需求。
 
 还需安装后在新聊天验证技能被宿主发现和实际调用；CLI 集成通过不代表已在当前聊天热加载。本文不声称已验证模型实际实现需求。
+
+## 0.2.0 执行方式
+
+新需求默认 executor=ai；人工任务使用 human，其他执行器使用 plugin:<id> 或 agent:<id>。旧需求未设置该字段时兼容为 ai。只领取有效排期中的 AI 任务，未排期、已退回、已取消、过期快照及其他执行器任务不领取。完成回写需要支持 scheduled-ai-complete 的新版 ReqFlow 桌面程序（1.10.3 起）；旧程序会被阻止回写。CLI complete 携带 --batch 和 --item-version 在存储操作内重新检查排期和版本。

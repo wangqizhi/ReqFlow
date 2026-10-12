@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('reqflow', {
   pickSSHKey: () => ipcRenderer.invoke('ssh:pick'),
   pickVerifyProgram: () => ipcRenderer.invoke('file:pickProgram'),
   openVerifySource: (source: any) => ipcRenderer.invoke('verify:open', source),
+  detectPublish: (root: string) => ipcRenderer.invoke('publish:detect', root),
+  runPublish: (root: string, rel: string) => ipcRenderer.invoke('publish:run', root, rel),
   getAISettings: () => ipcRenderer.invoke('ai:settings:get'),
   getAIRequestLogs: () => ipcRenderer.invoke('ai:logs:get'),
   optimizeCommitMessage: (project: string, message: string) => ipcRenderer.invoke('ai:commit:optimize', project, message),

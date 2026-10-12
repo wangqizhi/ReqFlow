@@ -70,7 +70,33 @@ try {
   const stale = await readRun(config, root, path.join(temp, 'runs'));
   assert.equal(stale.requirements.length, 0);
   assert.equal(stale.runFile, null);
-  assert.ok(stale.skipped.some(i => i.id === second.id));
+  assert.ok(!stale.requirements.some(i => i.id === second.id));
+  // Draft schedules are executable without submit; executor selection is respected.
+  for (const executor of ['ai', 'human', 'plugin:other', 'agent:other']) {
+    await apply(state, { op: 'item', project: p.id, title: executor, executor });
+  }
+  const assigned = p.items.slice(-4);
+  await apply(state, { op: 'generate', project: p.id, ids: assigned.map(i => i.id) });
+  await save();
+  const scheduled = await readRun(config, root, path.join(temp, 'runs'));
+  assert.equal(scheduled.requirements.length, 1);
+  assert.equal(scheduled.requirements[0].id, assigned[0].id);
+  assert.equal(scheduled.requirements[0].requirement.executor, 'ai');
+  assert.equal(scheduled.requirements[0].requirement.status, 'ready');
+  assert.equal(scheduled.skipped.length, 3);
+  const scheduledReport = { items: [{ id: assigned[0].id, summary: '已完成AI排期任务', validation: '测试通过' }] };
+  assert.equal((await completeRun(scheduled.runFile, scheduledReport, root)).ok, true);
+  const scheduledAfter = await callCli(config, ['workspace', 'get']);
+  assert.equal(scheduledAfter.state.projects[0].items.find(i => i.id === assigned[0].id).status, 'pending_verification');
+  for (const item of assigned.slice(1)) assert.equal(scheduledAfter.state.projects[0].items.find(i => i.id === item.id).status, 'ready');
+  assert.equal((await callCli(config, ['item', 'list', '--project', p.id, '--executor', 'human'])).items.length, 1);
+  // Editing the executor invalidates the schedule; an old snapshot cannot be used.
+  Object.assign(p, scheduledAfter.state.projects[0]);
+  await apply(state, { op: 'item', project: p.id, id: assigned[1].id, executor: 'ai' });
+  await save();
+  assert.equal((await readRun(config, root, path.join(temp, 'runs'))).requirements.length, 0);
+  await assert.rejects(apply(state, { op: 'complete', project: p.id, id: assigned[1].id, batch: p.batches[0].id, version: assigned[1].version }), /已变化/);
+  await assert.rejects(apply(state, { op: 'item', project: p.id, executor: 'invalid' }), /执行方式/);
   console.log('PASS: 实际 Electron CLI 领取/部分完成/幂等重试；目录边界、重复绑定、最新批次、版本与引导词冲突。');
 } finally {
   // This is an absolute path allocated by mkdtemp under the intended OS temp directory.

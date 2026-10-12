@@ -26,6 +26,7 @@ export type Item = {
   gitCommitHash?: string;
   executionVersion?: number;
   scheduledDate?: string;
+  executor?: string; // ai | human | plugin:<id> | agent:<id>；旧需求默认 ai
   archived?: boolean;
 };
 
@@ -42,6 +43,14 @@ export type Batch = {
   time: string;
   submittedAt?: string;
 };
+
+export function scheduledBatch(p: Project, i: Item) {
+  const lastSchedule = i.flowEvents?.slice().reverse().find(e => ['generate', 'revert', 'cancel', 'guidance', 'verify', 'regress'].includes(e.operation));
+  if (lastSchedule && lastSchedule.operation !== 'generate') return undefined;
+  const batch = p.batches.find(b => b.mode === 'develop' && b.status !== 'cancelled' && b.items.some(old => old.id === i.id));
+  const old = batch?.items.find(old => old.id === i.id);
+  return batch && batch.guideVersion === p.guideVersion && old?.version === i.version && (old.executor || 'ai') === (i.executor || 'ai') ? batch : undefined;
+}
 
 /** 待验证「运行」按钮使用的验证源：本地程序（绝对路径）或网页地址。 */
 export type VerifySource = { kind: 'exe' | 'url'; value: string };
@@ -61,12 +70,13 @@ export type Project = {
   dir?: string; // 关联的本地项目目录（「浏览项目」查看/编辑项目文件用）
   remote?: RemoteSettings;
   verifySource?: VerifySource; // 验证源：待验证需求一键打开的程序或网页
+  publishScript?: string; // 项目内发布脚本相对路径；未设置时自动检测，空串禁用
   baselineTemplate?: string; // 基线需求模板（留空使用 DEFAULT_BASELINE_TEMPLATE）
   folderId?: string;
   revision?: number;
 };
 
-export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[] };
+export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
 export const DEFAULT_GUIDANCE =
@@ -81,6 +91,18 @@ export const DEFAULT_BASELINE_TEMPLATE = [
   '4. 编译与发布脚本：在固定位置 scripts/ 下提供编译脚本与发布脚本（可直接运行，注明用法与依赖）；',
   '5. 核对以上配置与当前项目结构一致，缺失或失效的项请补齐或修正。',
   '完成后说明改动、脚本用法与未解决的问题。'
+].join('\n');
+
+/** 「发布功能需求」默认模板（REQ-070）：生成在 scripts/ 下放置 publish 发布脚本的需求；
+ *  脚本就位后主界面「浏览项目」旁出现「发布」按钮，点击即可执行。 */
+export const DEFAULT_PUBLISH_TEMPLATE = [
+  '配置项目发布与部署脚本：',
+  '1. 检查项目现有部署脚本及发布配置，优先复用用户已有的部署流程；',
+  '2. 如果没有部署脚本，先与用户确认目标位置、部署方式、运行环境、所需凭据与产物、覆盖及回滚策略，再创建可部署到该目标的脚本，不猜测部署细节；',
+  '3. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.bat），点击应用的「发布」按钮时实际调用用户的部署脚本；仅构建或生成安装包不能视为部署完成；',
+  '4. 按项目交付引导构建并生成产物，再部署到用户确认的目标位置；脚本失败时返回非零退出码，成功时打印部署目标与结果；',
+  '5. 注明脚本运行方式、依赖及配置方法，不将凭据写入代码仓库，并验证发布入口能够触发部署流程。',
+  '完成后说明发布入口、实际部署脚本、目标位置、验证结果与未解决的问题。'
 ].join('\n');
 
 export function requirementSettings(p: Project, i: Item) {
@@ -200,6 +222,10 @@ export function buildPrompt(p: Project, items: Item[]) {
 export function normalizeWorkspace(s: Workspace) {
   if (!Array.isArray(s.folders)) s.folders = [];
   if (!s.folders.some((f) => f.id === 'default')) s.folders.unshift({ id: 'default', name: 'default' });
+  // 全局基准模板（REQ-071）：留空视为未设置，项目回退到默认模板
+  if (typeof s.baselineTemplate === 'string' && s.baselineTemplate.trim()) s.baselineTemplate = s.baselineTemplate.trim();
+  else s.baselineTemplate = undefined;
+  s.publishTemplate = typeof s.publishTemplate === 'string' && s.publishTemplate.trim() ? s.publishTemplate.trim() : undefined;
   for (const p of s.projects) {
     if (!Number.isSafeInteger(p.revision) || p.revision! < 0) p.revision = 0;
     if (!s.folders.some((f) => f.id === p.folderId)) p.folderId = 'default';
@@ -212,6 +238,7 @@ export function normalizeWorkspace(s: Workspace) {
       || typeof p.verifySource.value !== 'string' || !p.verifySource.value.trim())) p.verifySource = undefined;
     else if (p.verifySource) p.verifySource = { kind: p.verifySource.kind, value: p.verifySource.value.trim() };
     for (const i of p.items) {
+      if (i.executor === undefined) i.executor = 'ai';
       if (!i.flowEvents) {
         const stages: Record<string, string> = { '创建': 'ready', '标记待提交': 'ready', '取消执行': 'ready', '退回待执行': 'ready', '验证失败': 'ready', '回归退回': 'ready', '实现完成': 'pending_verification', '归档': 'archived', '验证通过': 'archived' };
         i.flowEvents = i.history.slice().reverse().flatMap(h => {
@@ -268,7 +295,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => key === 'path' ? undefined : value));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'baselineTemplate', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!localOps.includes(a?.op) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -322,6 +349,18 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
 
+  // 全局基准需求模板（REQ-071）：工作区级设置，所有未设置独立模板的项目共用；留空恢复默认模板
+  if (a.op === 'globalBaselineTemplate') {
+    const text = String(a.text || '').trim();
+    s.baselineTemplate = text || undefined;
+    return;
+  }
+
+  if (a.op === 'globalPublishTemplate') {
+    s.publishTemplate = String(a.text || '').trim() || undefined;
+    return;
+  }
+
   const p = s.projects.find((p) => p.id === a.project);
   if (!p) throw new Error('项目不存在');
 
@@ -367,6 +406,8 @@ async function applyOperation(s: Workspace, a: any) {
       a.deliveryGuidance === undefined ? p.deliveryGuidance : needed(a.deliveryGuidance, '交付引导');
     if (a.aiValidation !== undefined && typeof a.aiValidation !== 'boolean')
       throw new Error('AI 验证设置无效');
+    const nextValidation = a.aiValidation === undefined ? p.aiValidation : a.aiValidation;
+    if (text === p.guidance && delivery === p.deliveryGuidance && nextValidation === p.aiValidation) return;
     p.guideHistory.unshift({
       version: p.guideVersion,
       text: p.guidance,
@@ -389,6 +430,25 @@ async function applyOperation(s: Workspace, a: any) {
     p.deliveryGuidance = delivery;
     p.aiValidation = a.aiValidation === undefined ? p.aiValidation : a.aiValidation;
     p.guideVersion++;
+    const scheduledIds = new Set(p.items.filter(item => !item.archived && item.status === 'in_progress').map(item => item.id));
+    for (const item of p.items) {
+      if (!item.archived && item.status === 'in_progress') {
+        item.status = 'ready';
+        item.version++;
+        item.history.unshift({ event: '引导词变化，退回需求池', time: now });
+      }
+    }
+    for (const batch of p.batches) if (batch.status !== 'cancelled' && batch.items.some(item => scheduledIds.has(item.id))) batch.status = 'cancelled';
+    return;
+  }
+
+  if (a.op === 'publishScript') {
+    if (a.script === null || a.script === undefined) p.publishScript = undefined;
+    else {
+      const script = String(a.script).trim().replace(/\\/g, '/');
+      if (script && (script.startsWith('/') || /^[a-z]:/i.test(script) || script.split('/').includes('..') || !/\.(mjs|js|cjs|bat|cmd|ps1|sh|py)$/i.test(script))) throw Error('发布脚本须为项目内的相对路径及支持的脚本类型');
+      p.publishScript = script;
+    }
     return;
   }
 
@@ -444,6 +504,8 @@ async function applyOperation(s: Workspace, a: any) {
     const body = a.body === undefined ? (existing?.body ?? '') : String(a.body);
     const type = a.type ?? existing?.type ?? 'feature';
     const priority = a.priority ?? existing?.priority ?? 'P1';
+    const executor = a.executor ?? existing?.executor ?? 'ai';
+    if (typeof executor !== 'string' || !/^(ai|human|(?:plugin|agent):[a-zA-Z0-9_.-]+)$/.test(executor)) throw Error('执行方式无效');
     const aiValidation = a.aiValidation ?? existing?.aiValidation ?? p.aiValidation;
     if (typeof aiValidation !== 'boolean') throw new Error('AI 测试验证设置无效');
     const deliveryGuidance =
@@ -465,6 +527,7 @@ async function applyOperation(s: Workspace, a: any) {
         deliveryGuidance,
         type,
         priority,
+        executor,
         status: 'ready',
         scheduledDate,
         version: i.version + 1
@@ -481,6 +544,7 @@ async function applyOperation(s: Workspace, a: any) {
         deliveryGuidance,
         type,
         priority,
+        executor,
         status: 'ready',
         scheduledDate,
         version: 1,
@@ -602,7 +666,14 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
   if (a.op === 'complete') {
-    if (i.status !== 'in_progress') throw new Error('需求不在执行中');
+    if (a.batch) {
+      const batch = scheduledBatch(p, i);
+      if (!batch || batch.id !== a.batch || (i.executor || 'ai') !== 'ai' || !['ready', 'in_progress'].includes(i.status) || i.archived || a.version !== i.version) throw Error('AI 排期任务或版本已变化');
+      i.executionVersion = i.version;
+    } else if (i.status !== 'in_progress') {
+      if (i.status !== 'ready' || i.archived || !scheduledBatch(p, i)) throw new Error('需求不在执行中或有效排期中');
+      i.executionVersion = i.version;
+    }
     i.status = 'pending_verification';
     i.link = String(a.link || '');
     i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || '') });

@@ -250,11 +250,35 @@ async function test() {
     /至少保留一个项目/,
     '最后一个项目禁止删除'
   );
+  // 引导词更新必须退回全部排期，独立发布设置和无变化保存不得退回。
+  const settingsSvc = new WorkspaceService(new storage.WorkspaceStore(path.join(dir, 'settings.json')));
+  let settings = await settingsSvc.get();
+  const settingsPid = settings.state.projects[0].id;
+  const settingsOp = async (a) => { settings = await settingsSvc.mutate({ ...a, project: settingsPid }, null); return settings.state.projects[0]; };
+  let sp = await settingsOp({ op: 'item', body: '排期退回测试', type: 'feature', priority: 'P1' });
+  const scheduledItem = sp.items[0].id;
+  sp = await settingsOp({ op: 'generate', ids: [scheduledItem], mode: 'develop' });
+  sp = await settingsOp({ op: 'submit', batch: sp.batches[0].id });
+  const guideVersion = sp.guideVersion;
+  sp = await settingsOp({ op: 'publishScript', script: 'scripts/deploy.mjs' });
+  assert.equal(sp.publishScript, 'scripts/deploy.mjs');
+  assert.equal(sp.items[0].status, 'in_progress');
+  sp = await settingsOp({ op: 'guidance', text: sp.guidance });
+  assert.equal(sp.guideVersion, guideVersion, '无变化保存不递增版本');
+  assert.equal(sp.items[0].status, 'in_progress', '无变化保存不退回排期');
+  sp = await settingsOp({ op: 'guidance', text: '更新后的引导词' });
+  assert.equal(sp.items[0].status, 'ready', '引导词变化自动退回需求池');
+  assert.equal(sp.batches[0].status, 'cancelled', '旧排期批次失效');
+  await assert.rejects(() => settingsOp({ op: 'publishScript', script: '../deploy.mjs' }), /相对路径/);
+  sp = await settingsOp({ op: 'publishScript', script: '' });
+  assert.equal(sp.publishScript, '', '支持禁用发布');
+  sp = await settingsOp({ op: 'publishScript', script: null });
+  assert.equal(sp.publishScript, undefined, '支持恢复自动检测');
 }
 
 try {
   await test();
-  console.log('冒烟测试全部通过 ✔（16 组断言：初始化/需求/标题选填/生成与内容去重/提交/校验/验证/二次退回问题标识/回归/并发冲突/取消/引导词/交付引导分组/迁移与删除需求/删除项目）');
+  console.log('冒烟测试全部通过 ✔（原16组断言及项目设置/排期自动退回回归检查）');
 } catch (e) {
   failed = 1;
   console.error('冒烟测试失败：', e.message);

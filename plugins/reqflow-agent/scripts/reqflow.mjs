@@ -44,6 +44,13 @@ export function submittedBatch(p, i) {
   return batches.sort((a, b) => String(b.submittedAt || b.time).localeCompare(String(a.submittedAt || a.time)))[0];
 }
 
+export function scheduledBatch(p, i) {
+  const lastSchedule = i.flowEvents?.slice().reverse().find(e => ['generate', 'revert', 'cancel', 'guidance', 'verify', 'regress'].includes(e.operation));
+  if (lastSchedule && lastSchedule.operation !== 'generate') return undefined;
+  // Latest live schedule wins; never fall back to an older snapshot after edits.
+  return p.batches.find(b => b.mode === 'develop' && b.status !== 'cancelled' && b.items.some(old => old.id === i.id));
+}
+
 export async function matchProject(projects, cwd) {
   const current = await canonical(cwd);
   const candidates = [];
@@ -68,7 +75,7 @@ async function workspace(config) {
   await fs.access(info.dataFile).catch(() => fail(`工作区不存在：${info.dataFile}；请核对数据目录。`));
   const result = await callCli(config, ['workspace', 'get']);
   if (!Array.isArray(result.state?.projects)) fail('工作区格式不兼容');
-  return { ...result, dataFile: await fs.realpath(info.dataFile) };
+  return { ...result, capabilities: info.capabilities || [], dataFile: await fs.realpath(info.dataFile) };
 }
 
 export async function readRun(config, cwd, runDir) {
@@ -76,14 +83,16 @@ export async function readRun(config, cwd, runDir) {
   const { project: p, root } = await matchProject(w.state.projects, cwd);
   const eligible = [], skipped = [];
   for (const i of p.items) {
-    if (i.status !== 'in_progress' || i.archived) continue;
-    const b = submittedBatch(p, i);
+    if (!['ready', 'in_progress'].includes(i.status) || i.archived) continue;
+    const b = scheduledBatch(p, i);
+    if (!b) continue;
+    if ((i.executor || 'ai') !== 'ai') { skipped.push({ id: i.id, number: i.number, reason: '非 AI 执行任务' }); continue; }
     const old = b?.items.find(x => x.id === i.id);
-    if (!b || old?.version !== i.version || i.executionVersion !== i.version || b.guideVersion !== p.guideVersion) {
-      skipped.push({ id: i.id, number: i.number, reason: '无有效已提交快照，或版本 / 引导词已变化' });
+    if (old?.version !== i.version || (old.executor || 'ai') !== 'ai' || b.guideVersion !== p.guideVersion) {
+      skipped.push({ id: i.id, number: i.number, reason: '排期快照版本、执行方式或引导词已变化' });
       continue;
     }
-    const { history, ...requirement } = old;
+    const { history, ...requirement } = { ...old, ...i, executor: i.executor || 'ai' };
     eligible.push({ id: i.id, batchId: b.id, hash: b.hash,
       signature: signature(p, i, b), requirement,
       history: i.history.filter(h => h.event === '验证失败' || h.event === '回归退回') });
@@ -120,6 +129,7 @@ export async function completeRun(runFile, report, cwd) {
   for (const result of report.items) {
     try {
       const w = await workspace(run.config);
+      if (!w.capabilities.includes('scheduled-ai-complete')) fail('ReqFlow 桌面版需升级到支持 AI 排期条件完成的版本，未进行回写');
       if (w.dataFile !== run.dataFile) fail('ReqFlow 数据文件已变化');
       const match = await matchProject(w.state.projects, cwd);
       if (match.project.id !== run.projectId || match.root !== run.root) fail('项目绑定已变化');
@@ -129,12 +139,12 @@ export async function completeRun(runFile, report, cwd) {
       if (prior && i.status === 'pending_verification' && i.history[0]?.note === prior.note) {
         outcomes.push({ id: i.id, status: 'already_completed' }); continue;
       }
-      const snapshot = run.items.find(x => x.id === i.id), b = submittedBatch(p, i);
-      if (i.status !== 'in_progress' || i.archived || !b || signature(p, i, b) !== snapshot.signature)
+      const snapshot = run.items.find(x => x.id === i.id), b = scheduledBatch(p, i);
+      if (!['ready', 'in_progress'].includes(i.status) || (i.executor || 'ai') !== 'ai' || i.archived || !b || signature(p, i, b) !== snapshot.signature)
         fail('需求、批次或项目设置已变化，请重新领取并核对实现');
       const note = `[ReqFlow Codex run ${run.id}]\n${result.summary}\n验证：${result.validation}`;
       // Legacy CLI has no conditional-write API. Pre/post checks narrow but cannot eliminate the race.
-      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--note', note]);
+      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note]);
       const after = await workspace(run.config);
       const updated = after.state.projects.find(p => p.id === run.projectId)?.items.find(x => x.id === i.id);
       if (updated?.status !== 'pending_verification' || updated.version !== i.version || updated.history[0]?.note !== note)

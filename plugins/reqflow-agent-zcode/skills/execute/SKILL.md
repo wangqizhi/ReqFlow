@@ -1,9 +1,9 @@
 ---
 name: execute
-description: 从 ReqFlow 读取与当前项目目录匹配的已提交需求，完成实现后将本轮完成的需求转入待验证。当用户要求执行 ReqFlow、需求流中的需求或同步实现结果时使用。
+description: 从 ReqFlow 读取与当前项目目录匹配的 AI 排期任务，完成实现后将本轮完成的需求转入待验证。当用户要求执行 ReqFlow、需求流中的需求或同步实现结果时使用。
 ---
 
-# 执行 ReqFlow 已提交需求
+# 执行 ReqFlow AI 排期任务
 
 使用插件根目录 `scripts/reqflow.mjs`，相对此 SKILL.md 为 `../../scripts/reqflow.mjs`。根据实际安装位置解析成绝对路径；运行 `node "<脚本绝对路径>"`，不要猜测缓存目录。Node >= 22，无 npm 安装步骤。
 
@@ -11,7 +11,7 @@ description: 从 ReqFlow 读取与当前项目目录匹配的已提交需求，�
 
 1. 使用当前聊天的项目工作目录作为 cwd。不要把插件目录当项目目录，不按项目名称猜测绑定，不自行更改 ReqFlow 项目目录。
 2. 运行 `node "<script>" read --cwd "<当前项目绝对目录>"`。首次未配置时运行插件 setup 技能。
-3. 解析 JSON。只执行 `requirements` 中的需求；只有 in_progress 且在有效 submitted 批次中的需求会返回。ready、pending_verification、archived、draft 和过期快照不领取。
+3. 解析 JSON。只执行 `requirements` 中的需求；领取有效排期批次（draft 或 submitted）中 executor 为 ai 的需求；兼容旧需求未设置 executor 时默认为 ai。ready 或 in_progress 都可以领取，无需先点击提交。未排期、人工执行、指定其他插件/agent、pending_verification、archived、已取消及过期快照不领取。
 4. 保存返回的 runFile。完整正文、验收条件、交付引导在 requirement 字段；项目背景与引导词在 project；未解决的验证问题以批次 Prompt 为准。batch Prompt 可能包含本轮之外的需求，只视为参考，不扩大执行范围。
 5. 没有 requirements 时说明无可执行需求及 skipped 原因，结束。不得自行 generate / submit 来扩大任务。
 

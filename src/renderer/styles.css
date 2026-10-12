@@ -140,7 +140,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 /* ---------- 生成 Prompt 标签页 ---------- */
 .gen-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 12px; margin: 12px 0 10px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .gen-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.gen-head { display: flex; align-items: baseline; gap: 10px; }
+.gen-head { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .gen-head h3 { margin: 0; font-size: 14px; }
 .gen-head span { font-size: 12px; color: var(--muted); }
 .gen-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -251,6 +251,10 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .btn.primary:hover:not(:disabled) { background: var(--accent-dark); border-color: var(--accent-dark); }
 .btn.accent { background: var(--accent-soft); border-color: #fdba74; color: var(--accent-dark); font-weight: 600; }
+.btn.accent:hover:not(:disabled) { border-color: var(--accent); background: #ffefd9; }
+/* 顶部「运行」（REQ-077）：运行验证源用通过绿与「发布」的品牌橙区分，图标+颜色一眼可辨 */
+.btn.run { background: var(--ok-soft); border-color: #86efac; color: var(--ok); font-weight: 600; }
+.btn.run:hover:not(:disabled) { border-color: var(--ok); background: #e8f8ee; }
 .btn.secondary { background: var(--bg); }
 .btn.ghost { background: transparent; border-color: var(--line); color: var(--ink-2); }
 .btn.plain { border-color: transparent; background: transparent; color: var(--ink-2); font-size: 13px; padding: 7px 10px; }
@@ -509,8 +513,21 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .new-requirement-split { position: relative; display: flex; gap: 1px; }
 .new-requirement-split > button:first-child { border-radius: 8px 0 0 8px; }
 .new-requirement-split > button:nth-child(2) { border-radius: 0 8px 8px 0; padding-inline: 9px; }
-.new-requirement-menu { position: absolute; right: 0; top: 100%; z-index: 30; padding: 8px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px #0002; white-space: nowrap; }
-.new-requirement-menu button { padding: 10px; border: 0; background: transparent; cursor: pointer; }
+/* 记录新需求下拉菜单（REQ-070）：竖向排列，整行可选 */
+.new-requirement-menu { position: absolute; right: 0; top: 100%; margin-top: 6px; z-index: 30; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px #0002; display: flex; flex-direction: column; gap: 2px; min-width: 128px; }
+.new-requirement-menu button { padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; text-align: left; white-space: nowrap; }
+.new-requirement-menu button:hover { background: var(--accent-soft); color: var(--accent-dark); }
+/* 发布输出（REQ-070）：等宽字体展示脚本输出，超长在自身区域滚动 */
+.publish-output { margin: 0; padding: 14px 16px; max-height: 300px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); white-space: pre-wrap; word-break: break-all; }
+/* 需求说明放大编辑（REQ-074）：按钮与「展开更多设置」同行，大输入框在独立弹窗中。
+   验证退回修复：放大弹窗在 DOM 中先于记录新需求浮层渲染，同为 z-index:50 会被盖住，提到 70 层 */
+.body-expand-overlay { z-index: 70; }
+.advanced-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.advanced-row .advanced-toggle { margin-bottom: 0; }
+.advanced-row .btn { flex-shrink: 0; white-space: nowrap; }
+.body-expand-dialog { width: min(860px, 100%); }
+.body-expand-input { width: 100%; min-height: 380px; max-height: calc(100vh - 220px); resize: vertical; border: 1px solid var(--line-2); border-radius: 8px; padding: 12px 14px; font-size: 14px; line-height: 1.6; background: #fff; color: var(--ink); }
+.body-expand-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .advanced-toggle { margin-bottom: 14px; }
 .attachment-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .attachment-grid figure { margin: 0; width: 180px; }
@@ -657,3 +674,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .archive-folder:hover { border-color: var(--accent); background: var(--accent-soft); }
 .archive-folder:focus-visible { outline: 2px solid var(--accent); }
 .list-tools-side { flex-wrap: wrap; }
+.gen-top { flex-wrap: nowrap; }
+.gen-head span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gen-filter { flex-wrap: nowrap; }
+.gen-top .gen-actions { margin-left: auto; }
+.requirements > .gen-panel { margin: 10px 0 0; }
+.guidance .linked-dir { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 6px !important; font-size: 12px; }
+@media (max-width: 1250px) { .gen-top { flex-wrap: wrap; } .gen-filter { flex-wrap: wrap; } }

@@ -46,6 +46,8 @@ function createWindow() {
     resizable: false,
     maximizable: false,
     center: true,
+    // REQ-072：主窗口等内容加载完成后再显示，期间由启动动画窗口承接视觉
+    show: false,
     title: 'ReqFlow · 需求流',
     icon: path.join(__dirname, 'icon.ico'),
     backgroundColor: '#f5f4f1',
@@ -73,6 +75,25 @@ function createWindow() {
   win.setMenu(null);
   win.setMenuBarVisibility(false);
 
+  // REQ-072：启动动画 —— 主窗口加载期间居中逐字显示 ReqFlow；
+  // 等内容加载完成且动画完整放完，再显示主窗口并关闭动画窗口
+  const splash = createSplashWindow();
+  // 动画节奏（REQ-072 验证退回：提速保证播得完）：末字母 450ms 起入场、280ms 完成，
+  // 副标题 750ms 起淡入、1050ms 结束；1100ms 时整段动画已播完，主窗口随即接管
+  const minSplashMs = 1100;
+  Promise.all([
+    new Promise<void>((resolve) => win.once('ready-to-show', resolve)),
+    new Promise((resolve) => setTimeout(resolve, minSplashMs))
+  ]).then(() => {
+    if (!win.isDestroyed()) win.show();
+    if (!splash.isDestroyed()) splash.close();
+  });
+  // 兜底：ready-to-show 因异常未触发时，20 秒后强制收起动画并显示主窗口
+  setTimeout(() => {
+    if (!splash.isDestroyed()) splash.close();
+    if (!win.isDestroyed() && !win.isVisible()) win.show();
+  }, 20000);
+
   // 屏蔽 Electron/Chromium 原生快捷键：F12、Ctrl+Shift+I/J/C（开发者工具）、
   // Ctrl+R / Ctrl+Shift+R / F5（刷新）、F10/F11（菜单/全屏）、Ctrl+F/G/P（查找/打印）、
   // Ctrl+=/-/0（缩放）与单独按 Alt（唤出菜单栏）。应用自身的 Ctrl+S / Ctrl+V 等不受影响。
@@ -93,4 +114,46 @@ function createWindow() {
   if (app.isPackaged) {
     win.webContents.on('devtools-opened', () => { win.webContents.closeDevTools(); });
   }
+}
+
+/** 启动动画窗口（REQ-072）：居中逐字出现 ReqFlow，附加载进度条与提示文字。 */
+function createSplashWindow() {
+  const { BrowserWindow } = require('electron');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:#f5f4f1;font-family:"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden}
+.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+.logo{font-size:44px;font-weight:700;color:#1c1917;letter-spacing:2px;line-height:1}
+.logo span{opacity:0;display:inline-block;animation:letter-in .28s ease-out forwards}
+.logo .caret{width:3px;height:38px;background:#c2410c;margin-left:5px;animation:blink .6s steps(1) infinite}
+.bar{width:180px;height:3px;border-radius:2px;background:#e7e5e4;overflow:hidden;opacity:0;animation:fade-in .25s forwards;animation-delay:.55s}
+.bar i{display:block;height:100%;width:40%;border-radius:2px;background:#c2410c;animation:slide 1.1s ease-in-out infinite}
+.sub{font-size:13px;color:#6d6862;opacity:0;animation:fade-in .3s forwards;animation-delay:.75s}
+@keyframes letter-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fade-in{to{opacity:1}}
+@keyframes blink{50%{opacity:0}}
+@keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}
+</style></head><body><div class="wrap"><div class="logo" id="logo"></div><div class="bar"><i></i></div><div class="sub">正在打开你的工作区…</div></div>
+<script>
+var text='ReqFlow',logo=document.getElementById('logo');
+for(var i=0;i<text.length;i++){var s=document.createElement('span');s.textContent=text[i];s.style.animationDelay=(i*0.075)+'s';logo.appendChild(s);}
+var caret=document.createElement('span');caret.className='caret';logo.appendChild(caret);
+</script></body></html>`;
+  const splash = new BrowserWindow({
+    width: 460,
+    height: 300,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    center: true,
+    skipTaskbar: true,
+    title: 'ReqFlow · 需求流',
+    icon: path.join(__dirname, 'icon.ico'),
+    backgroundColor: '#f5f4f1',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  splash.setMenuBarVisibility(false);
+  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  return splash;
 }

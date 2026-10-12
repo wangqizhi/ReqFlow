@@ -45,6 +45,9 @@ export interface ReqFlowBridge {
   /** 验证源（REQ-060）：选择本地验证程序；打开配置的 exe / url。仅桌面版提供。 */
   pickVerifyProgram?(): Promise<{ ok: boolean; path?: string; error?: string }>;
   openVerifySource?(source: { kind: 'exe' | 'url'; value: string }): Promise<{ ok: boolean; error?: string }>;
+  /** 发布脚本（REQ-070）：检测项目目录内的 publish 脚本（返回相对路径，空串表示没有）；执行发布并返回输出。仅桌面版提供。 */
+  detectPublish?(root: string): Promise<{ ok: boolean; script?: string; error?: string }>;
+  runPublish?(root: string, rel: string): Promise<{ ok: boolean; output?: string; error?: string }>;
   getAISettings(): Promise<{ ok: true; settings: AISettings } | { ok: false; error: string }>;
   getAIRequestLogs?(): Promise<{ ok: boolean; entries?: AIRequestLog[]; error?: string }>;
   saveAISettings(settings: AISettings): Promise<{ ok: boolean; error?: string }>;
