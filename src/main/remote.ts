@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { WorkspaceStore } from '../core/storage';
 import { emptyBackup, validateRemote, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 
 export async function runRemoteGit(args: string[], cwd: string, settings: RemoteSettings) {
@@ -85,7 +86,8 @@ export class BackupManager {
         if (heads.trim()) throw Error('远程分支不存在，请填写已有分支或使用空仓库');
         await git(['symbolic-ref', 'HEAD', 'refs/heads/' + settings.branch]);
       }
-      const workspace = JSON.parse(await fs.readFile(path.join(this.dataDir, 'workspace.json'), 'utf8'));
+      const workspace = await new WorkspaceStore(path.join(this.dataDir, 'workspace.json')).read();
+      if (!workspace) throw Error('工作区尚未初始化');
       // 工作区包含图片 dataUrl，可完整导入；不上传私钥或 API Key。
       const backup = { format: 'reqflow-backup-v1', workspace: workspace.data, settings: { backup: settings } };
       const destination = path.join(repo, 'reqflow-backup.json');

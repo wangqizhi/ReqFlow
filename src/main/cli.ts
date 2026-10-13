@@ -76,7 +76,8 @@ export class Cli {
           app: 'ReqFlow',
           capabilities: ['scheduled-ai-complete'],
           version: this.appVersion,
-          dataFile: this.storeFor(a).filePath,
+          dataFile: this.storeFor(a).backend === 'sqlite' ? this.storeFor(a).databasePath : this.storeFor(a).filePath,
+          storageBackend: this.storeFor(a).backend,
           protocol: 'workspace-json-v1'
         };
       case 'help':

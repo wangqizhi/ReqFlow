@@ -18,7 +18,7 @@ import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
-import { executorLabel, useLocalAgents, agentName } from './assignment';
+import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -78,8 +78,12 @@ export default function App() {
   const [newMenu, setNewMenu] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
-  const [publishing, setPublishing] = useState(false);
-  const [publishStep, setPublishStep] = useState('');
+  const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null }>>({});
+  const publishingIds = useRef(new Set<string>());
+  const p = data?.projects.find((x) => x.id === pid) || data?.projects[0];
+  const publishing = !!publishStates[p?.id || '']?.running;
+  const publishStep = publishStates[p?.id || '']?.step || '';
+  const publishResult = publishStates[p?.id || '']?.result || null;
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
   useEffect(() => {
     if (!publishConfirm) return;
@@ -97,8 +101,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', close);
   }, [completeConfirm]);
   // REQ-101：指派入口移入提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
-  const { agents: localAgents } = useLocalAgents(!!completeConfirm);
-  const [publishResult, setPublishResult] = useState<{ ok: boolean; output: string; error?: string } | null>(null);
+  const { agents: localAgents } = useLocalAgents(!!completeConfirm || tab === 'generate');
+  const [codexBusy, setCodexBusy] = useState(false);
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
   const [sort, setSort] = useState('desc');
@@ -117,7 +121,9 @@ export default function App() {
   const dirtyRef = useRef(false);
   formRef.current = form;
 
-  const p = data?.projects.find((x) => x.id === pid) || data?.projects[0];
+  function setPublishResult(result: { ok: boolean; output: string; error?: string } | null) {
+    if (p) setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], running: !!states[p.id]?.running, step: states[p.id]?.step || '', result } }));
+  }
 
   function notify(text: string, kind: 'ok' | 'err' = 'ok') {
     setToast({ text, kind });
@@ -128,6 +134,7 @@ export default function App() {
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate('');
+    setPublishConfirm(false); setPublishScript('');
     void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
   }
 
@@ -322,20 +329,33 @@ export default function App() {
 
   // 执行发布脚本（REQ-070）：运行项目目录下的 publish 脚本，完成后弹窗展示输出（含产物位置）
   async function runPublish() {
-    if (!p?.dir || !publishScript || publishing) return;
+    if (!p?.dir || !publishScript || publishingIds.current.has(p.id)) return;
     if (!bridge.runPublish) { notify('发布仅桌面版支持（浏览器预览无本地脚本访问）', 'err'); return; }
     setPublishConfirm(false);
-    setPublishing(true);
+    const project = p, script = publishScript;
+    publishingIds.current.add(project.id);
+    const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null }), ...patch } }));
+    update({ running: true, step: '', result: null });
     try {
-      const r = await publishProject(p, publishScript, bridge, setPublishStep);
-      setPublishResult({ ok: !!r.ok, output: r.output || '', error: r.error });
+      const r = await publishProject(project, script, bridge, step => update({ step }));
+      update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
     } catch (e: any) {
-      setPublishResult({ ok: false, output: '', error: e?.message || '执行发布脚本失败' });
+      update({ result: { ok: false, output: '', error: e?.message || '执行发布脚本失败' } });
     } finally {
-      setPublishing(false);
-      setPublishStep('');
+      publishingIds.current.delete(project.id);
+      update({ running: false, step: '' });
       void load({ quiet: true });
     }
+  }
+
+  async function dispatchCodex(item: Item) {
+    if (!p?.dir || codexBusy) return;
+    setCodexBusy(true);
+    try {
+      await sendToCodex(p.dir, '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)\n\n本轮只执行 ' + item.number + '（需求 ID：' + item.id + '），其他排期需求不属于本轮。');
+      notify('已调起 Codex，任务内容已复制');
+    } catch (e: any) { notify(e.message, 'err'); }
+    finally { setCodexBusy(false); }
   }
 
   // 运行验证源（REQ-077）：按钮移到顶部「浏览项目 / 发布」旁，仅项目配置了验证源时出现
@@ -524,7 +544,7 @@ export default function App() {
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
         </div>
         <nav className="side-projects">
-          {folderForm && <form className="folder-form" onSubmit={async (e) => { e.preventDefault(); if (await act({ op: "folder", name: folderName })) { setFolderName(""); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="btn sm" disabled={busy || !folderName.trim()}>创建</button></form>}
+          {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
           {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} />{folder.name}</summary>{data.projects.filter((pr) => (pr.folderId || 'default') === folder.id).map((pr) => (
             <div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragStart={(e) => e.dataTransfer.setData('application/reqflow-project', pr.id)}
@@ -761,6 +781,7 @@ export default function App() {
                           : '已归档，历史记录仍可查看。'}
                       </div>
                       <div className="card-actions">
+                        {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
                         {i.status === 'in_progress' && <button className="btn" onClick={() => copyPrompt([i])}>复制 Prompt</button>}
                         {i.status === 'ready' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
                         {i.status === 'ready' && <button className="btn" disabled={busy} onClick={() => edit(i)}>编辑</button>}
@@ -842,7 +863,8 @@ export default function App() {
                     <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
                   </div>
                   <div className="assign-row-actions">
-                    {(localAgents || []).map((id) => (
+                    {localAgents?.includes('codex') && <button className="btn sm" disabled={codexBusy || !p?.dir || executor !== 'ai'} title="发送给 Codex" onClick={() => { if (fresh) void dispatchCodex(fresh); }}>Codex</button>}
+                    {(localAgents || []).filter(id => id !== 'codex').map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
                         title={executor === 'agent:' + id ? '当前已指派给 ' + agentName(id) : '指派给 ' + agentName(id) + ' 执行'}
                         onClick={() => void assignItems([item.id], 'agent:' + id)}>指派给 {agentName(id)}</button>

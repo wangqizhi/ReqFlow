@@ -83,6 +83,11 @@ export function registerIpc(dataDir: string) {
     else if (action === 'close') win?.close();
   });
   const store = new WorkspaceStore(path.join(dataDir, 'workspace.json'));
+  ipcMain.handle('storage:status', () => ({ ok: true, backend: store.backend }));
+  ipcMain.handle('storage:migrate', async () => {
+    try { await store.migrateToSqlite(); return { ok: true, backend: store.backend }; }
+    catch (e: any) { return { ok: false, error: e.message }; }
+  });
   const service = new WorkspaceService(store);
   const backup = new BackupManager(dataDir);
   const backupReady = backup.load();
@@ -435,7 +440,7 @@ export function registerIpc(dataDir: string) {
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
-    dataFile: store.filePath,
+    dataFile: store.backend === 'sqlite' ? store.databasePath : store.filePath,
     platform: process.platform
   }));
 
@@ -449,7 +454,7 @@ export function registerIpc(dataDir: string) {
   });
   ipcMain.handle('app:showDataFile', async () => {
     try {
-      await shell.showItemInFolder(store.filePath);
+      await shell.showItemInFolder(store.backend === 'sqlite' ? store.databasePath : store.filePath);
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: e?.message };

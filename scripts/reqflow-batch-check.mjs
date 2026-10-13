@@ -1,0 +1,100 @@
+import { build } from 'esbuild';
+import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
+
+const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-batch-'));
+const output = path.resolve('out/review-1.11.6');
+try {
+  await mkdir(output, { recursive: true });
+  await build({ stdin: { contents: `export { registerIpc } from './src/main/ipc.ts'; export { makeProject } from './src/core/domain.ts';`, resolveDir: process.cwd() }, outfile: path.join(temp, 'ipc.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
+  const projectA = path.join(temp, 'project-a'), projectB = path.join(temp, 'project-b');
+  await mkdir(projectA); await mkdir(projectB);
+  await writeFile(path.join(projectA, 'publish.mjs'), `import {existsSync} from 'node:fs'; while(!existsSync('release')) await new Promise(r=>setTimeout(r,30)); console.log('project A complete');`);
+  await writeFile(path.join(projectB, 'publish.mjs'), `console.log('project B complete');`);
+  const host = `
+const {app, BrowserWindow, shell} = require('electron');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+let opened = [];
+shell.openExternal = async url => { opened.push(url); };
+app.setPath('userData', ${JSON.stringify(path.join(temp, 'profile'))});
+app.whenReady().then(async()=>{
+ let win;
+ try {
+  const {registerIpc, makeProject} = require('./ipc.cjs');
+  const a = makeProject('项目 A'), b = makeProject('项目 B');
+  a.dir = ${JSON.stringify(projectA)}; b.dir = ${JSON.stringify(projectB)};
+  const dataDir = ${JSON.stringify(path.join(temp, 'data'))};
+  await fs.mkdir(dataDir);
+  await fs.writeFile(path.join(dataDir,'workspace.json'),JSON.stringify({id:'local_electron',version:1,data:{projects:[a,b]}}));
+  registerIpc(dataDir);
+  win = new BrowserWindow({width:1440,height:900,show:false,webPreferences:{preload:${JSON.stringify(path.resolve('dist/preload/index.js'))},sandbox:false,backgroundThrottling:false}});
+  const errors=[]; win.webContents.on('console-message',(_event,level,message)=>{if(level===3) errors.push(message);});
+  await win.loadFile(${JSON.stringify(path.resolve('dist/renderer/index.html'))});
+  const js = source=>win.webContents.executeJavaScript(source);
+  const wait = async source=>{for(let i=0;i<160;i++){if(await js(source))return;await new Promise(r=>setTimeout(r,30));}throw Error('UI timeout: '+source);};
+  const click = text=>js('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==='+JSON.stringify(text)+').click()');
+  const shot = async name=>{await new Promise(r=>setTimeout(r,100));await fs.writeFile(path.join(${JSON.stringify(output)},name+'.png'),(await win.webContents.capturePage()).toPNG());};
+  await wait('!!document.querySelector(".project-background")');
+  await js('document.querySelector("[aria-label=新建文件夹]").click()');
+  await wait('!!document.querySelector(".folder-form")');
+  assert.ok(await js('document.querySelector(".folder-form input").getBoundingClientRect().height<=32'));
+  await shot('folder');
+  await js('document.querySelector("[aria-label=取消创建文件夹]").click()');
+  await wait('!document.querySelector(".folder-form")');
+  await js('document.querySelector("[aria-label=新建文件夹]").click()');
+  await js('document.querySelector(".folder-form input").dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))');
+  await wait('!document.querySelector(".folder-form")');
+  await click('插件/MOD/AGENT');
+  await click('实验室');
+  await wait('!!document.querySelector(".lab-body input")');
+  await js('document.querySelector(".lab-body input").click()');
+  await wait('document.querySelector(".lab-body input").checked && !document.querySelector(".lab-body input").disabled');
+  assert.deepEqual(await js('(async()=> (await window.reqflow.getLocalAgents()).enabled)()'),['codex']);
+  await click('迁移到 SQLite');
+  await wait('document.querySelector(".lab-body").textContent.includes("需求已迁移")');
+  assert.equal(await js('(async()=> (await window.reqflow.getStorageStatus()).backend)()'),'sqlite');
+  const spacing=await js('(()=>{const t=document.querySelector(".help-panel .settings-tabs"),b=t.querySelector("button").getBoundingClientRect(),r=t.getBoundingClientRect();return {top:b.top-r.top,bottom:r.bottom-b.bottom};})()');
+  assert.ok(spacing.top>=15 && spacing.bottom>=15,JSON.stringify(spacing));
+  await shot('lab-900'); win.setSize(1440,700); await shot('lab-700'); win.setSize(1440,900);
+  await js('document.querySelector(".help-header .icon-btn").click()');
+  await js('(async()=>{const r=await window.reqflow.getWorkspace(),p=r.state.projects[0];const added=await window.reqflow.apply({op:"item",project:p.id,body:"Codex dispatch"});const item=added.state.projects[0].items[0];const batch=await window.reqflow.apply({op:"generate",project:p.id,ids:[item.id]});await window.reqflow.apply({op:"submit",project:p.id,batch:batch.state.projects[0].batches[0].id});})()');
+  await js('document.querySelector("[aria-label=刷新数据]").click()');
+  await js('Array.from(document.querySelectorAll(".navtab")).find(b=>b.textContent.startsWith("排期表")).click()');
+  await wait('Array.from(document.querySelectorAll(".card-actions button")).some(b=>b.textContent==="Codex")');
+  // Clipboard writes need focus. Stub only clipboard in this test window.
+  await js('Object.defineProperty(navigator,"clipboard",{value:{writeText:async()=>{}},configurable:true})');
+  const before=await js('(async()=>{const r=await window.reqflow.getWorkspace();return JSON.stringify(r);})()');
+  await click('Codex');
+  await wait('document.querySelector(".toast")?.textContent.includes("已调起 Codex")');
+  assert.equal(opened.length,1);
+  assert.ok(new URL(opened[0]).searchParams.get('prompt').includes('本轮只执行 REQ-001'));
+  assert.equal(await js('(async()=>{const r=await window.reqflow.getWorkspace();return JSON.stringify(r);})()'),before,'dispatch does not change executor or workflow');
+  await shot('codex-schedule');
+  await wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent.trim()==="发布")');
+  await click('发布');
+  await wait('Array.from(document.querySelectorAll(".title-row button")).some(b=>b.disabled&&b.textContent.includes("发布"))');
+  await js('Array.from(document.querySelectorAll(".side-project")).find(b=>b.textContent.includes("项目 B")).click()');
+  await wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent.trim()==="发布"&&!b.disabled)');
+  await click('发布');
+  await wait('document.querySelector(".publish-output")?.textContent.includes("project B complete")');
+  await shot('publish-b');
+  await js('document.querySelector(".publish-dialog .icon-btn").click()');
+  await js('Array.from(document.querySelectorAll(".side-project")).find(b=>b.textContent.includes("项目 A")).click()');
+  await wait('Array.from(document.querySelectorAll(".title-row button")).some(b=>b.disabled&&b.textContent.includes("发布"))');
+  await fs.writeFile(${JSON.stringify(path.join(projectA, 'release'))},'');
+  await wait('document.querySelector(".publish-output")?.textContent.includes("project A complete")');
+  assert.equal(errors.length,0,errors.join('\\n'));
+  console.log('PASS: folder cancellation and compact controls, plugin tab spacing, Codex toggle and unchanged executor, SQLite migration, 900/700 layouts, independent concurrent project publishing.');
+ }catch(e){console.error(e);process.exitCode=1;}finally{await fs.writeFile(${JSON.stringify(path.join(projectA, 'release'))},'');win?.destroy();app.quit();}
+});`;
+  await writeFile(path.join(temp, 'host.cjs'), host);
+  await new Promise((resolve,reject)=>execFile(path.resolve('node_modules/electron/dist/electron.exe'),[path.join(temp,'host.cjs')],{windowsHide:true,timeout:60000},(error,stdout,stderr)=>{process.stdout.write(stdout);if(error)reject(Error(stderr||error.message));else resolve();}));
+} finally {
+  assert.ok(path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep));
+  await rm(temp, { recursive: true, force: true });
+}

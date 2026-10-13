@@ -9,18 +9,28 @@ export function useLocalAgents(active: boolean) {
     if (!active) return;
     let cancelled = false;
     if (!bridge.getLocalAgents) { setAgents([]); return; }
-    bridge.getLocalAgents().then(r => {
+    const refresh = () => bridge.getLocalAgents!().then(r => {
       if (cancelled) return;
-      if (!r.ok) setError(r.error || '读取配置失败');
+      setError(r.ok ? '' : r.error || '读取配置失败');
       setAgents(r.enabled || []);
     }).catch(e => { if (!cancelled) setError(e.message); });
-    return () => { cancelled = true; };
+    void refresh();
+    window.addEventListener('reqflow-agents-changed', refresh);
+    window.addEventListener('focus', refresh);
+    return () => { cancelled = true; window.removeEventListener('reqflow-agents-changed', refresh); window.removeEventListener('focus', refresh); };
   }, [active]);
   return { agents, error };
 }
 
 export function agentName(id: string) {
-  return id === 'opencode' ? 'OpenCode' : id;
+  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id;
+}
+
+export async function sendToCodex(projectDir: string, prompt: string) {
+  const url = 'codex://threads/new?path=' + encodeURIComponent(projectDir) + '&prompt=' + encodeURIComponent(prompt);
+  await navigator.clipboard.writeText(prompt);
+  const result = await bridge.openCodexDeepLink?.(url);
+  if (!result?.ok) throw Error(result?.error || '调起 Codex 仅桌面版可用');
 }
 
 // 执行方式显示名：agent:opencode → OpenCode，未知标识原样展示

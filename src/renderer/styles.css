@@ -20,6 +20,7 @@
   --side-bg: #1c1917;
   --side-ink: #e7e5e4;
   --side-muted: #a8a29e;
+  --side-hover: rgba(255, 255, 255, 0.07);
   --radius: 10px;
   --shadow: 0 1px 3px rgba(28, 25, 23, 0.07), 0 8px 24px rgba(28, 25, 23, 0.06);
   font-size: 15px;
@@ -601,9 +602,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .segmented[data-api-format] button { flex: 0 0 50%; box-sizing: border-box; min-height: 36px; }
 .project-folder summary { display: flex; align-items: center; gap: 8px; padding: 10px; color: var(--side-muted); cursor: pointer; font-size: 13px; }
 .project-folder .side-project { padding-left: 20px; }
-.folder-form { padding: 8px; display: flex; align-items: center; gap: 10px; }
-.folder-form .field { min-width: 0; margin: 0; }
-.folder-form input { width: 100%; }
+.folder-form { padding: 8px; display: flex; align-items: center; gap: 6px; }
+.folder-form .field { flex: 1; min-width: 0; margin: 0; }
+.folder-form .field input { width: 100%; height: 30px; padding: 5px 8px; font-size: 12px; background: var(--side-hover); color: var(--side-ink); border-color: var(--side-muted); }
+.folder-form .icon-btn { width: 28px; height: 28px; color: var(--side-muted); }
+.folder-form .icon-btn:hover:not(:disabled) { background: var(--side-hover); color: var(--side-ink); }
 .requirement-sort { margin: 0 0 16px; }
 .ai-requirements-dialog { width: min(860px, 94vw); display: flex; flex-direction: column; max-height: 90vh; padding: 24px; overflow: hidden; }
 .ai-requirements-body { overflow-y: auto; min-height: 0; padding: 0 4px 16px; }
@@ -725,7 +728,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .local-agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
 .local-agent-card code { overflow-wrap: anywhere; }
 
-.help-panel > .settings-tabs { margin: 0 24px; flex-shrink: 0; }
+.help-panel > .settings-tabs { margin: 0 24px; padding-top: 16px; padding-bottom: 16px; gap: 12px; flex-shrink: 0; }
 .local-agent-body > .settings-actions { margin-bottom: 16px; }
 .lab-target { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 13px; }
 .lab-target > span { flex-shrink: 0; color: var(--muted); }

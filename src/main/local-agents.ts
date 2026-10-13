@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 const definitions = [{ id: 'opencode', name: 'OpenCode', command: 'opencode', package: 'opencode-ai' }, { id: 'pi', name: 'pi', command: 'pi', package: '@earendil-works/pi-coding-agent' }];
+const validId = (id: string) => id === 'codex' || definitions.some(d => d.id === id);
 function version(command: string): Promise<{ installed: boolean; version?: string; error?: string }> {
   return new Promise(resolve => {
     // Only fixed, built-in commands are executed; user input never enters the shell.
@@ -16,13 +17,13 @@ function version(command: string): Promise<{ installed: boolean; version?: strin
 export function registerLocalAgents(dataDir: string) {
   const file = path.join(dataDir, 'local-agents.json');
   async function read(): Promise<string[]> {
-    try { const value = JSON.parse(await fs.readFile(file, 'utf8')); return Array.isArray(value) ? value.filter(id => definitions.some(d => d.id === id)) : []; }
+    try { const value = JSON.parse(await fs.readFile(file, 'utf8')); return Array.isArray(value) ? value.filter(validId) : []; }
     catch (e: any) { if (e.code === 'ENOENT') return []; throw e; }
   }
   ipcMain.handle('agents:get', async () => { try { return { ok: true, enabled: await read() }; } catch { return { ok: false, error: '读取 Agent 配置失败' }; } });
   ipcMain.handle('agents:save', async (_e, enabled: unknown) => {
     try {
-      if (!Array.isArray(enabled) || enabled.some(id => !definitions.some(d => d.id === id))) throw Error('Agent 配置无效');
+      if (!Array.isArray(enabled) || enabled.some(id => !validId(id))) throw Error('Agent 配置无效');
       await fs.mkdir(dataDir, { recursive: true });
       await fs.writeFile(file + '.tmp', JSON.stringify([...new Set(enabled)]), 'utf8'); await fs.rename(file + '.tmp', file);
       return { ok: true };

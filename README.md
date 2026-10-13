@@ -40,7 +40,9 @@ ReqFlow 是面向个人开发者的 Windows 桌面工作台，使用 Electron、
 
 ## 数据与隐私
 
-工作区使用本地 `workspace.json` 保存项目、需求、图片与历史。GUI 与 CLI 共用领域逻辑和数据文件，写入使用版本检查及进程锁，避免并发覆盖。
+新工作区使用本地 `requirements.sqlite` 保存项目、需求、批次快照与历史；AI、Agent、备份等配置仍使用独立文件。GUI 与 CLI 共用领域逻辑和存储入口，写入使用事务、版本检查及进程锁，避免并发覆盖。需求按项目与批次独立存储，未变更的数据行不会重复写入；存储适配接口预留后续 MySQL / PostgreSQL 接入。
+
+旧工作区继续读取 `workspace.json`，可在「插件/MOD/AGENT → 实验室 → 迁移到 SQLite」进行迁移。迁移会校验完整数据、保留原文件及带时间戳的备份，成功后 GUI、CLI 和远程备份统一读取数据库。迁移后原 JSON 不再更新，导出最新数据请使用应用或 `workspace export`。便携版迁移时仍需一起移动整个 `data/` 目录。
 
 AI Key 使用 Electron `safeStorage` 加密，单独保存在 `ai-settings.json`，不进入远程工作区备份。AI 请求日志记录时间和请求元数据，不保存 Key、URL、需求正文或响应文案。使用 AI 功能时，相关项目上下文会发送到所配置的服务。
 
