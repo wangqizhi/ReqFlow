@@ -222,10 +222,10 @@ func smokeUI(w *mygo.Window, path string) {
           document.querySelector('.requirement-dialog [aria-label="关闭"]')?.click();
           await waitFor(()=>!document.querySelector('.overlay'));
           [...document.querySelectorAll('.navtab')].find(b=>b.textContent.startsWith('排期')).click();
-          await waitFor(()=>document.querySelector('.schedule-bottom'));
+          await waitFor(()=>document.querySelector('.workspace-toolbar'));
           await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-          const panel=document.querySelector('.schedule-bottom');const buttons=[...panel.querySelectorAll('button')];
-          return {ok:Math.abs(panel.getBoundingClientRect().bottom-innerHeight)<1&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
+          const panel=document.querySelector('.workspace-toolbar');const buttons=[...panel.querySelectorAll('button')];
+          return {ok:panel.getBoundingClientRect().bottom<document.querySelector('.list-scroll').getBoundingClientRect().bottom&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
         })()`)
 		if e != nil {
 			schedule = map[string]any{"ok": false, "error": e.Error()}

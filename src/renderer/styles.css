@@ -83,7 +83,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .side .btn.plain:hover { background: rgba(255, 255, 255, 0.08); }
 
 /* ---------- 顶栏 ---------- */
-.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); z-index: 5; }
+.top { display: flex; align-items: center; justify-content: flex-end; padding: 4px 22px; min-height: 28px; position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); z-index: 5; }
 .switcher { position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; box-shadow: var(--shadow); }
 .switcher:hover { border-color: var(--line-2); }
 .switcher-icon { color: var(--accent); display: flex; }
@@ -146,6 +146,16 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .navtab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .navtab.active span { background: var(--accent-soft); color: var(--accent-dark); }
 .list-tools-side { display: flex; align-items: center; gap: 10px; }
+.workspace-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; padding: 14px 0; flex-shrink: 0; }
+.workspace-actions, .workspace-filters, .workspace-schedule-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.workspace-actions strong { font-size: 14px; }
+.workspace-filters { justify-content: flex-end; }
+.workspace-schedule-filters { grid-column: 1 / -1; }
+.workspace-schedule-filters .gen-warning { flex-basis: 100%; margin: 0; }
+@media (max-width: 1250px) {
+  .workspace-toolbar { grid-template-columns: 1fr; }
+  .workspace-filters { justify-content: flex-start; }
+}
 .list-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 2px; }
 
 /* ---------- 生成 Prompt 标签页 ---------- */

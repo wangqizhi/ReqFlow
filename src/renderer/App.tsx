@@ -74,7 +74,6 @@ export default function App() {
   const [modsTab, setModsTab] = useState('protocol');
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [mode, setMode] = useState<'FLOW' | 'CONTENT'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
@@ -82,6 +81,20 @@ export default function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [newMenu, setNewMenu] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!newMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!newMenuRef.current?.contains(event.target as Node)) setNewMenu(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setNewMenu(false); };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeEscape);
+    };
+  }, [newMenu]);
   const [aiOpen, setAiOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
   const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null }>>({});
@@ -137,6 +150,7 @@ export default function App() {
   }
 
   function switchProject(id: string) {
+    setNewMenu(false);
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate('');
@@ -435,13 +449,15 @@ export default function App() {
   const allInProgress = (p?.items || []).filter((i) => !i.archived && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
   // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
   const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
-  const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate));
+  const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
+    && (typeFilter === 'all' || i.type === typeFilter)
+    && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
     (tab === 'archived' ? !!i.archived
       : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledBatch(p!, i) : tab === 'generate' ? allInProgress.some(item => item.id === i.id) : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
-    && (tab === 'generate' || typeFilter === 'all' || i.type === typeFilter)
+    && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
   const archivedDate = (i: Item) => {
     const time = i.history.find(h => h.event === '归档')?.time;
@@ -627,7 +643,7 @@ export default function App() {
             <Plus size={16} /><span>新建项目</span>
           </button>
         </nav>
-        <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setSwitcherOpen(false); setNewMenu(false); }}>上下文管理</button>
+        <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
         </>}
@@ -646,25 +662,6 @@ export default function App() {
 
       <main className="main">
         <header className="top">
-          {mode === 'FLOW' && <div className="switcher" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSwitcherOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSwitcherOpen(false); }}>
-            <button className="mode-switch" aria-label="切换项目" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen(!switcherOpen)}>
-            <span className="switcher-icon"><Layers size={18} /></span>
-            <span className="switcher-text"><small>切换项目</small><strong>{p?.name}</strong></span>
-            <ChevronDown size={16} className={'chev' + (switcherOpen ? ' up' : '')} />
-            </button>
-            {switcherOpen && (
-              <div className="switcher-menu">
-                <div className="switcher-label">我的项目</div>
-                {data.projects.map((project) => (
-                  <button key={project.id} className={'switcher-row' + (project.id === p?.id ? ' current' : '')}
-                    onClick={() => { switchProject(project.id); setSwitcherOpen(false); }}>
-                    <strong>{project.name}</strong>
-                    <small>{project.items.filter(item => !item.archived).length} 条需求</small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>}
           <div className="save">
             <Check size={14} />{saved}
             <button className="icon-btn" aria-label="刷新数据" title="数据每 15 秒自动刷新，点击立即刷新" onClick={() => void load()}><RefreshCw size={15} /></button>
@@ -705,7 +702,7 @@ export default function App() {
                 <Play size={16} />运行
               </button>
             )}
-            <div className="new-requirement-split"><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
+            <div className="new-requirement-split" ref={newMenuRef} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setNewMenu(false); }}><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
           </div>
         </section>
 
@@ -741,39 +738,32 @@ export default function App() {
               ))}
             </div>
 
-            {tab === 'generate' && inProgress.length > 0 && (
-              <h3 className="gen-sub">待开发 <span>{inProgress.length} 条等待 AI 完成</span></h3>
-            )}
-            {tab !== 'generate' && <div className="list-tools">
-              {(tab === 'feature') && (
-                <label className="check-label">
-                  <input type="checkbox"
-                    checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every((i) => selected.includes(i.id))}
-                  onChange={(e) => setSelected(e.target.checked
-                    ? [...new Set([...selected, ...visible.filter(eligible).map((i) => i.id)])]
-                    : selected.filter((id) => !visible.some((i) => i.id === id)))} />
-                  全选需求
-                </label>
-              )}
-              {tab === 'archived' && (
-                <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
+            <div className="workspace-toolbar" aria-label="需求操作与筛选">
+              <div className="workspace-actions">
+                {tab === 'feature' && <><label className="check-label"><input type="checkbox"
+                  checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every(i => selected.includes(i.id))}
+                  onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(eligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
+                  <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
+                {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
+                  <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
+                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · 当前 {inProgress.length} 条</button></>}
+                {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
+                {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
                   <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button>
                   <button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button>
-                </div>
-              )}
-              <div className="list-tools-side">
-                {tab === 'feature' && picked.length > 0 && (
-                  <button className="btn primary" disabled={busy} onClick={() => generate()}>
-                    排期 · 已选 {picked.length} 条
-                  </button>
-                )}
-                {!viewingHistory && (
-                  <><div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div><div className="search"><Search size={15} />
-                    <input aria-label="搜索需求" value={query} onChange={(e) => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" />
-                  </div></>
-                )}
+                </div>}
               </div>
-            </div>}
+              {!viewingHistory && <div className="workspace-filters">
+                <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
+                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
+              </div>}
+              {tab === 'generate' && <div className="workspace-schedule-filters">
+                <span className="gen-count">{batch ? '批次 ' + String(batch.number).padStart(2, '0') : '暂无批次'}</span>
+                <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '当天'], ['all', '全部日期']].map(([id, label]) => <button key={id} className={scheduleMode === id ? 'on' : ''} aria-pressed={scheduleMode === id} onClick={() => setScheduleMode(id)}>{label}</button>)}</div>
+                <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
+                {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
+              </div>}
+            </div>
             <div className="list-scroll">
               {viewingHistory ? (
               <div className="batch-list">
@@ -907,30 +897,6 @@ export default function App() {
               </>
               )}
             </div>
-            {tab === 'generate' && (
-              <div className="gen-panel schedule-bottom">
-                <div className="gen-top">
-                  <div className="gen-head">
-                    <h3>本轮排期</h3>
-                    <span>{batch
-                      ? `批次 ${String(batch.number).padStart(2, '0')} · ${batch.items.length} 条需求`
-                      : '暂无批次'}</span>
-                  </div>
-                  <div className="gen-filter">
-                    <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
-                    <div className="search"><Search size={15} /><input aria-label="搜索排期需求" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索需求" /></div>
-                    <span className="gen-count" title="当前筛选范围内的待开发条数 / 全部待开发；未设日期的需求计入「日期及之前」，下方操作仅处理当前筛选范围。">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
-                  </div>
-                <div className="gen-actions"><button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
-                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}>
-                    <Check size={15} />提交验证 · 全部{inProgress.length > 0 ? ` ${inProgress.length} 条` : ''}
-                  </button>
-                </div>
-                </div>
-                {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
-                {!batch && <p className="gen-hint">到「待执行」勾选需求并排期。</p>}
-              </div>
-            )}
           </section>
 
 

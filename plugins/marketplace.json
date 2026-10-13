@@ -4,7 +4,7 @@
     {
       "name": "reqflow-agent-zcode",
       "source": "./reqflow-agent-zcode",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "按当前项目目录领取 ReqFlow 已提交需求，实现后转入待验证（ZCode 版）。",
       "displayName": "ReqFlow Agent (ZCode)",
       "displayName_i18n": {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { ensurePlugin } from './update.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fail = message => { throw new Error(message); };
@@ -116,6 +117,10 @@ export async function readRun(config, cwd, runDir) {
 
 export async function completeRun(runFile, report, cwd) {
   const run = await json(runFile);
+  const info = await callCli(run.config, ['version']);
+  const pluginUpdate = await ensurePlugin(run.config, info, 'zcode', callCli);
+  if (pluginUpdate.updateRequired) return { ok: false, pluginUpdate };
+  if (pluginUpdate.updated) return (await import(pathToFileURL(path.join(pluginUpdate.pluginDir, 'scripts/reqflow.mjs')).href)).completeRun(runFile, report, cwd);
   if (run.schema !== 1 || !Array.isArray(report.items) || !report.items.length) fail('报告需要非空 items 数组');
   if (await canonical(cwd) !== run.cwd) fail('当前工作目录与领取目录不一致');
   const ids = report.items.map(i => i.id);
@@ -195,7 +200,13 @@ export async function main(argv) {
     await fs.writeFile(configFile, JSON.stringify(config, null, 2), { mode: 0o600 });
     return { ok: true, configFile, ...info };
   }
-  if (command === 'doctor') return { ok: true, configFile, ...info };
+  const pluginUpdate = await ensurePlugin(config, info, 'zcode', callCli);
+  if (pluginUpdate.updateRequired) return { ok: false, pluginUpdate };
+  if (pluginUpdate.updated) {
+    const current = await import(pathToFileURL(path.join(pluginUpdate.pluginDir, 'scripts/reqflow.mjs')).href);
+    return { ...await current.main(argv), pluginUpdate, instruction: '已安装最新插件并使用最新脚本执行。宿主技能或 Pi 工具注册需要重新加载后生效。' };
+  }
+  if (command === 'doctor') return { ok: true, configFile, ...info, pluginUpdate };
   if (command === 'read') return readRun(config, cwd, path.join(path.dirname(configFile), 'runs'));
   fail('支持 configure / doctor / read / complete');
 }

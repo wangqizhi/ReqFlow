@@ -12,6 +12,7 @@ export default function (pi: ExtensionAPI) {
   async function read(ctx: any, projectId?: string, forceSelect = false) {
     active = undefined;
     const list = await main(["projects", "--cwd", ctx.cwd]);
+    if (!list.ok) return list;
     let id = projectId || (!forceSelect ? list.matchedProjectId : undefined);
     if (!id) {
       if (!ctx.hasUI) return { ...list, ok: false, selectionRequired: true, instruction: "请用户选择项目后，使用 reqflow_read 的 projectId 参数。禁止自行选择。" };
@@ -28,6 +29,7 @@ export default function (pi: ExtensionAPI) {
     if (match.project.id !== id) throw new Error("项目目录绑定不唯一，或发生变化，请先检查 ReqFlow 绑定。");
     const cwd = id === list.matchedProjectId ? ctx.cwd : project.dir;
     const result = await main(["read", "--cwd", cwd]);
+    if (!result.ok) return result;
     if (result.project.id !== id) throw new Error("读取过程中项目绑定变化，请重新选择。");
     active = result.runFile ? { runFile: result.runFile, cwd } : undefined;
     return { ...result, executionCwd: cwd, piCwd: ctx.cwd, instructions: rules };
@@ -38,6 +40,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       try {
         const result = await read(ctx, undefined, args.trim() === "select");
+        if (!result.ok) { ctx.ui.notify(result.pluginUpdate?.instruction || result.error || "插件版本检查失败", "error"); return; }
         if (result.cancelled || result.selectionRequired) return;
         if (!result.requirements?.length) {
           ctx.ui.notify(`无有效已提交需求。${JSON.stringify(result.skipped || [])}`, "info");

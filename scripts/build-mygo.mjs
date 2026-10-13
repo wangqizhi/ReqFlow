@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { renderCliDocsMarkdown } from './gen-docs-helper.mjs';
+import { buildPluginBundles } from './build-plugin-bundles.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -31,6 +32,7 @@ function assertBuildDirectory(directory, expected) {
 console.log('[Go 1/3] 构建 React 界面…');
 process.chdir(root);
 await writeFile(path.join(root, 'docs/cli-reference.md'), await renderCliDocsMarkdown(root), 'utf8');
+await buildPluginBundles(root);
 await viteBuild({ configFile: path.join(root, 'vite.mygo.config.ts') });
 const embedded = path.join(goRoot, 'frontend');
 assertBuildDirectory(embedded, 'src/mygo/frontend');

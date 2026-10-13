@@ -26,6 +26,8 @@ ReqFlow.exe --cli <command> [options]
 | --- | --- | --- |
 | `help` | `` | 显示 CLI 帮助（本参考的文本版）<br/>例：`ReqFlow.exe --cli help` |
 | `version` | `` | 输出版本信息（应用版本 / 数据文件路径）<br/>例：`ReqFlow.exe --cli version` |
+| `plugin version` | `--host <codex|zcode|pi> [--plugin-version <x.y.z>]` | 查询当前 ReqFlow 内置的最新插件版本、SHA256 与更新状态<br/>例：`ReqFlow.exe --cli plugin version --host codex --plugin-version 0.2.1` |
+| `plugin bundle` | `--host <codex|zcode|pi>` | 读取当前 ReqFlow 内置插件文件及 SHA256，供插件启动前自动更新使用 |
 | `workspace get` | `` | 读取完整工作区，返回 {version, state}；state.projects 为项目数组<br/>例：`ReqFlow.exe --cli workspace get` |
 | `workspace export` | `[--out <file>]` | 导出完整工作区 JSON（等价于界面「导出全部数据」）<br/>例：`ReqFlow.exe --cli workspace export --out backup.json` |
 | `workspace import` | `--file <path> [--replace]` | 导入界面或 export 导出的完整工作区 JSON；工作区已有数据时必须加 --replace 覆盖<br/>例：`ReqFlow.exe --cli workspace import --file backup.json --replace` |

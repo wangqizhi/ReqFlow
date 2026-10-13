@@ -36,19 +36,24 @@
 
   if (__REQFLOW_INTERACTIONS__) {
     const footer = document.querySelector('.side-foot');
-    const originalProject = document.querySelector('.switcher strong').textContent;
-    await click(document.querySelector('[aria-label="切换项目"]'));
-    const projects = [...document.querySelectorAll('.switcher-row')];
-    checks.projectSwitcher = { ok: projects.length === expected && projects.every(el => el.querySelector('strong').textContent !== 'CONTENT') };
-    if (projects.length > 1) {
-      const target = projects.find(el => !el.classList.contains('current'));
-      const name = target.querySelector('strong').textContent;
-      await click(target);
+    const originalProject = document.querySelector('.main h1').textContent;
+    const projects = [...document.querySelectorAll('.side-project[role="button"]')];
+    checks.projectSwitcher = { ok: !document.querySelector('[aria-label="切换项目"]') && projects.length === expected };
+    const switchProject = async name => {
+      await click([...document.querySelectorAll('.side-project[role="button"]')].find(el => el.querySelector('.project-name').textContent === name));
       await waitFor(() => document.querySelector('.main h1')?.textContent === name);
-      checks.projectSwitcher.ok &&= document.querySelector('.switcher strong').textContent === name;
-      await click(document.querySelector('[aria-label="切换项目"]'));
-      await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === originalProject));
-    } else await click(document.querySelector('[aria-label="切换项目"]'));
+    };
+    if (projects.length > 1) {
+      await switchProject(projects.find(el => !el.classList.contains('active')).querySelector('.project-name').textContent);
+      await switchProject(originalProject);
+    }
+    await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+    document.querySelector('.main h1').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await waitFor(() => !document.querySelector('.new-requirement-menu'));
+    await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !document.querySelector('.new-requirement-menu'));
+    checks.newMenuDismiss = { ok: true };
     const contextButton = button('上下文管理');
     const newProject = button('新建项目');
     const collaboration = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '协作项目');
@@ -58,13 +63,18 @@
     await click(contextButton);
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
-    checks.contentReturn = { ok: !!document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.switcher strong').textContent === originalProject };
+    checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
-    const bottom = document.querySelector('.schedule-bottom');
-    checks.scheduleBottom = { ok: Math.abs(bottom.getBoundingClientRect().bottom - innerHeight) < 1 && !document.querySelector('.page-foot') && [...bottom.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom <= innerHeight), bottom: bottom.getBoundingClientRect().bottom, height: innerHeight };
+    const toolbar = document.querySelector('.workspace-toolbar');
+    const toolbarTop = toolbar.getBoundingClientRect().top;
+    checks.scheduleToolbar = { ok: !document.querySelector('.schedule-bottom') && toolbarTop < document.querySelector('.list-scroll').getBoundingClientRect().top && [...toolbar.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom < innerHeight) };
+    checks.sharedToolbar = { ok: true };
+    for (const phase of ['需求池', '待验证', '归档', '排期']) {
+      await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith(phase)));
+      checks.sharedToolbar.ok &&= Math.abs(document.querySelector('.workspace-toolbar').getBoundingClientRect().top - toolbarTop) < 1 && !!document.querySelector('.workspace-toolbar [aria-label="搜索需求"]');
+    }
     if (completionProject.name !== originalProject) {
-      await click(document.querySelector('[aria-label="切换项目"]'));
-      await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === completionProject.name));
+      await switchProject(completionProject.name);
       await waitFor(() => document.querySelector('.main h1')?.textContent === completionProject.name);
     }
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
@@ -72,8 +82,7 @@
     const completionNote = reportCard?.querySelector('.completion-note');
     checks.completionNote = { ok: completionNote?.querySelector('p').textContent === '已补齐完成说明，CLI检查通过' && !!(completionNote.compareDocumentPosition(reportCard.querySelector('.next-step')) & Node.DOCUMENT_POSITION_FOLLOWING), project: originalProject, titles: [...document.querySelectorAll('.item-title')].map(el => el.textContent), text: completionNote?.textContent || '', card: !!reportCard };
     if (completionProject.name !== originalProject) {
-      await click(document.querySelector('[aria-label="切换项目"]'));
-      await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === originalProject));
+      await switchProject(originalProject);
       await waitFor(() => document.querySelector('.main h1')?.textContent === originalProject);
     }
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('归档')));

@@ -15,6 +15,7 @@ dist/
 /src/mygo/frontend/
 /src/mygo/*.syso
 /src/mygo/reqflow-winres.json
+/src/mygo/backendgo/plugins_generated.go
 out/
 .cache/
 .parcel-cache/

@@ -7,6 +7,10 @@ description: 从 ReqFlow 读取与当前项目目录匹配的 AI 排期任务，
 
 使用插件根目录 `scripts/reqflow.mjs`，相对此 SKILL.md 为 `../../scripts/reqflow.mjs`。根据实际安装位置解析成绝对路径；运行 `node "<脚本绝对路径>"`，不要猜测缓存目录。Node >= 22，无 npm 安装步骤。
 
+## 启动前版本检查
+
+read / doctor / complete 会先向 ReqFlow 查询本宿主插件版本。版本落后时校验内置更新包的 SHA256，通过宿主支持的安装流程更新；不得手工编辑宿主缓存。更新失败或返回 pluginUpdate.updateRequired 时先处理更新，禁止继续领取或回写。已更新时使用最新桥接脚本执行，按返回 instruction 重新加载宿主技能。旧 ReqFlow 缺少查询能力时先升级 ReqFlow 2.2.3 或更新版本。
+
 ## 领取
 
 1. 使用当前聊天的项目工作目录作为 cwd。不要把插件目录当项目目录，不按项目名称猜测绑定，不自行更改 ReqFlow 项目目录。

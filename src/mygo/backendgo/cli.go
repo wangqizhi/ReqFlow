@@ -161,7 +161,9 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, version string) (map[string]any, error) {
 	switch command {
 	case "version":
-		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
+		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
+	case "plugin version", "plugin bundle":
+		return pluginRelease(command, a)
 	case "help":
 		return coreCLIHelp(version), nil
 	case "workspace get":
