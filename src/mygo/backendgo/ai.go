@@ -296,9 +296,7 @@ func (b *Backend) optimizeAICommit(args []any) (any, error) {
 	if strings.TrimSpace(diff) == "" {
 		return nil, errors.New("请先 Add 暂存变动，再生成提交文案")
 	}
-	if len([]rune(diff)) > 200000 {
-		return nil, errors.New("暂存差异过大，请分批 Add 后生成文案")
-	}
+	requirementsOnly := len([]rune(diff)) > 200000
 	items := []any{}
 	for _, v := range aiArray(p["items"]) {
 		item := aiMap(v)
@@ -311,8 +309,18 @@ func (b *Backend) optimizeAICommit(args []any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	payload, _ := json.Marshal(map[string]any{"requirements": items, "stagedDiff": diff, "draft": strings.TrimSpace(aiReqIDPattern.ReplaceAllString(draft, ""))})
-	text, err := RequestAI(s, aiCommitSystem, string(payload), b.aiTrace(s))
+	context := map[string]any{"requirements": items}
+	system := aiCommitSystem
+	if requirementsOnly {
+		if len(items) == 0 {
+			return nil, errors.New("暂存差异较大，且没有待 Git 提交的需求，请先完成需求或分批暂存")
+		}
+		system = strings.Split(aiCommitSystem, " 以 stagedDiff")[0] + " 暂存差异较大，本次仅依据 requirements 生成文案，不推测代码改动。"
+	} else {
+		context["stagedDiff"], context["draft"] = diff, strings.TrimSpace(aiReqIDPattern.ReplaceAllString(draft, ""))
+	}
+	payload, _ := json.Marshal(context)
+	text, err := RequestAI(s, system, string(payload), b.aiTrace(s))
 	if err != nil {
 		return nil, err
 	}

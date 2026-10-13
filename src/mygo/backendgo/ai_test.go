@@ -187,6 +187,7 @@ func TestAICommitChannelUsesActualStagedGitDiff(t *testing.T) {
 	if _, err = b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": id, "dir": repo}, nil); err != nil {
 		t.Fatal(err)
 	}
+	largeDiff := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&payload)
@@ -195,7 +196,11 @@ func TestAICommitChannelUsesActualStagedGitDiff(t *testing.T) {
 		if len(messages) != 2 || json.Unmarshal([]byte(aiString(aiMap(messages[1])["content"])), &context) != nil {
 			t.Error("AI commit context missing")
 		}
-		if !strings.Contains(aiString(context["stagedDiff"]), "staged-fact") || strings.Contains(aiString(context["draft"]), "REQ-") {
+		if largeDiff {
+			if coreHas(context, "stagedDiff") || coreHas(context, "draft") || len(aiArray(context["requirements"])) != 1 || !strings.Contains(aiString(aiMap(messages[0])["content"]), "仅依据 requirements") {
+				t.Error("large diff must use requirements only")
+			}
+		} else if !strings.Contains(aiString(context["stagedDiff"]), "staged-fact") || strings.Contains(aiString(context["draft"]), "REQ-") {
 			t.Error("AI commit omitted staged facts or retained tracking ID")
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "feat: REQ-999 · 新增测试行为"}}}})
@@ -207,5 +212,32 @@ func TestAICommitChannelUsesActualStagedGitDiff(t *testing.T) {
 	value, handled, err := b.InvokeAI("ai:commit:optimize", []any{id, "REQ-999 草稿"})
 	if err != nil || !handled || aiMap(value)["message"] != "feat: 新增测试行为" {
 		t.Fatalf("Go AI commit channel failed: %v", err)
+	}
+	if err = os.WriteFile(filepath.Join(repo, "change.txt"), []byte(strings.Repeat("large change\n", 20000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = RunRemoteGit([]string{"add", "--", "change.txt"}, repo, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = b.InvokeAI("ai:commit:optimize", []any{id, "草稿"}); err == nil || !strings.Contains(err.Error(), "没有待 Git 提交的需求") {
+		t.Fatal("missing requirements must not produce invented summary")
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "item", "project": id, "body": "新增测试行为"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err = b.Workspace.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := aiMap(aiArray(aiMap(aiArray(aiMap(workspace["state"])["projects"])[0])["items"])[0])["id"]
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "generate", "project": id, "ids": []any{itemID}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": id, "id": itemID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	largeDiff = true
+	if _, _, err = b.InvokeAI("ai:commit:optimize", []any{id, "无关草稿"}); err != nil {
+		t.Fatal(err)
 	}
 }

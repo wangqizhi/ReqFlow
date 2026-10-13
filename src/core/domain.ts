@@ -74,9 +74,11 @@ export type Project = {
   baselineTemplate?: string; // 基线需求模板（留空使用 DEFAULT_BASELINE_TEMPLATE）
   folderId?: string;
   revision?: number;
+  requirementDraft?: Record<string, any>;
 };
 
-export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string };
+export type ContextPrompt = { id: string; title: string; body: string; tags: string[] };
+export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; contextPrompts?: ContextPrompt[] };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
 export const DEFAULT_GUIDANCE =
@@ -296,7 +298,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
 }
 export function mutationProjectIds(a: any): string[] | null {
   const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
-  if (!localOps.includes(a?.op) || typeof a.project !== 'string') return null;
+  if (!(localOps.includes(a?.op) || a?.op === 'requirementDraft') || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
 export async function apply(s: Workspace, a: any) {
@@ -320,6 +322,21 @@ export async function apply(s: Workspace, a: any) {
 }
 async function applyOperation(s: Workspace, a: any) {
   normalizeWorkspace(s);
+
+  if (a.op === 'contextPrompt' || a.op === 'deleteContextPrompt') {
+    const prompts = s.contextPrompts ||= [];
+    const index = prompts.findIndex(prompt => prompt.id === a.id);
+    if (a.id && index < 0) throw Error('提示词不存在，请刷新后重试');
+    if (a.op === 'deleteContextPrompt') {
+      if (index < 0) throw Error('提示词不存在');
+      prompts.splice(index, 1);
+    } else {
+      if (!Array.isArray(a.tags) || a.tags.some((tag: unknown) => typeof tag !== 'string')) throw Error('标签格式无效');
+      const prompt = { id: a.id || crypto.randomUUID(), title: needed(a.title, '提示词标题'), body: needed(a.body, '提示词内容'), tags: [...new Set<string>(a.tags.map((tag: string) => tag.trim()).filter(Boolean))] };
+      if (index < 0) prompts.push(prompt); else prompts[index] = prompt;
+    }
+    return;
+  }
 
   if (a.op === 'folder') {
     const name = needed(a.name, '文件夹名称');
@@ -374,6 +391,12 @@ async function applyOperation(s: Workspace, a: any) {
 
   const p = s.projects.find((p) => p.id === a.project);
   if (!p) throw new Error('项目不存在');
+
+  if (a.op === 'requirementDraft') {
+    if (!a.draft || typeof a.draft !== 'object' || Array.isArray(a.draft)) throw Error('草稿格式无效');
+    p.requirementDraft = structuredClone(a.draft);
+    return;
+  }
 
   if (a.op === 'projectFolder') {
     if (!s.folders!.some((f) => f.id === a.folderId)) throw Error('文件夹不存在');
@@ -556,6 +579,7 @@ async function applyOperation(s: Workspace, a: any) {
         version: i.version + 1
       });
     } else {
+      if (a.clearDraft) delete p.requirementDraft;
       p.items.push({
         id: crypto.randomUUID(),
         number: 'REQ-' + String(p.nextNumber++).padStart(3, '0'),

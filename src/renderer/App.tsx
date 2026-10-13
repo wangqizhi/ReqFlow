@@ -18,7 +18,8 @@ import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
-import { executorLabel, useLocalAgents, agentName, sendToCodex, sendToZcode, ZCODE_MENTION } from './assignment';
+import { ContentWorkspace } from './content';
+import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -71,6 +72,7 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -104,7 +106,6 @@ export default function App() {
   // REQ-101：指派入口移入提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
   const { agents: localAgents } = useLocalAgents(!!completeConfirm || tab === 'generate');
   const [codexBusy, setCodexBusy] = useState(false);
-  const [zcodeBusy, setZcodeBusy] = useState(false); // REQ-114：排期表派发 ZCode
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
   const [sort, setSort] = useState('desc');
@@ -287,7 +288,7 @@ export default function App() {
     setEditing(i || null);
     setForm(i
       ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n') }
-      : {
+      : p!.requirementDraft || {
           ...emptyForm, aiValidation: false,
           deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
             ? '说明改动、未解决的问题。' : p!.deliveryGuidance
@@ -363,17 +364,6 @@ export default function App() {
     finally { setCodexBusy(false); }
   }
 
-  // REQ-114：派发给 ZCode —— 复制任务内容后在项目目录打开终端窗口运行 zcode
-  async function dispatchZcode(item: Item) {
-    if (!p?.dir || zcodeBusy) return;
-    setZcodeBusy(true);
-    try {
-      await sendToZcode(p.dir, ZCODE_MENTION + '\n\n本轮只执行 ' + item.number + '（需求 ID：' + item.id + '），其他排期需求不属于本轮。');
-      notify('已调起 ZCode 终端窗口，任务内容已复制');
-    } catch (e: any) { notify(e.message, 'err'); }
-    finally { setZcodeBusy(false); }
-  }
-
   // 运行验证源（REQ-077）：按钮移到顶部「浏览项目 / 发布」旁，仅项目配置了验证源时出现
   async function runVerifySource() {
     if (!p?.verifySource) return;
@@ -439,7 +429,7 @@ export default function App() {
   };
   const archiveDates = [...new Set(visible.map(archivedDate))].sort().reverse();
   const shownItems = tab === 'archived' ? visible.filter(i => archivedDate(i) === archiveDate) : visible;
-  const windowBar = bridge.windowControl && <div className="window-bar"><span>ReqFlow · 需求流</span><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
+  const windowBar = bridge.windowControl && <div className="window-bar"><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
   // 各 tab 的说明文字统一显示在底部「ReqFlow · 需求流」后的信息区
   const helpText =
     viewingHistory ? '历史排期快照保留在这里，点击批次可到排期表查看。' : tab === 'feature' ? '勾选本轮需求，点击排期转入待开发'
@@ -523,6 +513,10 @@ export default function App() {
   async function closeModal() {
     if (busyRef.current) return;
     clearTimeout(autoRef.current);
+    if (modal === 'item' && !editing && dirtyRef.current) {
+      if (!await act({ op: 'requirementDraft', draft: formRef.current }, true)) return;
+      dirtyRef.current = false;
+    }
     if (modal === 'item' && editing && dirtyRef.current) {
       if (!await act({ op: 'item', ...formRef.current, id: editing.id }, true)) return;
       dirtyRef.current = false;
@@ -551,7 +545,6 @@ export default function App() {
 
   return (
     <div className={"app" + (bridge.windowControl ? " desktop-app" : "")}>
-      {windowBar}
       {toast && <div className={'toast ' + toast.kind}>{toast.text}</div>}
 
       <aside className="side">
@@ -561,7 +554,7 @@ export default function App() {
         </div>
         <nav className="side-projects">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
-          {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} />{folder.name}{folder.id !== 'default' && (
+          {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
             // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
             <button className="side-folder-del" aria-label={'删除文件夹 ' + folder.name} title="删除文件夹（项目迁移到 default）"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
@@ -606,18 +599,20 @@ export default function App() {
 
       <main className="main">
         <header className="top">
-          <div className="switcher" onClick={() => setSwitcherOpen(!switcherOpen)} onBlur={() => setTimeout(() => setSwitcherOpen(false), 150)}>
+          <div className="switcher" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSwitcherOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSwitcherOpen(false); }}>
+            <button className="mode-switch" aria-label="切换模式" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen(!switcherOpen)}>
             <span className="switcher-icon"><Layers size={18} /></span>
-            <span className="switcher-text"><small>切换项目</small><strong>{p?.name}</strong></span>
+            <span className="switcher-text"><small>切换模式</small><strong>{mode}</strong></span>
             <ChevronDown size={16} className={'chev' + (switcherOpen ? ' up' : '')} />
+            </button>
             {switcherOpen && (
               <div className="switcher-menu">
-                <div className="switcher-label">我的项目 <span>{data.projects.length}</span></div>
-                {data.projects.map((pr) => (
-                  <button key={pr.id} className={'switcher-row' + (pr.id === p?.id ? ' current' : '')}
-                    onClick={() => { switchProject(pr.id); setSwitcherOpen(false); }}>
-                    <strong>{pr.name}</strong>
-                    <small>{pr.items.filter((i) => !i.archived).length} 条进行中的需求</small>
+                <div className="switcher-label">工作模式</div>
+                {(['FLOW', 'CONTENT'] as const).map((value) => (
+                  <button key={value} className={'switcher-row' + (value === mode ? ' current' : '')}
+                    onClick={() => { setMode(value); setSwitcherOpen(false); }}>
+                    <strong>{value}</strong>
+                    <small>{value === 'FLOW' ? '项目需求与排期' : '常用提示词与标签'}</small>
                   </button>
                 ))}
               </div>
@@ -627,6 +622,7 @@ export default function App() {
             <Check size={14} />{saved}
             <button className="icon-btn" aria-label="刷新数据" title="数据每 15 秒自动刷新，点击立即刷新" onClick={() => void load()}><RefreshCw size={15} /></button>
           </div>
+          {windowBar}
         </header>
 
         {error && (
@@ -636,6 +632,7 @@ export default function App() {
           </div>
         )}
 
+        {mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -823,9 +820,8 @@ export default function App() {
                         )}
                         {i.status === 'archived' && <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看历史</button>
-                        {/* REQ-114：实验室开关开启后，Codex / ZCode 派发按钮统一放在「查看历史」后面 */}
+                        {/* 实验室开关开启后，在「查看历史」后面显示 Codex 派发按钮 */}
                         {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
-                        {tab === 'generate' && localAgents?.includes('zcode') && <button className="btn" disabled={zcodeBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 ZCode" onClick={() => void dispatchZcode(i)}>ZCode</button>}
                       </div>
                     </div>
                   </article>
@@ -869,6 +865,7 @@ export default function App() {
         <footer className="page-foot">
           ReqFlow · 需求流 <span className="page-help">{helpText}</span>
         </footer>
+        </>}
       </main>
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
@@ -962,7 +959,7 @@ export default function App() {
             <div className="dialog-head">
               <div>
                 <h3>{({ item: editing ? '编辑需求' : '记录新需求', project: '创建项目', guide: '项目与交付设置', detail: editing ? (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '', verify: editing ? '未通过退回 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '记录未通过的问题', regress: editing ? '重新打开 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '重新打开归档需求', deleteProject: '删除项目', deleteFolder: '删除文件夹', moveItem: '迁移需求', deleteItem: '删除需求' } as any)[modal]}</h3>
-                <p>{modal === 'item' ? '标题与验收条件选填；已有需求编辑后自动保存。'
+                <p>{modal === 'item' ? editing ? '标题与验收条件选填；已有需求编辑后自动保存。' : '关闭窗口会保留当前项目草稿；点击保存需求后加入需求池。'
                   : modal === 'verify' ? '未通过的内容会显示在需求卡片中，并带入下一轮 Prompt。'
                   : modal === 'deleteProject' ? '删除会一并移除该项目全部需求、批次与历史，且不可恢复。'
                   : modal === 'deleteFolder' ? '文件夹会被移除，其中的项目自动迁移到 default，需求不受影响。'
@@ -1014,7 +1011,7 @@ export default function App() {
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 clearTimeout(autoRef.current);
-                const r = await act({ op: 'item', ...form, id: editing?.id });
+                const r = await act({ op: 'item', ...form, id: editing?.id, clearDraft: !editing });
                 if (r) {
                   setModal(''); setTab('feature');
                   const pr = r.projects.find((x) => x.id === p?.id)!;
@@ -1070,7 +1067,7 @@ export default function App() {
                 </label>
                 </div>}
                 <div className="editor-footer">
-                  <span>{saved}</span>
+                  <span>{editing ? saved : '关闭时保留草稿'}</span>
                   <button className="btn primary" disabled={busy || uploading}>保存需求</button>
                 </div>
               </form>

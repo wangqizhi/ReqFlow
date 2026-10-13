@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const expectedVersion = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
 const executable = path.join(root, 'release/win-unpacked/ReqFlow.exe');
 const temp = await mkdtemp(path.join(tmpdir(), 'reqflow-go-cli-'));
 const data = path.join(temp, 'data');
@@ -22,7 +23,7 @@ function cli(args, ok = true) {
 }
 try {
   const version = cli(['version']);
-  assert.equal(version.version, '2.0.0');
+  assert.equal(version.version, expectedVersion);
   assert.ok(version.capabilities.includes('scheduled-ai-complete'));
   const initial = cli(['workspace', 'get']);
   const project = initial.state.projects[0].id;

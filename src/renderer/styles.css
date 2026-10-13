@@ -602,8 +602,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .segmented[data-api-format] button { flex: 0 0 50%; box-sizing: border-box; min-height: 36px; }
 .project-folder summary { display: flex; align-items: center; gap: 8px; padding: 10px; color: var(--side-muted); cursor: pointer; font-size: 13px; }
 /* REQ-111：文件夹悬浮显示删除按钮（default 不渲染按钮），样式与项目删除一致 */
-.side-folder-del { display: none; flex: none; align-items: center; justify-content: center; padding: 3px; margin-left: auto; border-radius: 6px; color: var(--side-muted); }
-.project-folder summary:hover .side-folder-del, .side-folder-del:focus-visible { display: inline-flex; }
+.project-folder summary { min-height: 40px; }
+.project-folder summary > svg { flex-shrink: 0; }
+.folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-folder-del { display: inline-flex; opacity: 0; flex: 0 0 20px; width: 20px; height: 20px; align-items: center; justify-content: center; padding: 3px; margin-left: auto; border-radius: 6px; color: var(--side-muted); pointer-events: none; }
+.project-folder summary:hover .side-folder-del, .project-folder summary:focus-within .side-folder-del { opacity: 1; pointer-events: auto; }
 .side-folder-del:hover { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
 .project-folder .side-project { padding-left: 20px; }
 .folder-form { padding: 8px; display: flex; align-items: center; gap: 6px; }
@@ -697,10 +700,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .window-bar { height: 34px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; padding-left: 16px; font-size: 12px; color: var(--muted); -webkit-app-region: drag; user-select: none; }
 /* REQ-069：左侧栏顶到窗口最顶部，窗口栏只在右侧主区上方，形成左右布局。
    侧栏顶部品牌行无交互元素，兼作左上角窗口拖动区。 */
-.desktop-app { grid-template-rows: 34px minmax(0, 1fr); }
-.desktop-app > .window-bar { grid-column: 2; grid-row: 1; }
-.desktop-app > .side { grid-column: 1; grid-row: 1 / -1; }
-.desktop-app > .main { grid-column: 2; grid-row: 2; }
+.desktop-app { grid-template-rows: minmax(0, 1fr); }
+.desktop-app > .side { grid-column: 1; grid-row: 1; }
+.desktop-app > .main { grid-column: 2; grid-row: 1; }
+.desktop-app .top { -webkit-app-region: drag; padding-right: 0; }
+.desktop-app .top .switcher, .desktop-app .top .save { -webkit-app-region: no-drag; }
+.top .window-bar { height: auto; align-self: stretch; padding: 0; border: 0; background: transparent; flex-shrink: 0; }
+.top .window-controls button { min-height: 34px; }
+.top .save { margin-left: auto; }
+.mode-switch { display: flex; align-items: center; gap: 10px; text-align: left; width: 100%; }
 .desktop-app > .side .brand { -webkit-app-region: drag; }
 .boot > .window-bar { position: fixed; top: 0; left: 0; right: 0; }
 .window-controls { height: 100%; display: flex; -webkit-app-region: no-drag; }
@@ -742,3 +750,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .data-archive-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .data-archive-section .settings-actions { flex-wrap: wrap; }
 .archive-date { margin: 0; }
+
+.content-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.content-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 28px 20px; flex-wrap: wrap; }
+.content-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.content-list { flex: 1; min-height: 0; overflow: auto; padding: 0 28px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-content: start; gap: 20px; }
+.content-card { background: var(--panel); border: 1px solid var(--line); padding: 20px; border-radius: 12px; min-width: 0; }
+.content-card h2 { margin: 0 0 14px; font-size: 18px; overflow-wrap: anywhere; }
+.content-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; line-height: 1.7; }
+.content-dialog { max-height: calc(100vh - 48px); overflow-y: auto; }
+.content-dialog textarea { resize: vertical; }
+.data-archive-actions { align-items: center; }
+.data-archive-actions .archive-date { flex: 0 0 170px; width: 170px; margin: 0; }
+.data-archive-actions .archive-date input { height: 40px; }
+.data-archive-actions .btn { flex-shrink: 0; white-space: nowrap; height: 40px; }

@@ -66,8 +66,8 @@ export interface ReqFlowBridge {
   getDataUsage?(): Promise<{ ok: boolean; dataDir?: string; backend?: string; dirSize?: number; databasePath?: string; databaseSize?: number; error?: string }>;
   previewDataArchive?(date: string): Promise<{ ok: boolean; items?: number; batches?: number; error?: string }>;
   archiveData?(date: string): Promise<{ ok: boolean; canceled?: boolean; items?: number; batches?: number; file?: string; dataDir?: string; backend?: string; dirSize?: number; databasePath?: string; databaseSize?: number; error?: string }>;
-  // 实验室：在项目目录打开新终端窗口运行 zcode（REQ-114），仅桌面版提供
-  openZcode?(dir: string): Promise<{ ok: boolean; error?: string }>;
+  exportArchivedData?(date: string): Promise<{ ok: boolean; canceled?: boolean; items?: number; batches?: number; file?: string; error?: string }>;
+  clearArchivedData?(date: string): Promise<{ ok: boolean; items?: number; batches?: number; error?: string }>;
   getAISettings(): Promise<{ ok: true; settings: AISettings } | { ok: false; error: string }>;
   getAIRequestLogs?(): Promise<{ ok: boolean; entries?: AIRequestLog[]; error?: string }>;
   getPublishRequestLogs?(): Promise<{ ok: boolean; entries?: PublishRequestLog[]; error?: string }>;

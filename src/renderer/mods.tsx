@@ -2,13 +2,12 @@ import protocol from '../../docs/mod-protocol.md?raw';
 import { bridge, type LocalAgent } from './api';
 import { useEffect, useState } from 'react';
 import { renderMarkdown } from './markdown';
-import { X, Layers, ExternalLink, Copy, Terminal } from './icons';
-import { AGENT_MENTION, ZCODE_MENTION } from './assignment';
+import { X, Layers, ExternalLink, Copy } from './icons';
+import { AGENT_MENTION } from './assignment';
 
-// 实验室支持的调起目标（REQ-114）：Codex 走深链窗口，ZCode 走项目目录终端窗口
+// 实验室：通过深链调起 Codex 窗口
 const LAB_AGENTS = [
-  { id: 'codex', name: 'Codex', mention: AGENT_MENTION },
-  { id: 'zcode', name: 'ZCode', mention: ZCODE_MENTION }
+  { id: 'codex', name: 'Codex', mention: AGENT_MENTION }
 ] as const;
 
 export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { onClose(): void; initialTab?: string; projectDir?: string }) {
@@ -37,11 +36,9 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
     setLabBusyId(id); setLabError(''); setLabStatus('');
     try {
       await navigator.clipboard.writeText(agent.mention);
-      const r = id === 'codex'
-        ? await bridge.openCodexDeepLink?.(labUrl)
-        : await bridge.openZcode?.(projectDir);
+      const r = await bridge.openCodexDeepLink?.(labUrl);
       if (!r?.ok) throw Error(r?.error || '调起仅桌面版可用');
-      setLabStatus('已调起 ' + agent.name + (id === 'codex' ? ' 窗口' : ' 终端窗口') + '；Agent 引用已复制到剪贴板，若输入框未自动填入请手动粘贴发送。');
+      setLabStatus('已调起 ' + agent.name + ' 窗口' + '；Agent 引用已复制到剪贴板，若输入框未自动填入请手动粘贴发送。');
     } catch (e: any) { setLabError(e.message); } finally { setLabBusyId(''); }
   }
   // REQ-062：Esc 关闭插件/MOD/AGENT 说明浮层
@@ -59,14 +56,13 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
           <div className="validation-setting"><h3>{agent.name}</h3><label className="switch"><input type="checkbox" aria-label={'启用 ' + agent.name} checked={enabled.includes(agent.id)} disabled={busy || !loaded} onChange={e => void configure(agent.id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(agent.id) ? '已开启' : '已关闭'}</span></label></div>
           <div className="settings-actions">
-            <button className="btn primary" disabled={labBusyId !== '' || !enabled.includes(agent.id) || !projectDir || (agent.id === 'codex' ? !bridge.openCodexDeepLink : !bridge.openZcode)}
+            <button className="btn primary" disabled={labBusyId !== '' || !enabled.includes(agent.id) || !projectDir || !bridge.openCodexDeepLink}
               onClick={() => void openAgent(agent.id)}
-              title={projectDir ? agent.id === 'codex' ? '在项目目录调起 Codex 桌面窗口' : '在项目目录打开终端窗口运行 zcode' : '先关联本地项目目录'}>
-              {agent.id === 'codex' ? <ExternalLink size={15} /> : <Terminal size={15} />}{labBusyId === agent.id ? '调起中…' : agent.id === 'codex' ? '调起 Codex 窗口' : '调起 ZCode 终端窗口'}
+              title={projectDir ? '在项目目录调起 Codex 桌面窗口' : '先关联本地项目目录'}>
+              <ExternalLink size={15} />{labBusyId === agent.id ? '调起中…' : '调起 Codex 窗口'}
             </button>
             <button className="btn" onClick={() => void copyMention(agent.mention, agent.name)}><Copy size={15} />复制 Agent 引用</button>
           </div>
-          {agent.id === 'zcode' && <p className="settings-hint">ZCode 通过命令行调起：在项目目录打开新终端窗口运行 <code>zcode</code>，需已安装并加入 PATH。</p>}
         </section>)}
         {labStatus && <p role="status">{labStatus}</p>}
         {labError && <p role="alert">{labError}</p>}
@@ -76,7 +72,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         <div className="settings-actions"><button className="btn" disabled={migrating || backend !== 'json'} onClick={() => void migrate()}>{migrating ? '迁移中…' : '迁移到 SQLite'}</button></div>
         <p className="settings-hint">Codex 本次调起链接：<code className="lab-link">{labUrl || '—'}</code></p>
         <p className="settings-hint">链接格式：<code>codex://threads/new?path=&lt;项目目录&gt;&amp;prompt=&lt;Agent引用&gt;</code></p>
-        <p className="settings-hint">Agent 引用：<code>{AGENT_MENTION}</code>（Codex）、<code>{ZCODE_MENTION}</code>（ZCode）。在绑定 ReqFlow 项目目录的聊天中只发送对应引用，即可授权读取排期并开始实现，完成后回写待验证（见「插件 / MOD 说明」）。</p>
+        <p className="settings-hint">Agent 引用：<code>{AGENT_MENTION}</code>（Codex）。在绑定 ReqFlow 项目目录的聊天中只发送对应引用，即可授权读取排期并开始实现，完成后回写待验证（见「插件 / MOD 说明」）。</p>
       </div> : <article className="help-body fb-md mod-document" dangerouslySetInnerHTML={{ __html: renderMarkdown(protocol) }} />}
     </section>
   </div>;

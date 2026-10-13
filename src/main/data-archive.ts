@@ -88,12 +88,14 @@ export function registerDataArchive(store: WorkspaceStore, dataDir: string) {
     } catch (e: any) { return { ok: false, error: e?.message || '统计归档数据失败' }; }
   });
 
-  ipcMain.handle('data:archive', async (_e, date: unknown) => {
+  for (const channel of ['data:archive', 'data:archiveExport', 'data:archiveClear']) ipcMain.handle(channel, async (_e, date: unknown) => {
     try {
       const cutoffMs = parseCutoff(date);
       const { record, state, projects, batches } = await collect(cutoffMs);
       const items = projects.reduce((n, p) => n + p.items.length, 0);
       if (!items && !batches.length) return { ok: true, items: 0, batches: 0, file: '', ...(await usage()) };
+      let file = '';
+      if (channel !== 'data:archiveClear') {
       const win = BrowserWindow.getAllWindows()[0];
       const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
       const options: Electron.SaveDialogOptions = {
@@ -103,7 +105,7 @@ export function registerDataArchive(store: WorkspaceStore, dataDir: string) {
       };
       const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
       if (picked.canceled || !picked.filePath) return { ok: true, canceled: true, items, batches };
-      const file = picked.filePath;
+      file = picked.filePath;
       const payload = {
         format: ARCHIVE_FORMAT,
         createdAt: new Date().toISOString(),
@@ -116,6 +118,8 @@ export function registerDataArchive(store: WorkspaceStore, dataDir: string) {
       const temporary = file + '.reqflow-tmp';
       await fs.writeFile(temporary, JSON.stringify(payload, null, 2), 'utf8');
       await fs.rename(temporary, file);
+      }
+      if (channel === 'data:archiveExport') return { ok: true, items, batches, file, ...(await usage()) };
       // 从工作区移除已导出的需求与批次；经 store 写入通道拿写锁并校验版本，
       // 与 GUI/CLI 并发写入冲突时整体失败，不产生半清理状态
       const removedBatches = new Set(batches.map((b) => b.batch.id));

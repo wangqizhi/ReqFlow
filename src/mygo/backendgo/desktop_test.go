@@ -187,9 +187,21 @@ func TestDesktopArchiveDurabilityAndInFlightReferences(t *testing.T) {
 		}
 		return map[string]any{"canceled": false, "filePath": target}, nil
 	}
-	archived := desktopTestCall(t, b, "data:archive", "2021-01-01")
-	if archived["file"] != target {
-		t.Fatal("archive output missing")
+	exported := desktopTestCall(t, b, "data:archiveExport", "2021-01-01")
+	if exported["file"] != target {
+		t.Fatal("export output missing")
+	}
+	r, e = b.Workspace.Get()
+	if e != nil || len(desktopList(desktopMap(desktopProjects(r)[0])["items"])) != 2 {
+		t.Fatal("export unexpectedly cleared workspace")
+	}
+	b.Native = func(method string, args []any) (any, error) {
+		t.Fatal("clear must not open export dialog")
+		return nil, nil
+	}
+	archived := desktopTestCall(t, b, "data:archiveClear", "2021-01-01")
+	if archived["file"] != "" {
+		t.Fatal("clear unexpectedly exported a file")
 	}
 	raw, e := os.ReadFile(target)
 	if e != nil || !strings.Contains(string(raw), "reqflow-archive-v1") {

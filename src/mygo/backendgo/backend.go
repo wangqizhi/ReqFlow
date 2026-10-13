@@ -274,8 +274,6 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		}
 		_, e := desktopNative(b, "openExternal", value)
 		return desktopOK(nil), e
-	case "shell:openZcode":
-		return b.desktopOpenZcode(desktopText(args, 0))
 	case "verify:open":
 		source := desktopMap(desktopArg(args, 0))
 		value := strings.TrimSpace(desktopString(source["value"]))

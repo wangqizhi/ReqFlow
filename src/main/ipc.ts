@@ -21,7 +21,7 @@ import { validateRemote } from '../core/remote';
 import { prepareProjectDirectory } from './project-directory';
 import { checkoutNewProject, pullProject } from './git-checkout';
 import { emptyRemote, type RemoteSettings } from '../core/remote';
-import { registerLocalAgents, version as probeAgentCommand } from './local-agents';
+import { registerLocalAgents } from './local-agents';
 import { registerUpdater } from './updater';
 import { notifyPublishResult } from './notify';
 import { registerDataArchive } from './data-archive';
@@ -337,7 +337,6 @@ export function registerIpc(dataDir: string) {
       const diff = await runGit(['diff', '--cached', '--no-ext-diff', '--no-textconv', '--'], project.dir);
       if (diff.code !== 0) throw Error('读取暂存区失败：' + gitErr(diff.err));
       if (!diff.out.trim()) throw Error('请先 Add 暂存变动，再生成提交文案');
-      if (diff.out.length > 200000) throw Error('暂存差异过大，请分批 Add 后生成文案');
       const items = pendingCommitItems(project).map(({ number, type, title, body, criteria }) => ({ number, type, title, body, criteria }));
       const settings = await readAISettings();
       const requestId = randomUUID().slice(0, 8);
@@ -598,27 +597,6 @@ export function registerIpc(dataDir: string) {
     } catch (e: any) {
       return { ok: false, error: errText(e, '调起失败，未检测到可用的 Codex 桌面应用') };
     }
-  });
-
-  // 实验室：调起 ZCode（REQ-114）。ZCode 是 CLI，没有深链协议：预检 PATH 中的 zcode 命令后，
-  // 在项目目录打开新的终端窗口运行 zcode，Agent 引用由渲染端复制到剪贴板。其他平台接口预留。
-  ipcMain.handle('shell:openZcode', async (_e, dir: string) => {
-    if (process.platform !== 'win32') return { ok: false, error: '调起 ZCode 当前仅支持 Windows，其他平台接口已预留' };
-    if (typeof dir !== 'string' || !path.isAbsolute(dir)) return { ok: false, error: '请先关联本地项目目录' };
-    const st = await fs.stat(dir).catch(() => null);
-    if (!st?.isDirectory()) return { ok: false, error: '项目目录不存在或不可访问，请重新关联' };
-    const probe = await probeAgentCommand('zcode');
-    if (!probe.installed) return { ok: false, error: '未检测到可用的 zcode 命令，请先安装 ZCode 并确认其在 PATH 中' };
-    return await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      try {
-        // start "标题" /D 目录 cmd /k zcode：新终端窗口停留在项目目录运行 ZCode
-        const child = spawn('cmd.exe', ['/d', '/s', '/c', 'start "ReqFlow ZCode" /D "' + dir + '" cmd /k zcode'],
-          { windowsHide: true, windowsVerbatimArguments: true, detached: true, stdio: 'ignore' });
-        child.on('error', (e: any) => resolve({ ok: false, error: e?.message || '调起 ZCode 失败' }));
-        child.on('spawn', () => resolve({ ok: true }));
-        child.unref();
-      } catch (e: any) { resolve({ ok: false, error: e?.message || '调起 ZCode 失败' }); }
-    });
   });
 
   // ---------- 浏览项目：Git 支持（检测到本机 git 才暴露，命令固定 + 参数数组，不经 shell） ----------

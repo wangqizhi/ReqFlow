@@ -527,7 +527,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "revert", "verify", "regress", "archive", "gitCommitted") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -702,6 +702,50 @@ func coreApplyOperation(s, a map[string]any) error {
 	projects := coreList(s["projects"])
 	folders := coreList(s["folders"])
 	switch op {
+	case "contextPrompt", "deleteContextPrompt":
+		prompts := coreList(s["contextPrompts"])
+		old := coreFind(prompts, a["id"])
+		if coreString(a["id"]) != "" && old == nil {
+			return errors.New("提示词不存在，请刷新后重试")
+		}
+		if op == "deleteContextPrompt" {
+			if old == nil {
+				return errors.New("提示词不存在")
+			}
+			s["contextPrompts"] = coreRemove(prompts, a["id"])
+			return nil
+		}
+		title, e := coreNeed(a["title"], "提示词标题")
+		if e != nil {
+			return e
+		}
+		body, e := coreNeed(a["body"], "提示词内容")
+		if e != nil {
+			return e
+		}
+		list, ok := a["tags"].([]any)
+		if !ok {
+			return errors.New("标签格式无效")
+		}
+		tags, seen := []any{}, map[string]bool{}
+		for _, value := range list {
+			tag, ok := value.(string)
+			if !ok {
+				return errors.New("标签格式无效")
+			}
+			tag = strings.TrimSpace(tag)
+			if tag != "" && !seen[tag] {
+				tags = append(tags, tag)
+				seen[tag] = true
+			}
+		}
+		if old == nil {
+			old = map[string]any{"id": coreUUID()}
+			prompts = append(prompts, old)
+		}
+		old["title"], old["body"], old["tags"] = title, body, tags
+		s["contextPrompts"] = prompts
+		return nil
 	case "folder":
 		name, e := coreNeed(a["name"], "文件夹名称")
 		if e != nil {
@@ -794,6 +838,13 @@ func coreApplyOperation(s, a map[string]any) error {
 	items := coreList(p["items"])
 	batches := coreList(p["batches"])
 	switch op {
+	case "requirementDraft":
+		draft, ok := a["draft"].(map[string]any)
+		if !ok {
+			return errors.New("草稿格式无效")
+		}
+		p["requirementDraft"] = coreClone(draft)
+		return nil
 	case "projectFolder":
 		if coreFind(folders, a["folderId"]) == nil {
 			return errors.New("文件夹不存在")
@@ -1286,6 +1337,9 @@ func coreApplyItem(p, a map[string]any, now string) error {
 		i["version"] = coreNum(i["version"]) + 1
 	} else {
 		i = map[string]any{"id": coreUUID(), "number": fmt.Sprintf("REQ-%03d", coreNum(p["nextNumber"])), "version": int64(1), "history": []any{map[string]any{"event": "创建", "time": now}}}
+		if coreTruthy(a["clearDraft"]) {
+			delete(p, "requirementDraft")
+		}
 		p["nextNumber"] = coreNum(p["nextNumber"]) + 1
 		p["items"] = append(coreList(p["items"]), i)
 	}

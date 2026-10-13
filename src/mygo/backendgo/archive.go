@@ -104,7 +104,7 @@ func (b *Backend) desktopArchive(channel string, args []any) (any, error) {
 	if channel == "data:archivePreview" {
 		return desktopOK(summary), nil
 	}
-	if channel != "data:archive" {
+	if channel != "data:archive" && channel != "data:archiveExport" && channel != "data:archiveClear" {
 		return nil, errors.New("未知数据操作")
 	}
 	if count == 0 && len(batches) == 0 {
@@ -114,22 +114,29 @@ func (b *Backend) desktopArchive(channel string, args []any) (any, error) {
 		summary["file"] = ""
 		return desktopOK(summary), nil
 	}
-	value, e := desktopNative(b, "saveDialog", map[string]any{"title": "保存数据归档", "defaultPath": filepath.Join(b.DataDir, fmt.Sprintf("reqflow-archive-%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"))), "filters": []map[string]any{{"name": "JSON", "extensions": []string{"json"}}}})
-	if e != nil {
-		return nil, e
+	file := ""
+	if channel != "data:archiveClear" {
+		value, e := desktopNative(b, "saveDialog", map[string]any{"title": "保存数据归档", "defaultPath": filepath.Join(b.DataDir, fmt.Sprintf("reqflow-archive-%s.json", time.Now().UTC().Format("2006-01-02-15-04-05"))), "filters": []map[string]any{{"name": "JSON", "extensions": []string{"json"}}}})
+		if e != nil {
+			return nil, e
+		}
+		picked := desktopMap(value)
+		file = desktopString(picked["filePath"])
+		if desktopBool(picked["canceled"]) || file == "" {
+			summary["canceled"] = true
+			return desktopOK(summary), nil
+		}
+		if !filepath.IsAbs(file) {
+			return nil, errors.New("归档文件路径必须为绝对路径")
+		}
+		payload := map[string]any{"format": "reqflow-archive-v1", "createdAt": desktopNow(), "before": cutoff.UTC().Format(time.RFC3339Nano), "projects": projects, "batches": batches}
+		if e = desktopAtomicJSON(file, payload); e != nil {
+			return nil, e
+		}
 	}
-	picked := desktopMap(value)
-	file := desktopString(picked["filePath"])
-	if desktopBool(picked["canceled"]) || file == "" {
-		summary["canceled"] = true
+	if channel == "data:archiveExport" {
+		summary["file"] = file
 		return desktopOK(summary), nil
-	}
-	if !filepath.IsAbs(file) {
-		return nil, errors.New("归档文件路径必须为绝对路径")
-	}
-	payload := map[string]any{"format": "reqflow-archive-v1", "createdAt": desktopNow(), "before": cutoff.UTC().Format(time.RFC3339Nano), "projects": projects, "batches": batches}
-	if e = desktopAtomicJSON(file, payload); e != nil {
-		return nil, e
 	}
 	removed := map[string]bool{}
 	for _, v := range batches {
@@ -161,6 +168,9 @@ func (b *Backend) desktopArchive(channel string, args []any) (any, error) {
 		}
 	}
 	if _, e = b.Workspace.WriteState(state, desktopInt(r["version"])); e != nil {
+		if channel == "data:archiveClear" {
+			return nil, fmt.Errorf("工作区清理失败：%w", e)
+		}
 		return nil, fmt.Errorf("归档已导出，但工作区清理失败（导出文件已保留）：%w", e)
 	}
 	summary["file"] = file

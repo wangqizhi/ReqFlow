@@ -38,6 +38,7 @@ function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok'
   }, []);
   useEffect(() => {
     setConfirming(false);
+    setMessage(''); setPreview(null);
     if (!date) { setPreview(null); return; }
     if (!bridge.previewDataArchive) return;
     let cancelled = false;
@@ -48,17 +49,19 @@ function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok'
     }).catch(() => { if (!cancelled) setPreview(null); });
     return () => { cancelled = true; };
   }, [date]);
-  async function archive() {
-    if (archiving || !date || !bridge.archiveData) return;
+  async function archive(mode: 'export' | 'clear') {
+    const operation = mode === 'export' ? bridge.exportArchivedData : bridge.clearArchivedData;
+    if (archiving || !date || !operation) return;
     setArchiving(true); setMessage('');
     try {
-      const r = await bridge.archiveData(date);
+      const r = await operation(date);
       if (!r.ok) throw Error(r.error || '数据归档失败');
-      if (!r.canceled) {
+      if (!('canceled' in r && r.canceled)) {
         setConfirming(false);
-        setMessage(`已导出 ${r.items || 0} 条需求、${r.batches || 0} 个批次到 ${r.file}，工作区已清理。`);
-        notify('数据归档完成');
-        onArchived?.();
+        const counts = `${r.items || 0} 条需求、${r.batches || 0} 个批次`;
+        setMessage(mode === 'export' ? ('file' in r && r.file ? `已导出 ${counts} 到 ${r.file}。` : '没有可导出的归档数据。') : `已清理 ${counts}。`);
+        notify(mode === 'export' ? '归档导出完成' : '归档清理完成');
+        if (mode === 'clear') { setPreview({ items: 0, batches: 0 }); onArchived?.(); }
       }
     } catch (e: any) { setMessage(e.message); notify(e.message, 'err'); }
     finally { setArchiving(false); }
@@ -68,16 +71,18 @@ function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok'
     <div className="validation-setting"><div><label>数据目录总大小</label><p>目录内全部文件（含图片附件、日志与备份配置）</p></div><span>{usage ? formatSize(usage.dirSize) : '—'}</span></div>
     <div className="validation-setting"><div><label>{usage?.backend === 'sqlite' ? 'SQLite 数据库大小' : '工作区文件大小'}</label><p title={usage?.databasePath}>{usage?.backend === 'sqlite' ? 'requirements.sqlite 实时大小，清理后立即变小' : 'workspace.json 当前大小'}</p></div><span>{usage ? formatSize(usage.databaseSize) : '—'}</span></div>
     <div className="data-archive-section">
-      <div className="validation-setting"><div><label>数据归档</label><p>导出归档时间早于所选日期的已归档需求（含历史）与不再被排期引用的历史批次，并从工作区清理这些内容。导出前请先确认弹出的保存位置。</p></div></div>
-      <div className="settings-actions">
-        <label className="field archive-date"><input type="date" aria-label="归档日期" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} /></label>
-        {!confirming ? <button className="btn" disabled={!date || archiving || (!bridge.archiveData)} title={bridge.archiveData ? '导出所选日期以前的归档数据并清理' : '仅桌面版可用'} onClick={() => setConfirming(true)}>导出并清理…</button>
+      <div className="validation-setting"><div><label>数据归档</label><p>处理归档时间早于所选日期的已归档需求（含历史）与不再被排期引用的历史批次。导出会保存 JSON 文件，清理会从工作区删除这些内容。</p></div></div>
+      <div className="settings-actions data-archive-actions">
+        <label className="field archive-date"><input type="date" aria-label="归档日期" disabled={archiving} value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} /></label>
+        <button className="btn primary" disabled={!date || archiving || !bridge.exportArchivedData} onClick={() => void archive('export')}>导出归档</button>
+        {!confirming ? <button className="btn danger" disabled={!date || archiving || !bridge.clearArchivedData} onClick={() => setConfirming(true)}>清理归档…</button>
           : <>
-            <button className="btn danger" disabled={archiving} onClick={() => void archive()}>{archiving ? '归档中…' : '确认导出并清理'}</button>
+            <button className="btn danger" disabled={archiving} onClick={() => void archive('clear')}>{archiving ? '处理中…' : '确认清理'}</button>
             <button className="btn" disabled={archiving} onClick={() => setConfirming(false)}>取消</button>
           </>}
       </div>
-      {date && preview && <p className="settings-hint">将导出并清理 {preview.items} 条已归档需求、{preview.batches} 个历史批次；没有可归档数据时不会生成文件。</p>}
+      {date && preview && <p className="settings-hint">所选范围内有 {preview.items} 条已归档需求、{preview.batches} 个历史批次；没有可归档数据时不会生成文件。</p>}
+      {confirming && <p className="settings-message" role="alert">清理后无法恢复，请先导出需要保留的归档数据，再确认清理。</p>}
       {message && <p className="settings-message" role="status">{message}</p>}
     </div>
   </>;

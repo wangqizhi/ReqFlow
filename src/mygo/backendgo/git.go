@@ -425,16 +425,3 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 	}
 	return nil, errors.New("未知 Git 操作")
 }
-
-func (b *Backend) desktopOpenZcode(dir string) (any, error) {
-	if !filepath.IsAbs(dir) {
-		return nil, errors.New("请先关联本地项目目录")
-	}
-	if _, e := desktopPrepareDirectory(dir, false); e != nil {
-		return nil, e
-	}
-	if !desktopBool(ProbeAgent("zcode")["installed"]) {
-		return nil, errors.New("未检测到可用的 zcode 命令，请先安装 ZCode 并确认其在 PATH 中")
-	}
-	return desktopOK(nil), desktopLaunchZcode(dir)
-}
