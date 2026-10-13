@@ -1,35 +1,41 @@
-import fs from 'node:fs';
+// Validate the actual shipped Go PE and portable PE in isolated data folders.
+import { mkdtemp, readFile, stat, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { extractFile } from '@electron/asar';
-import { setTimeout as delay } from 'node:timers/promises';
-const archive = path.resolve('release/win-unpacked/resources/app.asar');
-const version = JSON.parse(fs.readFileSync('package.json','utf8')).version;
-assert.equal(JSON.parse(extractFile(archive,'package.json')).version, version);
-for (const file of ['dist/main/index.js','dist/preload/index.js','dist/renderer/index.html',...fs.readdirSync('dist/renderer/assets').map((f)=>'dist/renderer/assets/'+f)])
-  assert.ok(fs.readFileSync(file).equals(extractFile(archive,path.normalize(file))),file+' matches final build');
-const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'reqflow-package-'));
+import { verifyReleaseVersion } from './release-version.mjs';
+
+const root = path.resolve(process.cwd());
+const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
+await verifyReleaseVersion(root, version);
+const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-cli-'));
 try {
-  const env={...process.env}; delete env.ELECTRON_RUN_AS_NODE;
-  for(const exe of ['release/win-unpacked/ReqFlow.exe',`release/ReqFlow-Portable-${version}.exe`]) {
-    const resultFile=path.join(dataDir, 'version.json');
-    fs.rmSync(resultFile,{force:true});
-    execFileSync(path.resolve(exe),['--cli','version','--data-dir',dataDir,'--out',resultFile],{encoding:'utf8',windowsHide:true,timeout:60000,env});
-    for(let n=0;n<100 && !fs.existsSync(resultFile);n++) await delay(100);
-    const parsed=JSON.parse(fs.readFileSync(resultFile,'utf8')); assert.equal(parsed.version,version); assert.equal(parsed.ok,true);
-    console.log('PASS packaged CLI: '+exe+' version '+parsed.version+' exit=0');
-    const workspaceResult=path.join(dataDir,'workspace-result.json');
-    fs.rmSync(workspaceResult,{force:true});
-    execFileSync(path.resolve(exe),['--cli','workspace','get','--data-dir',dataDir,'--out',workspaceResult],{encoding:'utf8',windowsHide:true,timeout:60000,env});
-    for(let n=0;n<100 && !fs.existsSync(workspaceResult);n++) await delay(100);
-    const workspace=JSON.parse(fs.readFileSync(workspaceResult,'utf8'));
-    assert.equal(workspace.ok,true); assert.equal(workspace.state.projects.length,1);
-    assert.ok(fs.existsSync(path.join(dataDir,'requirements.sqlite')),'packaged SQLite is operational');
-    console.log('PASS packaged SQLite workspace: '+exe);
+  const executables = [path.join(root, 'release/win-unpacked/ReqFlow.exe'), path.join(root, 'release', `ReqFlow-Portable-${version}.exe`)];
+  for (const [index, executable] of executables.entries()) {
+    const data = path.join(temp, `data-${index}`);
+    const invoke = async args => {
+      const out = path.join(temp, `result-${index}.json`);
+      const result = spawnSync(executable, ['--cli', ...args, '--data-dir', data, '--out', out], { windowsHide: true, encoding: 'utf8', timeout: 60000 });
+      assert.equal(result.error, undefined, result.error?.message);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      return JSON.parse(await readFile(out, 'utf8'));
+    };
+    const result = await invoke(['version']);
+    assert.equal(result.ok, true);
+    assert.equal(result.version, version);
+    const workspace = await invoke(['workspace', 'get']);
+    assert.equal(workspace.ok, true);
+    assert.equal(workspace.state.projects.length, 1);
+    assert.ok((await stat(path.join(data, 'requirements.sqlite'))).size > 0, 'Go SQLite operates in the packaged app');
+    console.log(`PASS: shipped ${path.basename(executable)} Go CLI version ${version}, workspace and SQLite`);
   }
-} finally { fs.rmSync(dataDir,{recursive:true,force:true}); }
-for(const file of [`release/ReqFlow-Setup-${version}.exe`,`release/ReqFlow-Portable-${version}.exe`])
-  assert.equal(fs.readFileSync(file).subarray(0,2).toString(),'MZ');
-console.log('PASS installer and portable PE, all ASAR files match final build');
+  const preview = spawnSync(process.execPath, [path.join(root, 'scripts/release-github.mjs'), '--dry-run'], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 60000 });
+  assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+  assert.match(preview.stdout, /Go 构建\/打包清单 SHA256 已核验/);
+  assert.match(preview.stdout, /预览完成；未上传/);
+  console.log('PASS: release dry-run verifies only Go Setup/Portable/hash assets, without uploads or Git writes');
+} finally {
+  assert.ok(path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep));
+  await rm(temp, { recursive: true, force: true });
+}

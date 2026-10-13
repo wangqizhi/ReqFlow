@@ -25,6 +25,9 @@ export async function renderCliDocsMarkdown(root) {
     });
     const mod = await import('file://' + out.replaceAll('\\', '/'));
     const { CLI_DOCS, CLI_GLOBAL_OPTIONS, CLI_NOTES, CLI_USAGE } = mod;
+    const help = JSON.stringify({ usage: CLI_USAGE, options: CLI_GLOBAL_OPTIONS, groups: CLI_DOCS, notes: CLI_NOTES });
+    await writeFile(path.join(root, 'src/mygo/backendgo/cli_help_generated.go'),
+      '// Code generated from src/core/cli-help.ts by scripts/gen-docs-helper.mjs. DO NOT EDIT.\npackage backendgo\n\nconst coreCLIHelpJSON = ' + JSON.stringify(help) + '\n', 'utf8');
 
     const lines = [];
     lines.push('# ReqFlow CLI 参考（Agent 对接指南）');

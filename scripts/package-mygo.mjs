@@ -1,0 +1,84 @@
+// Ship only the verified Go executable. NSIS is a packaging tool, never a runtime.
+import { readFile, writeFile, copyFile, mkdir, stat, mkdtemp, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from 'node:path';
+import os from 'node:os';
+
+export const legacyRuntimeFiles = [
+  'chrome_100_percent.pak', 'chrome_200_percent.pak', 'chrome_elf.dll',
+  'ffmpeg.dll', 'icudtl.dat', 'libEGL.dll', 'libGLESv2.dll', 'resources.pak',
+  'snapshot_blob.bin', 'v8_context_snapshot.bin', 'vk_swiftshader.dll',
+  'vulkan-1.dll', 'vk_swiftshader_icd.json', 'd3dcompiler_47.dll', 'dxcompiler.dll', 'dxil.dll',
+  'LICENSE.electron', 'LICENSE.electron.txt', 'LICENSES.chromium.html',
+  'resources/app.asar', 'resources/elevate.exe', 'resources/app-update.yml',
+  'runtime/node.exe', 'dist/main/backend.cjs', 'ReqFlow-MyGO.exe',
+  ...['af', 'am', 'ar', 'bg', 'bn', 'ca', 'cs', 'da', 'de', 'el', 'en-GB', 'en-US',
+    'es', 'es-419', 'et', 'fa', 'fi', 'fil', 'fr', 'gu', 'he', 'hi', 'hr', 'hu', 'id',
+    'it', 'ja', 'kn', 'ko', 'lt', 'lv', 'ml', 'mr', 'ms', 'nb', 'nl', 'pl', 'pt-BR',
+    'pt-PT', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'sw', 'ta', 'te', 'th', 'tr', 'uk',
+    'ur', 'vi', 'zh-CN', 'zh-TW'].map(locale => `locales/${locale}.pak`)
+];
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export async function sha256(file) { return createHash('sha256').update(await readFile(file)).digest('hex'); }
+export function cleanupInclude() {
+  return '!macro ReqFlowCleanupLegacy\n' + legacyRuntimeFiles.map(file =>
+    `  Push "$INSTDIR\\${file.replaceAll('/', '\\')}"\n  Call DeleteLegacyRuntime`).join('\n') +
+    '\n  ; Only remove empty directories. Unknown files and user data stay in place.\n' +
+    ['resources', 'locales', 'runtime', 'dist\\main', 'dist'].map(dir => `  Push "$INSTDIR\\${dir}"\n  Call RemoveEmptyLegacyDirectory`).join('\n') + '\n!macroend\n';
+}
+function run(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: root, windowsHide: true, stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve() : reject(Error(`${command} exited ${code}`)));
+  });
+}
+export async function findNSIS() {
+  const candidates = [process.env.REQFLOW_NSIS, 'C:/Program Files (x86)/NSIS/makensis.exe',
+    path.join(os.homedir(), 'AppData/Local/electron-builder/Cache/nsis/nsis-3.0.4.1/Bin/makensis.exe'),
+    path.join(os.homedir(), 'AppData/Local/electron-builder/Cache/nsis/nsis-3.0.4.1/makensis.exe')].filter(Boolean);
+  for (const file of candidates) if ((await stat(file).catch(() => null))?.isFile()) return file;
+  throw Error('需要 NSIS 3（安装 NSIS 或通过 REQFLOW_NSIS 指定 makensis.exe）；无需 Electron/electron-builder');
+}
+export async function packageMyGO() {
+  if (process.platform !== 'win32') throw Error('Windows packaging requires Windows');
+  const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  const version = pkg.version;
+  const source = path.join(root, 'release/win-unpacked/ReqFlow.exe');
+  const info = JSON.parse(await readFile(path.join(root, 'release/win-unpacked/build-info.json'), 'utf8'));
+  const sourceHash = await sha256(source);
+  if (info.version !== version || info.backend !== 'go' || info.runtime !== 'mygo' || info.sha256 !== sourceHash) throw Error('Go 构建信息或哈希不匹配，请先 npm run build');
+  const release = path.join(root, 'release');
+  const setupName = `ReqFlow-Setup-${version}.exe`;
+  const portableName = `ReqFlow-Portable-${version}.exe`;
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-'));
+  try {
+    const include = path.join(temp, 'legacy-cleanup.nsh');
+    await writeFile(include, cleanupInclude(), 'utf8');
+    const nsis = await findNSIS();
+    await run(nsis, ['/V2', '/INPUTCHARSET', 'UTF8', `/DAPP_VERSION=${version}`, `/DAPP_FILE_VERSION=${version.split('-')[0]}.0`,
+      `/DAPP_SOURCE=${source}`, `/DAPP_BUILD_INFO=${path.join(release, 'win-unpacked/build-info.json')}`,
+      `/DAPP_ICON=${path.join(root, 'build/icon.ico')}`, `/DAPP_OUTPUT=${path.join(release, setupName)}`,
+      `/DLEGACY_CLEANUP_INCLUDE=${include}`, path.join(root, 'build/installer-go.nsi')]);
+    // A portable app is the same Go PE; no extraction directory or bundled runtime.
+    await copyFile(source, path.join(release, portableName));
+    const assets = {};
+    for (const name of [setupName, portableName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };
+    await writeFile(path.join(release, `packaging-manifest-${version}.json`), JSON.stringify({
+      version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: sourceHash }, assets,
+      cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true, files: legacyRuntimeFiles }
+    }, null, 2) + '\n');
+    await writeFile(path.join(release, `SHA256SUMS-${version}.txt`), Object.entries(assets).map(([name, value]) => `${value.sha256}  ${name}`).join('\n') + '\n');
+    await writeFile(path.join(release, `README-Portable-${version}.txt`),
+      `ReqFlow ${version} — Windows x64\r\n\r\n运行 ${portableName}。程序不包含 Node 或 Electron，需系统 WebView2 Runtime。\r\n便携版默认数据为 EXE 同级 data 文件夹；可用 REQFLOW_DATA_DIR 或 --data-dir 显式指定旧数据目录。\r\n安装版升级会保留 data-dir.cfg、注册表 DataDir、用户配置与数据，仅清理明确的旧运行库组件。\r\n`, 'utf8');
+    console.log(`已生成 Go 安装版与绿色版：\n${path.join(release, setupName)}\n${path.join(release, portableName)}`);
+  } finally {
+    if (!path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw Error('Invalid packaging temp directory');
+    await rm(temp, { recursive: true, force: true });
+  }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  packageMyGO().catch(error => { console.error(error.message); process.exitCode = 1; });
+}

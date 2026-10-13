@@ -1,0 +1,176 @@
+package backendgo
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func coreTestApply(t *testing.T, s map[string]any, a map[string]any) {
+	t.Helper()
+	if e := Apply(s, a); e != nil {
+		t.Fatalf("%v: %v", a["op"], e)
+	}
+}
+func coreTestState() (map[string]any, map[string]any) {
+	p := MakeProject("测试", "项目背景")
+	return map[string]any{"projects": []any{p}}, p
+}
+func TestCoreRequirementLifecycle(t *testing.T) {
+	s, p := coreTestState()
+	id := p["id"]
+	coreTestApply(t, s, map[string]any{"op": "item", "project": id, "title": "登录", "criteria": "可登录\n \n可退出", "scheduledDate": "2026-10-13"})
+	i := coreMap(coreList(p["items"])[0])
+	iid := i["id"]
+	if i["number"] != "REQ-001" || len(coreList(i["criteria"])) != 2 {
+		t.Fatal(i)
+	}
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": id, "ids": []any{iid}})
+	b := coreMap(coreList(p["batches"])[0])
+	if ScheduledBatch(p, i) == nil || b["hash"] != coreHash(coreString(b["text"])) || !strings.Contains(coreString(b["text"]), "- [ ] 可登录") {
+		t.Fatal("prompt/schedule mismatch")
+	}
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": id, "id": iid, "batch": b["id"], "version": i["version"]})
+	if i["status"] != "pending_verification" {
+		t.Fatal(i)
+	}
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": id, "id": iid, "pass": false, "note": "退出未实现"})
+	if coreNum(i["version"]) != 2 || i["status"] != "ready" {
+		t.Fatal(i)
+	}
+	if err := Apply(s, map[string]any{"op": "complete", "project": id, "id": iid, "batch": b["id"], "version": int64(1)}); err == nil {
+		t.Fatal("stale batch completed")
+	}
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": id, "ids": []any{iid}})
+	b = coreMap(coreList(p["batches"])[0])
+	if !strings.Contains(coreString(b["text"]), "退出未实现") {
+		t.Fatal("failed verification missing")
+	}
+	coreTestApply(t, s, map[string]any{"op": "submit", "project": id, "batch": b["id"]})
+	if err := Apply(s, map[string]any{"op": "item", "project": id, "id": iid, "title": "不能编辑"}); err == nil {
+		t.Fatal("edited running item")
+	}
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": id, "id": iid})
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": id, "id": iid, "pass": true})
+	if i["status"] != "archived" || !coreTruthy(i["archived"]) || len(UnresolvedFailures(i)) != 0 {
+		t.Fatal(i)
+	}
+	coreTestApply(t, s, map[string]any{"op": "regress", "project": id, "id": iid, "note": "回归问题"})
+	if i["status"] != "ready" || coreNum(i["version"]) != 3 || len(UnresolvedFailures(i)) != 1 {
+		t.Fatal(i)
+	}
+	if len(coreList(i["flowEvents"])) < 8 {
+		t.Fatal("timeline incomplete")
+	}
+}
+func TestCoreAssignmentAndAccumulatedBatches(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "work"})
+	i := coreMap(coreList(p["items"])[0])
+	a := map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}}
+	coreTestApply(t, s, a)
+	first := coreMap(coreList(p["batches"])[0])
+	coreTestApply(t, s, map[string]any{"op": "assign", "project": p["id"], "ids": []any{i["id"]}, "executor": "human"})
+	if ScheduledBatch(p, i) == nil || coreMap(coreList(first["items"])[0])["executor"] != "human" {
+		t.Fatal("assignment invalidated schedule")
+	}
+	if e := Apply(s, map[string]any{"op": "complete", "project": p["id"], "id": i["id"], "batch": first["id"], "version": i["version"]}); e == nil {
+		t.Fatal("human item accepted AI completion")
+	}
+	coreTestApply(t, s, map[string]any{"op": "submit", "project": p["id"], "batch": first["id"]})
+	coreTestApply(t, s, a)
+	second := coreMap(coreList(p["batches"])[0])
+	coreTestApply(t, s, map[string]any{"op": "submit", "project": p["id"], "batch": second["id"]})
+	coreTestApply(t, s, map[string]any{"op": "cancel", "project": p["id"], "batch": first["id"]})
+	if i["status"] != "in_progress" {
+		t.Fatal("cancelled item while another batch runs")
+	}
+	coreTestApply(t, s, map[string]any{"op": "guidance", "project": p["id"], "text": "新引导", "deliveryGuidance": "自定义交付"})
+	if i["status"] != "ready" || second["status"] != "cancelled" || coreNum(i["version"]) != 3 {
+		t.Fatal("guidance invalidation mismatch")
+	}
+}
+func TestCoreValidationAndSettings(t *testing.T) {
+	s, p := coreTestState()
+	for _, date := range []any{"2026-02-29", "2026-13-01", "0000-01-01", "2026-1-01", true} {
+		if _, e := ValidateDate(date); e == nil {
+			t.Fatalf("accepted %v", date)
+		}
+	}
+	if _, e := ValidateDate("2024-02-29"); e != nil {
+		t.Fatal(e)
+	}
+	for _, a := range []map[string]any{{"op": "item", "executor": "plugin:bad/command"}, {"op": "item", "type": "bad"}, {"op": "item", "priority": "P3"}, {"op": "item", "deliveryGuidance": ""}, {"op": "item", "attachments": []any{map[string]any{"id": "../x", "label": "图片1", "name": "x", "dataUrl": "data:image/png;base64,AA=="}}}, {"op": "publishScript", "script": "../publish.js"}, {"op": "publishScript", "script": "C:/publish.js"}, {"op": "verifySource", "source": map[string]any{"kind": "file", "value": "x"}}} {
+		a["project"] = p["id"]
+		if e := Apply(s, a); e == nil {
+			t.Fatalf("accepted %v", a)
+		}
+	}
+	coreTestApply(t, s, map[string]any{"op": "folder", "name": "F"})
+	folder := coreMap(coreList(s["folders"])[1])
+	coreTestApply(t, s, map[string]any{"op": "projectFolder", "project": p["id"], "folderId": folder["id"]})
+	coreTestApply(t, s, map[string]any{"op": "deleteFolder", "folderId": folder["id"]})
+	if p["folderId"] != "default" {
+		t.Fatal("folder removal lost project")
+	}
+	if e := Apply(s, map[string]any{"op": "deleteProject", "project": p["id"]}); e == nil {
+		t.Fatal("deleted last project")
+	}
+	if !MatchesSchedule("", "through", "2026-10-13") || MatchesSchedule("2026-10-14", "through", "2026-10-13") {
+		t.Fatal("date filter")
+	}
+}
+func TestCoreMoveAndVerificationFailures(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "project", "name": "目标"})
+	target := coreMap(coreList(s["projects"])[1])
+	target["deliveryGuidance"] = "目标默认"
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "说明"})
+	i := coreMap(coreList(p["items"])[0])
+	coreTestApply(t, s, map[string]any{"op": "moveItem", "project": p["id"], "id": i["id"], "targetProject": target["id"]})
+	if i["deliveryGuidance"] != "说明改动、未解决的问题。" || coreNum(i["version"]) != 2 || len(coreList(p["items"])) != 0 {
+		t.Fatal("moved item settings mismatch")
+	}
+	i["history"] = []any{map[string]any{"event": "验证失败", "time": "2026-10-13T00:00:00.000Z", "note": "新问题"}, map[string]any{"event": "验证失败", "time": "2026-10-12T00:00:00.000Z", "note": "旧问题"}, map[string]any{"event": "验证失败", "time": "2026-10-11T00:00:00.000Z", "note": "已修复", "resolved": true}}
+	fails := UnresolvedFailures(i)
+	if len(fails) != 2 || coreMap(fails[0])["current"] != false || coreMap(fails[1])["current"] != true {
+		t.Fatal("failure ordering")
+	}
+	prompt := BuildPrompt(target, []any{i})
+	if !strings.Contains(prompt, "【此前问题未修复】旧问题") || !strings.Contains(prompt, "【本轮新问题】新问题") || strings.Contains(prompt, "已修复") {
+		t.Fatal(prompt)
+	}
+}
+func TestCoreCanonicalTokenJSON(t *testing.T) {
+	var p map[string]any
+	_ = json.Unmarshal([]byte(`{"id":"p","revision":99,"unknown":{"10":"ten","2":"two","😀":"astral","\ue000":"private","path":"derived"},"text":"<>&\u2028literal\\u2028","path":"generated"}`), &p)
+	expected := "8a648adbc33fff970d06a3dc86ab01c862cc72761478479aeda29387e3542e33"
+	if token := ProjectConcurrencyToken(p); token != expected {
+		t.Fatalf("TS signature mismatch got %s want %s", token, expected)
+	}
+	before := ProjectConcurrencyToken(p)
+	p["revision"] = int64(100)
+	p["path"] = "changed"
+	if ProjectConcurrencyToken(p) != before {
+		t.Fatal("derived fields changed token")
+	}
+	p["text"] = "changed"
+	if ProjectConcurrencyToken(p) == before {
+		t.Fatal("user edit retained token")
+	}
+	var decoded any
+	if e := json.Unmarshal([]byte(coreJSON(p)), &decoded); e != nil {
+		t.Fatal("literal escape corrupted JSON", e)
+	}
+}
+
+func TestCorePromptMatchesTypeScript(t *testing.T) {
+	var fixture map[string]any
+	if e := json.Unmarshal([]byte(`{"p":{"id":"p","name":"中文😀测试","description":"背景\n第二行","guidance":"请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。","guideVersion":1,"guideHistory":[],"deliveryGuidance":"说明改动、测试命令和结果、未解决的问题。","aiValidation":false,"items":[],"batches":[],"nextNumber":1},"items":[{"id":"a","number":"REQ-001","title":"登录😀","body":"<form>登录</form>","type":"bug","priority":"P0","criteria":["成功","退出"],"version":2,"history":[{"event":"验证失败","time":"2026-10-13T00:00:00.000Z","note":"新问题"},{"event":"验证失败","time":"2026-10-12T00:00:00.000Z","note":"旧问题"}],"attachments":[{"id":"img","label":"图片1","name":"ref.png","dataUrl":"data:image/png;base64,AA==","path":"E:/ref.png"}]},{"id":"b","number":"REQ-002","title":"","body":"<form>登录</form>","type":"bug","priority":"P0","criteria":["成功","退出"],"version":2,"history":[],"attachments":[],"deliveryGuidance":"独立交付"}]}`), &fixture); e != nil {
+		t.Fatal(e)
+	}
+	prompt := BuildPrompt(coreMap(fixture["p"]), coreList(fixture["items"]))
+	if hash := coreHash(prompt); hash != "b5bbe7b3934410f43f782bfe1dc98232856eec727c3d0976e0e8d800ecd8b7d8" {
+		t.Fatalf("TypeScript prompt mismatch: %s", hash)
+	}
+}

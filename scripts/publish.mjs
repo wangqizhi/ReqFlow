@@ -9,7 +9,6 @@
 // 依赖：Node >= 22；项目根目录已执行 npm install；GitHub CLI 已通过 gh auth login 登录。
 // 打包后自动提交工作区变更、推送当前分支及版本标签，再上传 GitHub Release。
 // 产物：安装包与便携版输出到 release/；上传仓库读取 Git origin。
-import { readdirSync } from 'node:fs';
 import { prepareReleaseVersion } from './release-version.mjs';
 import { startStep, traceStep } from './release-trace.mjs';
 import { checkReleasePublished } from './release-github.mjs';
@@ -57,7 +56,7 @@ run('构建代码', 'npm', ['run', 'build']);
 run('打包 Windows 安装版与便携版', 'npm', ['run', 'dist']);
 
 const release = path.join(root, 'release');
-const artifacts = readdirSync(release).filter((f) => f.includes(version) && f.endsWith('.exe'));
+const artifacts = ['Setup', 'Portable'].map(kind => `ReqFlow-${kind}-${version}.exe`);
 console.log(`\n打包完成，产物位于 release/（ReqFlow v${version}）：`);
 for (const file of artifacts) console.log('  ' + path.join(release, file));
 

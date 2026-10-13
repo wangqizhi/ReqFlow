@@ -90,7 +90,7 @@ async function main() {
     } finally { await handle.close(); }
   }
   await traceStep('检查发布版本一致性', () => verifyReleaseVersion(root, version));
-  console.log(`版本一致性检查通过：源码、锁文件、打包应用、安装版、便携版均为 ${version}`);
+  console.log(`版本一致性检查通过：源码、锁文件、Go 程序、安装版、绿色版均为 ${version}；Go 构建/打包清单 SHA256 已核验`);
   const sums = (await traceStep('计算安装包 SHA256', () => Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`)))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
   let notesFile = options.notes ? path.resolve(root, options.notes) : path.join(root, 'docs', `release-${version}.md`);
@@ -117,7 +117,7 @@ async function main() {
     traceStep('上传安装包到 GitHub', () => gh(['release', 'upload', tag, ...assets, sumsFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]));
   } else {
     traceStep('创建 Release 并上传安装包到 GitHub', () => gh(['release', 'create', tag, ...assets, sumsFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
-      ...(notesFile ? ['--notes-file', notesFile] : ['--notes', `ReqFlow ${version}\n\nWindows x64：Setup 为安装版，Portable 为便携版。下载后可用 SHA256SUMS 文件校验。`]),
+      ...(notesFile ? ['--notes-file', notesFile] : ['--notes', `ReqFlow ${version}\n\nWindows x64，Go/MyGO 独立应用：Setup 为保留原数据的安装升级版，Portable 为单文件绿色版。需要系统 WebView2 Runtime。下载后可用 SHA256SUMS 文件校验。`]),
       ...(options.draft ? ['--draft'] : []), ...(version.includes('-') ? ['--prerelease'] : [])]));
   }
   console.log(`完成：https://github.com/${repo}/releases/tag/${tag}`);

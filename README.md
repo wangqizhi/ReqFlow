@@ -2,9 +2,11 @@
 
 把想法整理成可执行需求，交给 AI 编码，再把实现结果带回人工验证。
 
-ReqFlow 是面向个人开发者的 Windows 桌面工作台，使用 Electron、React 和 TypeScript。它把多项目需求管理、Prompt 生成、AI 需求讨论、项目文件浏览和 Git 操作放在同一个应用中，也提供 CLI 与 Agent 插件，方便编码助手读取需求和回写实现结果。
+ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO 后端、系统 WebView2 和 React 界面。它把多项目需求管理、Prompt 生成、AI 需求讨论、项目文件浏览和 Git 操作放在同一个应用中，也提供 CLI 与 Agent 插件，方便编码助手读取需求和回写实现结果。运行时不包含 Node 或 Electron。
 
 核心需求管理在本机运行，无需登录。AI 调用、远程 Git 操作和远程备份需要联网及相应配置。当前源码版本见 [package.json](package.json)。
+
+[2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
 ## 下载与安装
 
@@ -44,7 +46,7 @@ ReqFlow 是面向个人开发者的 Windows 桌面工作台，使用 Electron、
 
 旧工作区继续读取 `workspace.json`，可在「插件/MOD/AGENT → 实验室 → 迁移到 SQLite」进行迁移。迁移会校验完整数据、保留原文件及带时间戳的备份，成功后 GUI、CLI 和远程备份统一读取数据库。迁移后原 JSON 不再更新，导出最新数据请使用应用或 `workspace export`。便携版迁移时仍需一起移动整个 `data/` 目录。
 
-AI Key 使用 Electron `safeStorage` 加密，单独保存在 `ai-settings.json`，不进入远程工作区备份。AI 请求日志记录时间和请求元数据，不保存 Key、URL、需求正文或响应文案。使用 AI 功能时，相关项目上下文会发送到所配置的服务。
+AI Key 使用 Go 调用 Windows DPAPI 加密，兼容读取原 Electron `safeStorage` 的 v10/v11 密文，单独保存在 `ai-settings.json`，不进入远程工作区备份。原 `Local State` 加密密钥文件保留。AI 请求日志记录时间和请求元数据，不保存 Key、URL、需求正文或响应文案。使用 AI 功能时，相关项目上下文会发送到所配置的服务。
 
 远程工作区备份可能包含需求、图片和本地路径，请选择适合存放这些数据的仓库。发布源码前应检查文件；`.gitignore` 已排除常见本地数据、密钥、缓存和构建产物，但不能自动识别所有私密内容。
 
@@ -70,20 +72,23 @@ AI Key 使用 Electron `safeStorage` 加密，单独保存在 `ai-settings.json`
 
 ## 本地开发
 
-需要 Node.js ≥ 22.13、npm 和 Windows。Git 操作需要 Git；手动发布需要 GitHub CLI。
+开发构建需要 Windows x64、Node.js ≥ 22.13、npm、Go ≥ 1.27.1（支持自动工具链下载）和 NSIS 3。运行程序只需要系统 WebView2；Git 操作需要 Git，手动发布需要 GitHub CLI。项目自身的 JavaScript 发布脚本需由开发环境的 Node 执行。
 
 ```powershell
 npm ci
-npm run dev             # Vite + Electron 开发窗口
+npm run dev             # 构建并启动 Go 程序
 npm run dev:renderer    # 仅浏览器预览，使用 mock 数据
 npm run typecheck
-npm run smoke
-npm run cli-e2e
-npm run build           # 构建主进程、preload、界面及 CLI 文档
-npm run dist            # 打包 Windows x64 安装版与便携版
+npm run smoke           # Go 测试与 vet
+npm run build           # 内嵌 React 界面，编译独立 Go EXE
+npm run cli-e2e         # 实际 Go EXE，空 PATH 验证独立运行
+npm run check:mygo:ui   # 原数据只读副本中的 WebView 检查
+npm run dist            # NSIS 安装程序与单文件绿色版
+npm run package-check  # 实际 Go CLI、包哈希和发布 dry-run
+npm run installer-check # 隔离沙盒中的安装升级/卸载验证
 ```
 
-`npm run dist` 使用已有 `dist/`，发布前务必先执行 `npm run build`。构建输出保存在 `dist/` 与 `release/`，均不提交到 Git。
+`npm run dist` 使用已编译的 `release/win-unpacked/ReqFlow.exe`，发布前务必先执行 `npm run build`。可通过 `REQFLOW_NSIS` 指定 `makensis.exe`。构建输出保存在 `dist/` 与 `release/`，均不提交到 Git。
 
 ## 手动发布到 GitHub Releases
 
@@ -107,14 +112,14 @@ npm run release:github
 npm run release:github -- --draft
 ```
 
-脚本只上传当前版本的 Setup、Portable 和自动生成的 SHA256 校验文件，不上传构建日志、解包目录、用户数据或其他版本的安装包。缺少任一安装包时会停止。
+脚本只上传当前版本的 Go Setup、Go Portable 和自动生成的 SHA256 校验文件。上传前核对 Go 构建标记、主程序/安装包版本、完整打包清单和 SHA256，拒绝旧 Electron 产物。缺少任一安装包时会停止。
 
 已有 Release 时只上传附件，保留原说明和发布状态；同名附件默认拒绝覆盖，明确需要替换时使用 `--clobber`。草稿发布状态请在 GitHub 中手动调整。
 
 其他用法：
 
 ```powershell
-npm run release:github -- --version 1.11.1 --dry-run
+npm run release:github -- --version 2.0.0 --dry-run
 npm run release:github -- --repo owner/repo --notes docs/my-release.md
 npm run release:github -- --help
 ```
@@ -125,9 +130,11 @@ npm run release:github -- --help
 
 | 目录 | 内容 |
 | --- | --- |
-| `src/core/` | 领域模型、存储、服务、CLI 帮助 |
-| `src/main/` | Electron 主进程、IPC、CLI、Git 与本地配置 |
-| `src/preload/` | 界面与主进程之间的桥接 |
+| `src/mygo/` | Go 桌面宿主、原生系统操作和数据目录识别 |
+| `src/mygo/backendgo/` | 完整 Go 领域规则、SQLite/JSON、CLI、AI、Git、备份、归档、发布与更新 |
+| `src/mygo/preload/` | 前端直接调用 Go 服务的接口映射 |
+| `src/core/` | 前端类型、界面辅助逻辑和 CLI 帮助，旧存储实现仅供迁移比对 |
+| `src/main/`、`src/preload/` | 旧 Electron 源码参照，不参与 2.0 编译或发布 |
 | `src/renderer/` | React 工作台 |
 | `plugins/` | Codex、ZCode、Pi 接入 |
 | `scripts/` | 开发、构建、检查与手动发布脚本 |

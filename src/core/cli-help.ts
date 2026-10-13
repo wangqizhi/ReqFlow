@@ -1,7 +1,7 @@
 // CLI 参考说明 —— 单一数据源：
-//  1) `ReqFlow.exe --cli help` 的文本输出（main/cli.ts 渲染）
+//  1) `ReqFlow.exe --cli help` 的文本输出（构建生成 Go 后端帮助常量）
 //  2) GUI 帮助页面的命令表（renderer 渲染）
-//  3) docs/cli-reference.md（scripts/gen-docs.mjs 生成）
+//  3) docs/cli-reference.md（scripts/gen-docs-helper.mjs 生成）
 // 修改命令时只改这里，三处保持一致。
 
 export const CLI_USAGE = 'ReqFlow.exe --cli <command> [options]';

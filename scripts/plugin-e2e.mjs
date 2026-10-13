@@ -1,4 +1,4 @@
-// Real Electron CLI; isolated temporary workspace, never uses the user's store.
+// Actual Go CLI; isolated legacy JSON fixture verifies existing Agent contracts.
 import { build } from 'esbuild';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -13,9 +13,6 @@ try {
   const root = path.join(temp, '中文 项目'), child = path.join(root, 'src');
   const sibling = path.join(temp, '中文 项目-other');
   await Promise.all([fs.mkdir(app), fs.mkdir(data), fs.mkdir(child, { recursive: true }), fs.mkdir(sibling)]);
-  await fs.writeFile(path.join(app, 'package.json'), JSON.stringify({ name: 'reqflow-plugin-test', version: '1.0.0', main: 'main.cjs' }));
-  await build({ entryPoints: ['src/main/index.ts'], outfile: path.join(app, 'main.cjs'), bundle: true,
-    platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' });
   const domainFile = path.join(temp, 'domain.mjs');
   await build({ entryPoints: ['src/core/domain.ts'], outfile: domainFile, bundle: true,
     platform: 'node', format: 'esm', logLevel: 'silent' });
@@ -28,7 +25,7 @@ try {
   const [first, second, ready] = p.items;
   await apply(state, { op: 'generate', project: p.id, ids: [first.id, second.id] });
   await apply(state, { op: 'submit', project: p.id, batch: p.batches[0].id });
-  const config = { executable: path.resolve('node_modules/electron/dist/electron.exe'), args: [app], dataDir: data };
+  const config = { executable: path.resolve('release/win-unpacked/ReqFlow.exe'), args: [], dataDir: data };
   const store = path.join(data, 'workspace.json');
   let version = 1;
   const save = async () => fs.writeFile(store, JSON.stringify({ id: 'local_electron', version: version++, data: state }));
@@ -97,7 +94,7 @@ try {
   assert.equal((await readRun(config, root, path.join(temp, 'runs'))).requirements.length, 0);
   await assert.rejects(apply(state, { op: 'complete', project: p.id, id: assigned[1].id, batch: p.batches[0].id, version: assigned[1].version }), /已变化/);
   await assert.rejects(apply(state, { op: 'item', project: p.id, executor: 'invalid' }), /执行方式/);
-  console.log('PASS: 实际 Electron CLI 领取/部分完成/幂等重试；目录边界、重复绑定、最新批次、版本与引导词冲突。');
+  console.log('PASS: 实际 Go CLI 领取/部分完成/幂等重试；目录边界、重复绑定、最新批次、版本与引导词冲突。');
 } finally {
   // This is an absolute path allocated by mkdtemp under the intended OS temp directory.
   assert.ok(path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep));

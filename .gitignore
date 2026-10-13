@@ -12,6 +12,9 @@ electron-builder.log
 # ---- 运行时产物 / 用户数据 ----
 release/
 dist/
+/src/mygo/frontend/
+/src/mygo/*.syso
+/src/mygo/reqflow-winres.json
 out/
 .cache/
 .parcel-cache/

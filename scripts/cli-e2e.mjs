@@ -1,18 +1,18 @@
-// CLI 端到端测试：用真实 electron.exe 走完 Agent 典型工作流。
-// 运行：node scripts/cli-e2e.mjs（数据写入 .test-data，测试后自动清理）
+// CLI 端到端测试：实际 Go EXE 的完整 Agent 工作流，数据仅在随机临时目录。
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 const packaged = process.env.REQFLOW_E2E_EXE;
-const exe = path.resolve(packaged || 'node_modules/electron/dist/electron.exe');
-const dataDir = path.resolve('.test-data');
+const exe = path.resolve(packaged || 'release/win-unpacked/ReqFlow.exe');
+const dataDir = mkdtempSync(path.join(os.tmpdir(), 'reqflow-go-cli-full-'));
 const env = { ...process.env, REQFLOW_DATA_DIR: dataDir };
 const appVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
 
 function rf(...args) {
-  const out = execFileSync(exe, [...(packaged ? [] : ['.']), '--cli', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env });
+  const out = execFileSync(exe, ['--cli', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env, windowsHide: true });
   return JSON.parse(out.trim());
 }
 function rfFail(...args) {
@@ -29,7 +29,7 @@ const ok = (label, cond) => {
   if (!cond) process.exitCode = 1;
 };
 
-rmSync(dataDir, { recursive: true, force: true });
+if (!path.resolve(dataDir).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw Error('Invalid CLI testing directory');
 try {
   console.log('CLI 端到端测试（' + exe + ' --cli）:');
   let r = rf('version');
