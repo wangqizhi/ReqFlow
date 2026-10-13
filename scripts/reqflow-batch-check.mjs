@@ -62,10 +62,20 @@ app.whenReady().then(async()=>{
   assert.ok(spacing.top>=15 && spacing.bottom>=15,JSON.stringify(spacing));
   await shot('lab-900'); win.setSize(1440,700); await shot('lab-700'); win.setSize(1440,900);
   await js('document.querySelector(".help-header .icon-btn").click()');
-  await js('(async()=>{const r=await window.reqflow.getWorkspace(),p=r.state.projects[0];const added=await window.reqflow.apply({op:"item",project:p.id,body:"Codex dispatch"});const item=added.state.projects[0].items[0];const batch=await window.reqflow.apply({op:"generate",project:p.id,ids:[item.id]});await window.reqflow.apply({op:"submit",project:p.id,batch:batch.state.projects[0].batches[0].id});})()');
+  await js('(async()=>{const r=await window.reqflow.getWorkspace(),p=r.state.projects[0];const added=await window.reqflow.apply({op:"item",project:p.id,body:"Codex dispatch"});const item=added.state.projects[0].items[0];await window.reqflow.apply({op:"generate",project:p.id,ids:[item.id]});})()');
   await js('document.querySelector("[aria-label=刷新数据]").click()');
   await js('Array.from(document.querySelectorAll(".navtab")).find(b=>b.textContent.startsWith("排期表")).click()');
   await wait('Array.from(document.querySelectorAll(".card-actions button")).some(b=>b.textContent==="Codex")');
+  await click('继续排期');
+  await wait('Array.from(document.querySelectorAll(".card-actions button")).some(b=>b.textContent==="提交验证")');
+  assert.equal(await js('(async()=> (await window.reqflow.getWorkspace()).state.projects[0].items[0].status)()'),'in_progress','stranded draft resumes through GUI');
+  await js('(async()=>{const r=await window.reqflow.getWorkspace();await window.reqflow.apply({op:"item",project:r.state.projects[0].id,body:"GUI scheduling regression"});})()');
+  await js('Array.from(document.querySelectorAll(".navtab")).find(b=>b.textContent.startsWith("需求池")).click()');
+  await wait('Array.from(document.querySelectorAll(".card-actions button")).some(b=>b.textContent==="排期")');
+  await click('排期');
+  await wait('document.querySelector(".toast")?.textContent.includes("已排期")');
+  assert.ok(await js('(async()=> (await window.reqflow.getWorkspace()).state.projects[0].items.every(i=>i.status==="in_progress"))()'),'GUI generate and submit succeed consecutively with SQLite signatures');
+  assert.equal(await js('Array.from(document.querySelectorAll(".card-actions button")).some(b=>["排期","编辑","迁移到其他项目","删除"].includes(b.textContent.trim()))'),false,'schedule cards show execution actions');
   // Clipboard writes need focus. Stub only clipboard in this test window.
   await js('Object.defineProperty(navigator,"clipboard",{value:{writeText:async()=>{}},configurable:true})');
   const before=await js('(async()=>{const r=await window.reqflow.getWorkspace();return JSON.stringify(r);})()');

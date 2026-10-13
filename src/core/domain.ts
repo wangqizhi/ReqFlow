@@ -285,7 +285,14 @@ async function sha256Hex(text: string) {
 export async function projectConcurrencyToken(p: Project): Promise<string> {
   // Materialized attachment paths are derived, not user edits. Content tokens also
   // detect older writers which preserve (but do not increment) project.revision.
-  return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => key === 'path' ? undefined : value));
+  return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => {
+    if (key === 'path') return undefined;
+    // Database reconstruction can reorder object fields without changing content.
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]]));
+    }
+    return value;
+  }));
 }
 export function mutationProjectIds(a: any): string[] | null {
   const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];

@@ -783,12 +783,13 @@ export default function App() {
                       <div className="card-actions">
                         {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
                         {i.status === 'in_progress' && <button className="btn" onClick={() => copyPrompt([i])}>复制 Prompt</button>}
-                        {i.status === 'ready' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
-                        {i.status === 'ready' && <button className="btn" disabled={busy} onClick={() => edit(i)}>编辑</button>}
-                        {i.status === 'ready' && <button className="btn" disabled={busy} onClick={() => {
+                        {i.status === 'ready' && tab === 'generate' && <button className="btn accent" disabled={busy} onClick={async () => { const draft = scheduledBatch(p!, i); if (draft && await act({ op: 'submit', batch: draft.id }, true)) notify('已继续排期，进入待开发'); }}>继续排期</button>}
+                        {i.status === 'ready' && tab !== 'generate' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
+                        {i.status === 'ready' && tab !== 'generate' && <button className="btn" disabled={busy} onClick={() => edit(i)}>编辑</button>}
+                        {i.status === 'ready' && tab !== 'generate' && <button className="btn" disabled={busy} onClick={() => {
                           setEditing(i); setTargetProject(data.projects.find((pr) => pr.id !== p?.id)?.id || ''); setModal('moveItem');
                         }}>迁移到其他项目</button>}
-                        {i.status === 'ready' && <button className="btn" disabled={busy} onClick={() => {
+                        {i.status === 'ready' && tab !== 'generate' && <button className="btn" disabled={busy} onClick={() => {
                           setEditing(i); setModal('deleteItem');
                         }}><Trash size={14} />删除</button>}
                         {i.status === 'in_progress' && <button className="btn primary" disabled={busy} onClick={() => submitItem(i)}>提交验证</button>}
