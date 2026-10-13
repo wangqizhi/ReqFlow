@@ -49,6 +49,9 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [archiveDate, setArchiveDate] = useState('');
+  // REQ-131：归档日期按「年 → 月 → 日」文件夹树展开浏览；同一层只保留一个展开项
+  const [archiveOpenYear, setArchiveOpenYear] = useState('');
+  const [archiveOpenMonth, setArchiveOpenMonth] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState('已保存');
@@ -445,6 +448,23 @@ export default function App() {
     return time && Number.isFinite(Date.parse(time)) ? localDate(new Date(time)) : '日期未知';
   };
   const archiveDates = [...new Set(visible.map(archivedDate))].sort().reverse();
+  // REQ-131：把归档日期组织成「年 → 月 → 日」的文件夹树（archiveDates 已按日期倒序，最新年份/月份在前）；无法解析的日期单独归为一组
+  const archiveTree = (() => {
+    const years: { year: string; count: number; months: { month: string; count: number; days: { day: string; date: string; count: number }[] }[] }[] = [];
+    for (const date of archiveDates) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+      if (!match) continue;
+      const count = visible.filter(i => archivedDate(i) === date).length;
+      let year = years.find(n => n.year === match[1]);
+      if (!year) { year = { year: match[1], count: 0, months: [] }; years.push(year); }
+      let month = year.months.find(n => n.month === match[2]);
+      if (!month) { month = { month: match[2], count: 0, days: [] }; year.months.push(month); }
+      month.days.push({ day: match[3], date, count });
+      month.count += count;
+      year.count += count;
+    }
+    return { years, unknown: archiveDates.filter(date => !/^\d{4}-\d{2}-\d{2}$/.test(date)) };
+  })();
   const shownItems = tab === 'archived' ? visible.filter(i => archivedDate(i) === archiveDate) : visible;
   const windowBar = bridge.windowControl && <div className="window-bar"><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
   const batch = p?.batches.find((b) => b.id === batchId) || p?.batches.find((b) => b.mode === 'develop');
@@ -511,7 +531,14 @@ export default function App() {
     setTab(v);
     void load({ quiet: true }); // REQ-076：切换模块时立即刷新 flow 状态
     if (v === 'generate') { setScheduleMode('through'); setScheduleDate(localDate()); }
-    if (v === 'archived') setArchiveView('items');
+    // REQ-131：进入归档页时展开最新年份与月份，直接看到最近的日期文件夹。
+    // 这里必须直接统计归档需求：当前渲染的 visible 仍是旧 tab 的过滤结果，取不到归档日期
+    if (v === 'archived') {
+      setArchiveView('items');
+      const latest = /^(\d{4})-(\d{2})-\d{2}$/.exec([...new Set((p?.items || []).filter(i => i.archived).map(archivedDate))].sort().reverse()[0] || '');
+      setArchiveOpenYear(latest?.[1] || '');
+      setArchiveOpenMonth(latest?.[2] || '');
+    }
     if (v !== 'feature' && v !== 'generate') setSelected([]);
   }
 
@@ -779,7 +806,33 @@ export default function App() {
                 )}
 
                 {tab === 'feature' && <div className="requirement-sort segmented" role="group" aria-label="需求排序">{[['desc', '最新在前'], ['asc', '最早在前'], ['priority', '优先级']].map(([id, label]) => <button key={id} aria-pressed={sort === id} className={sort === id ? 'on' : ''} onClick={() => setSort(id)}>{label}</button>)}</div>}
-                {tab === 'archived' && <div className="archive-folders"><button className="btn sm" onClick={() => setArchiveDate('')} disabled={!archiveDate}>全部日期</button>{archiveDate && <span className="muted">{archiveDate}</span>}{!archiveDate && archiveDates.map(date => <button key={date} className="archive-folder" onClick={() => setArchiveDate(date)}><FolderOpen size={24} /><strong>{date}</strong><span>{visible.filter(i => archivedDate(i) === date).length} 条需求</span></button>)}</div>}
+                {tab === 'archived' && archiveDates.length > 0 && (
+                  <nav className="archive-folders" aria-label="归档日期文件夹">
+                    <button className={'archive-row archive-root' + (!archiveDate ? ' chosen' : '')} onClick={() => setArchiveDate('')}><FolderOpen size={16} /><strong>全部日期</strong><span>{visible.length} 条需求</span></button>
+                    {archiveTree.years.map(n => (
+                      <div className="archive-branch" key={n.year}>
+                        <button className="archive-row" aria-expanded={archiveOpenYear === n.year} onClick={() => { const opening = archiveOpenYear !== n.year; setArchiveOpenYear(opening ? n.year : ''); setArchiveOpenMonth(opening ? n.months[0]?.month || '' : ''); }}>
+                          <ChevronDown size={14} className={'archive-chevron' + (archiveOpenYear === n.year ? ' open' : '')} /><FolderOpen size={17} /><strong>{n.year} 年</strong><span>{n.count} 条</span>
+                        </button>
+                        {archiveOpenYear === n.year && n.months.map(m => (
+                          <div className="archive-branch" key={m.month}>
+                            <button className="archive-row archive-month" aria-expanded={archiveOpenMonth === m.month} onClick={() => setArchiveOpenMonth(archiveOpenMonth === m.month ? '' : m.month)}>
+                              <ChevronDown size={14} className={'archive-chevron' + (archiveOpenMonth === m.month ? ' open' : '')} /><FolderOpen size={16} /><strong>{Number(m.month)} 月</strong><span>{m.count} 条</span>
+                            </button>
+                            {archiveOpenMonth === m.month && m.days.map(d => (
+                              <button key={d.date} className={'archive-row archive-day' + (archiveDate === d.date ? ' chosen' : '')} onClick={() => setArchiveDate(d.date)}>
+                                <FolderOpen size={15} /><strong>{Number(d.day)} 日</strong><span>{d.count} 条</span>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {archiveTree.unknown.map(date => (
+                      <button key={date} className={'archive-row archive-day' + (archiveDate === date ? ' chosen' : '')} onClick={() => setArchiveDate(date)}><FolderOpen size={16} /><strong>{date}</strong><span>{visible.filter(i => archivedDate(i) === date).length} 条</span></button>
+                    ))}
+                  </nav>
+                )}
                 {[...shownItems].sort(tab === 'archived' ? compareArchivedItems : tab === 'feature' && sort !== 'priority' ? (a, b) => (sort === 'desc' ? -1 : 1) * (Number(a.number.replace('REQ-', '')) - Number(b.number.replace('REQ-', ''))) : (a, b) => a.priority.localeCompare(b.priority)).map((i) => (
                   <article key={i.id} className={'req-card' + (selected.includes(i.id) ? ' chosen' : '')}>
                     {tab === 'feature' && eligible(i) && (
@@ -848,7 +901,7 @@ export default function App() {
                   </article>
                 ))}
                 <footer className="list-foot">
-                  <span>{tab === 'archived' && !archiveDate ? visible.length : shownItems.length} 条需求{tab === 'archived' && !archiveDate ? ` · ${archiveDates.length} 个日期文件夹` : ''}</span>
+                  <span>{tab === 'archived' && !archiveDate ? visible.length : shownItems.length} 条需求{tab === 'archived' && !archiveDate ? ` · ${archiveTree.years.length} 个年份 · ${archiveDates.length} 个日期文件夹` : ''}</span>
                   <span>{tab === 'archived' ? '归档时间倒序' : '优先级排序'}{tab === 'feature' ? ` · 已选择 ${picked.length} 条` : ''}</span>
                 </footer>
               </>

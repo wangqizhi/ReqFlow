@@ -76,6 +76,29 @@
       await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === originalProject));
       await waitFor(() => document.querySelector('.main h1')?.textContent === originalProject);
     }
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('归档')));
+    const archiveNav = document.querySelector('.archive-folders');
+    if (archiveNav) {
+      // REQ-131：进入归档页即展开最新年/月，年份可折叠，点击日文件夹筛选、全部日期还原
+      const yearButton = [...archiveNav.querySelectorAll('.archive-row')].find(el => /^\d{4} 年$/.test(el.querySelector('strong')?.textContent || ''));
+      const monthsOnEntry = archiveNav.querySelectorAll('.archive-month').length;
+      const openOnEntry = yearButton?.getAttribute('aria-expanded') === 'true';
+      let collapsed = false;
+      if (yearButton) {
+        if (yearButton.getAttribute('aria-expanded') !== 'true') await click(yearButton);
+        await click(yearButton);
+        collapsed = archiveNav.querySelectorAll('.archive-month').length === 0;
+        await click(yearButton);
+      }
+      const dayButton = archiveNav.querySelector('.archive-day');
+      const total = document.querySelector('.list-foot span').textContent;
+      if (dayButton) await click(dayButton);
+      const dayCount = dayButton ? parseInt(dayButton.querySelector('span').textContent, 10) : 0;
+      const dayFilter = dayButton
+        ? dayButton.classList.contains('chosen') && document.querySelector('.list-foot span').textContent.startsWith(`${dayCount} 条需求`) && document.querySelector('.list-foot span').textContent !== total
+        : true;
+      checks.archiveFolders = { ok: !!openOnEntry && monthsOnEntry > 0 && collapsed && dayFilter, openOnEntry, monthsOnEntry, collapsed, dayFilter };
+    } else checks.archiveFolders = { ok: true, note: 'no archived dates' };
     await click(document.querySelector('.navtab'));
 
     const deletion = document.querySelector('.side-project-del');

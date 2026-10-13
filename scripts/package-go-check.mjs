@@ -93,6 +93,52 @@ try {
   } finally { running.kill(); await new Promise(resolve => running.once('exit', resolve)); }
   console.log('PASS: running app blocks silent upgrade without terminating it or deleting files');
 
+  // REQ-129: the wizard's close-and-continue helpers terminate the process that
+  // matches the install path exactly, then wait for the executable to unlock.
+  const harnessNsi = path.join(temp, 'close-harness.nsi');
+  const harnessExe = path.join(temp, 'close-harness.exe');
+  const closeReport = path.join(temp, 'close-report.txt');
+  const victim = path.join(install, 'ReqFlow.exe');
+  await writeFile(harnessNsi, `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${harnessExe}"
+!include "${path.join(root, 'build/close-app.nsh')}"
+Function .onInit
+  FileOpen $9 "${closeReport}" w
+  Push "${victim}"
+  Call KillAppProcesses
+  FileWrite $9 "killed=$AppKillCount$\\r$\\n"
+  Push "${victim}"
+  Call WaitAppWritable
+  FileWrite $9 "writable=$AppWritable$\\r$\\n"
+  FileClose $9
+  Quit
+FunctionEnd
+Section ""
+SectionEnd
+`, 'utf8');
+  run(nsis, ['/V2', '/INPUTCHARSET', 'UTF8', harnessNsi]);
+  const otherDir = path.join(temp, 'same name elsewhere');
+  await mkdir(otherDir);
+  await copyFile(victim, path.join(otherDir, 'ReqFlow.exe'));
+  const closing = spawn(victim, [], { windowsHide: true, stdio: 'ignore' });
+  const untouched = spawn(path.join(otherDir, 'ReqFlow.exe'), [], { windowsHide: true, stdio: 'ignore' });
+  const closed_ = child => new Promise(resolve => { if (child.exitCode !== null) resolve(); else child.once('exit', resolve); });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  try {
+    // .onInit exits (Quit) surface as NSIS cancel code 2; the report file is the real verdict.
+    const closed = spawnSync(harnessExe, [], { windowsHide: true, timeout: 60000 });
+    assert.ok(!closed.error && [0, 2].includes(closed.status), `close harness exited ${closed.status}`);
+    assert.equal(await readFile(closeReport, 'utf8'), 'killed=1\r\nwritable=1\r\n');
+    await closed_(closing);
+    assert.equal(untouched.exitCode, null, 'Same image name outside the install directory stays alive');
+  } finally {
+    closing.kill(); untouched.kill();
+    await Promise.all([closing, untouched].map(closed_));
+  }
+  console.log('PASS: wizard close helpers terminate the path-matched running app, wait for unlock and leave other directories alone');
+
   const fixtureRoot = path.join(temp, 'release fixture');
   await put(fixtureRoot, 'package.json', JSON.stringify({ version }));
   await put(fixtureRoot, 'package-lock.json', JSON.stringify({ version: '1.11.8', packages: { '': { version: '1.11.8' }, 'node_modules/fixture': { version: '9.0.0' } } }));

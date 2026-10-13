@@ -725,12 +725,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .window-controls button:hover { background: var(--bg); }
 .window-controls .window-close:hover { background: var(--danger); color: white; }
 .window-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-.archive-folders { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
-.archive-folder { display: flex; align-items: center; gap: 12px; padding: 20px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); }
-.archive-folder svg { color: var(--accent); }
-.archive-folder span { color: var(--muted); font-size: 12px; }
-.archive-folder:hover { border-color: var(--accent); background: var(--accent-soft); }
-.archive-folder:focus-visible { outline: 2px solid var(--accent); }
+/* REQ-131：归档日期改为竖排「年 → 月 → 日」文件夹树，展开浏览、点击日期文件夹筛选 */
+.archive-folders { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; padding: 10px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); max-height: 336px; overflow-y: auto; }
+.archive-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid transparent; background: transparent; border-radius: 8px; font: inherit; color: var(--ink); text-align: left; white-space: nowrap; }
+.archive-row:hover { background: var(--accent-soft); }
+.archive-row:focus-visible { outline: 2px solid var(--accent); }
+.archive-row svg { color: var(--accent); flex-shrink: 0; }
+.archive-row strong { font-size: 13px; font-weight: 600; }
+.archive-row span { margin-left: auto; color: var(--muted); font-size: 12px; flex-shrink: 0; }
+.archive-row.chosen { background: var(--accent-soft); border-color: var(--accent); }
+.archive-month { padding-left: 36px; }
+.archive-day { padding-left: 62px; }
+.archive-chevron { color: var(--muted); flex-shrink: 0; transform: rotate(-90deg); transition: transform 0.15s ease; }
+.archive-chevron.open { transform: none; }
 .list-tools-side { flex-wrap: wrap; }
 .gen-top { flex-wrap: nowrap; }
 .gen-head span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

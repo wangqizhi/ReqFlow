@@ -7,6 +7,7 @@ SetCompressor /SOLID lzma
 !include "TextFunc.nsh"
 !include "nsDialogs.nsh"
 !include "${LEGACY_CLEANUP_INCLUDE}"
+!include "close-app.nsh"
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\173d13da-33b6-52f0-a048-23db6656a56c"
 Name "ReqFlow ${APP_VERSION}"
@@ -24,8 +25,8 @@ Var DataDir
 Var DataEdit
 Var DataChanged
 !define MUI_ABORTWARNING
+; REQ-130：安装完成后默认勾选「运行 ReqFlow」
 !define MUI_FINISHPAGE_RUN "$INSTDIR\ReqFlow.exe"
-!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 Page custom DataPage DataLeave
@@ -141,22 +142,8 @@ Function DataLeave
   ${EndIf}
 FunctionEnd
 
-Function CheckRuntimeNotRunning
-  Exch $0
-  Push $1
-  IfFileExists "$0" 0 runtime_closed
-  System::Call 'kernel32::CreateFileW(w r0, i 0x40000000, i 0, p 0, i 3, i 0, p 0)p .r1'
-  ${If} $1 == -1
-    MessageBox MB_ICONSTOP "请先关闭 ReqFlow（包括旧 MyGO 测试版）再安装；程序正在运行或目录不可写。" /SD IDOK
-    SetErrorLevel 2
-    Abort
-  ${EndIf}
-  System::Call 'kernel32::CloseHandle(p r1)'
-  runtime_closed:
-  Pop $1
-  Pop $0
-FunctionEnd
-
+; REQ-129：向导模式下请求确认后关闭运行中的程序再继续安装（close-app.nsh）；
+; 静默安装（/S）保持拒绝并返回退出码 2，不终止任何进程。
 ; Never follow junctions/symlinks or remove a file inside the selected data dir.
 Function DeleteLegacyRuntime
   Exch $0
@@ -223,13 +210,13 @@ Section "ReqFlow" SEC_APP
     SetErrorLevel 2
     Abort
   root_ok:
-  ; Request write access without modifying or killing existing executables.
+  ; Request write access; the wizard asks to close a still-running app first (REQ-129).
   Push "$INSTDIR\ReqFlow.exe"
-  Call CheckRuntimeNotRunning
+  Call EnsureRuntimeClosed
   Push "$INSTDIR\ReqFlow-MyGO.exe"
-  Call CheckRuntimeNotRunning
+  Call EnsureRuntimeClosed
   Push "$INSTDIR\runtime\node.exe"
-  Call CheckRuntimeNotRunning
+  Call EnsureRuntimeClosed
   SetOutPath "$INSTDIR"
   SetOverwrite on
   ClearErrors
