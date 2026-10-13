@@ -43,6 +43,13 @@ func main() {
 	}
 }
 func run() (int, error) {
+	if len(os.Args) == 2 && os.Args[1] == "--check-notification-icon" {
+		report, err := checkNotificationIcon()
+		if err != nil {
+			return 1, err
+		}
+		return 0, json.NewEncoder(os.Stdout).Encode(report)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return 1, err
@@ -183,6 +190,15 @@ func smokeUI(w *mygo.Window, path string) {
 	if err != nil {
 		result = map[string]any{"ok": false, "error": err.Error()}
 	}
+	if os.Getenv("REQFLOW_UI_NOTIFICATION") == "1" {
+		check := checkNotificationDelivery(w)
+		if report, ok := result.(map[string]any); ok {
+			report["notification"] = check
+			if check["ok"] != true {
+				report["ok"] = false
+			}
+		}
+	}
 	if e := writeReport(path, result); e != nil {
 		log.Printf("write UI smoke report: %v", e)
 	}
@@ -199,6 +215,24 @@ func smokeUI(w *mygo.Window, path string) {
 		_ = writeReport(path+".compact.json", compact)
 		if png, e := w.CapturePage(); e == nil {
 			_ = os.WriteFile(path+".compact.png", png, 0600)
+		}
+		schedule, e := w.Page().EvalContext(ctx, `(async()=>{
+          const waitFor=async predicate=>{const end=Date.now()+5000;while(!predicate()){if(Date.now()>end)throw Error('Compact layout timeout');await new Promise(r=>setTimeout(r,40));}};
+          await waitFor(()=>!document.querySelector('.requirement-dialog [aria-label="关闭"]')?.disabled);
+          document.querySelector('.requirement-dialog [aria-label="关闭"]')?.click();
+          await waitFor(()=>!document.querySelector('.overlay'));
+          [...document.querySelectorAll('.navtab')].find(b=>b.textContent.startsWith('排期')).click();
+          await waitFor(()=>document.querySelector('.schedule-bottom'));
+          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          const panel=document.querySelector('.schedule-bottom');const buttons=[...panel.querySelectorAll('button')];
+          return {ok:Math.abs(panel.getBoundingClientRect().bottom-innerHeight)<1&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
+        })()`)
+		if e != nil {
+			schedule = map[string]any{"ok": false, "error": e.Error()}
+		}
+		_ = writeReport(path+".schedule.json", schedule)
+		if png, e := w.CapturePage(); e == nil {
+			_ = os.WriteFile(path+".schedule.png", png, 0600)
 		}
 	}
 	mygo.App.Quit()

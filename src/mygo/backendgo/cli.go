@@ -51,7 +51,7 @@ func coreCLIHelp(version string) map[string]any {
 }
 func coreCLIItem(i map[string]any) map[string]any {
 	r := map[string]any{"archived": coreTruthy(i["archived"]), "executor": coreExecutor(i), "bodyPreview": coreCLIPreview(coreString(i["body"]), 120)}
-	for _, k := range []string{"id", "number", "title", "type", "priority", "status", "version", "executionVersion", "scheduledDate", "aiValidation", "deliveryGuidance", "link", "criteria"} {
+	for _, k := range []string{"id", "number", "title", "type", "priority", "status", "version", "executionVersion", "completionNote", "completionNoteVersion", "scheduledDate", "aiValidation", "deliveryGuidance", "link", "criteria"} {
 		if v, ok := i[k]; ok {
 			r[k] = v
 		}
@@ -278,8 +278,17 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 		}
 		b := coreMap(coreList(p["batches"])[0])
 		return map[string]any{"batch": coreCLIBatch(b), "prompt": b["text"], "promptLength": len(utf16.Encode([]rune(coreString(b["text"])))), "version": r["version"]}, nil
-	case "submit", "cancel", "complete", "revert", "verify", "regress", "archive":
+	case "submit", "cancel", "complete", "item completion-note", "revert", "verify", "regress", "archive":
 		action := map[string]any{"op": command, "project": a["project"], "id": a["id"], "note": coreString(a["note"]), "link": coreString(a["link"])}
+		if command == "item completion-note" {
+			action["op"] = "completionNote"
+			if !coreHas(a, "summary") {
+				return nil, errors.New("缺少 --summary <50字内完成说明>")
+			}
+		}
+		if coreHas(a, "summary") {
+			action["summary"] = a["summary"]
+		}
 		if command == "submit" || command == "cancel" {
 			if !coreTruthy(a["batch"]) {
 				return nil, errors.New("缺少 --batch <批次ID>")

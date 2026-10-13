@@ -14,12 +14,16 @@
     await new Promise(resolve => setTimeout(resolve, 60));
   };
   const checks = {};
+  let completionProject;
   await waitFor(() => document.querySelector('.desktop-app'));
   for (const channel of ['app:info', 'workspace:get', 'ai:settings:get', 'storage:status']) {
     const result = await window.mygo.call('ReqFlow.Invoke', channel, []);
     checks[channel] = { ok: !!result && result.ok !== false };
     if (channel === 'app:info') checks[channel] = { ok: result.version === __REQFLOW_VERSION__ && result.backend === 'go', version: result.version, backend: result.backend };
-    if (channel === 'workspace:get') checks[channel].count = result.state.projects.length;
+    if (channel === 'workspace:get') {
+      checks[channel].count = result.state.projects.length;
+      completionProject = result.state.projects.find(p => p.items.some(i => i.title === '完成说明UI检查'));
+    }
   }
   const expected = checks['workspace:get'].count;
   await waitFor(() => document.querySelectorAll('.side-project[role="button"]').length === expected);
@@ -45,10 +49,34 @@
       await click(document.querySelector('[aria-label="切换项目"]'));
       await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === originalProject));
     } else await click(document.querySelector('[aria-label="切换项目"]'));
-    await click(button('CONTENT'));
+    const contextButton = button('上下文管理');
+    const newProject = button('新建项目');
+    const collaboration = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '协作项目');
+    const labelStyle = getComputedStyle(collaboration);
+    const contextStyle = getComputedStyle(contextButton);
+    checks.contextEntry = { ok: contextButton.getBoundingClientRect().top > newProject.getBoundingClientRect().top && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
+    await click(contextButton);
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !!document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.switcher strong').textContent === originalProject };
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
+    const bottom = document.querySelector('.schedule-bottom');
+    checks.scheduleBottom = { ok: Math.abs(bottom.getBoundingClientRect().bottom - innerHeight) < 1 && !document.querySelector('.page-foot') && [...bottom.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom <= innerHeight), bottom: bottom.getBoundingClientRect().bottom, height: innerHeight };
+    if (completionProject.name !== originalProject) {
+      await click(document.querySelector('[aria-label="切换项目"]'));
+      await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === completionProject.name));
+      await waitFor(() => document.querySelector('.main h1')?.textContent === completionProject.name);
+    }
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
+    const reportCard = [...document.querySelectorAll('.card-body')].find(el => el.querySelector('.item-title')?.textContent === '完成说明UI检查');
+    const completionNote = reportCard?.querySelector('.completion-note');
+    checks.completionNote = { ok: completionNote?.querySelector('p').textContent === '已补齐完成说明，CLI检查通过' && !!(completionNote.compareDocumentPosition(reportCard.querySelector('.next-step')) & Node.DOCUMENT_POSITION_FOLLOWING), project: originalProject, titles: [...document.querySelectorAll('.item-title')].map(el => el.textContent), text: completionNote?.textContent || '', card: !!reportCard };
+    if (completionProject.name !== originalProject) {
+      await click(document.querySelector('[aria-label="切换项目"]'));
+      await click([...document.querySelectorAll('.switcher-row')].find(el => el.querySelector('strong').textContent === originalProject));
+      await waitFor(() => document.querySelector('.main h1')?.textContent === originalProject);
+    }
+    await click(document.querySelector('.navtab'));
 
     const deletion = document.querySelector('.side-project-del');
     if (deletion) {

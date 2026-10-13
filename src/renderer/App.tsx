@@ -447,12 +447,6 @@ export default function App() {
   const archiveDates = [...new Set(visible.map(archivedDate))].sort().reverse();
   const shownItems = tab === 'archived' ? visible.filter(i => archivedDate(i) === archiveDate) : visible;
   const windowBar = bridge.windowControl && <div className="window-bar"><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
-  // 各 tab 的说明文字统一显示在底部「ReqFlow · 需求流」后的信息区
-  const helpText =
-    viewingHistory ? '历史排期快照保留在这里，点击批次可到排期表查看。' : tab === 'feature' ? '勾选本轮需求，点击排期转入待开发'
-      : tab === 'pending_verification' ? '你验证完成后，点击「通过并归档」即可；未通过可退回待执行。'
-      : tab === 'archived' ? '已归档的需求与验证记录保存在这里，发现问题可重新打开。'
-      : '本轮排期的需求在这里跟踪，开发完成后提交验证。';
   const batch = p?.batches.find((b) => b.id === batchId) || p?.batches.find((b) => b.mode === 'develop');
   const stale = !!batch && !!p && (
     batch.guideVersion !== p.guideVersion ||
@@ -567,8 +561,8 @@ export default function App() {
       <aside className="side">
         <div className="brand"><img className="mark" src="./app-icon.png" alt="ReqFlow" /><div>ReqFlow<small>需求流{appVersion ? ` v${appVersion}` : ''}</small></div></div>
         {mode === 'CONTENT' ? <>
-          <div className="side-label">CONTENT 功能</div>
-          <nav className="side-projects" aria-label="CONTENT 功能菜单">
+          <div className="side-label">上下文管理</div>
+          <nav className="side-projects" aria-label="上下文管理功能菜单">
             <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
             <div className="side-project active" aria-current="page"><FileText size={16} /><span>上下文 · 提示词</span></div>
           </nav>
@@ -602,11 +596,11 @@ export default function App() {
               )}
             </div>
           ))}</details>)}
-          <button className="side-project" onClick={() => { setMode('CONTENT'); setSwitcherOpen(false); setNewMenu(false); }}><FileText size={16} /><span>CONTENT</span></button>
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span>新建项目</span>
           </button>
         </nav>
+        <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setSwitcherOpen(false); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
         </>}
@@ -707,7 +701,7 @@ export default function App() {
           }}>编辑设置</button>
         </section>
 
-        <div className="workspace-grid single">
+        <div className={'workspace-grid single' + (tab === 'generate' ? ' scheduling' : '')}>
           <section className="requirements">
             <div className="navtabs">
               {phases.map(([v, l]) => (
@@ -819,6 +813,7 @@ export default function App() {
                         {i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} />{c}</p>)
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
+                      {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
                       <div className="next-step">
                         {i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
                           : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回需求池重新编辑。'
@@ -860,7 +855,7 @@ export default function App() {
               )}
             </div>
             {tab === 'generate' && (
-              <div className="gen-panel">
+              <div className="gen-panel schedule-bottom">
                 <div className="gen-top">
                   <div className="gen-head">
                     <h3>本轮排期</h3>
@@ -888,9 +883,6 @@ export default function App() {
 
         </div>
 
-        <footer className="page-foot">
-          ReqFlow · 需求流 <span className="page-help">{helpText}</span>
-        </footer>
         </>}
       </main>
 

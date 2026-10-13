@@ -84,7 +84,8 @@ export const CLI_DOCS: CliGroupDoc[] = [
     group: '执行与验收',
     desc: '对单条需求推进状态；验证未通过的原因会自动带入下一轮 Prompt。',
     commands: [
-      { name: 'complete', args: '--project <id> --id <需求ID> [--link <链接>] [--note <说明>] [--batch <排期批次ID> --item-version <版本>]', desc: '实现完成：执行中或有效排期 → 待验证；带 batch/item-version 时原子核对 AI 执行标识及排期版本', example: 'ReqFlow.exe --cli complete --project <id> --id <需求ID>' },
+      { name: 'complete', args: '--project <id> --id <需求ID> [--link <链接>] [--note <完整报告>] [--summary <50字内完成说明>] [--batch <排期批次ID> --item-version <版本>]', desc: '实现完成：执行中或有效排期 → 待验证；summary 显示在验证提示上方，省略时从 note 提取最多50字；带 batch/item-version 时原子核对 AI 执行标识及排期版本', example: 'ReqFlow.exe --cli complete --project <id> --id <需求ID> --summary "已完成布局调整，构建检查通过"' },
+      { name: 'item completion-note', args: '--project <id> --id <需求ID> --summary <50字内完成说明> [--item-version <版本>]', desc: '补写当前版本待验证需求的开发完成说明；空白、超过50字或非待验证状态均拒绝', example: 'ReqFlow.exe --cli item completion-note --project <id> --id <需求ID> --summary "已补齐CLI接口，生命周期检查通过"' },
       { name: 'revert', args: '--project <id> --id <需求ID> [--note <原因>]', desc: '退回待执行：执行中 → 待执行（退回后可编辑，同批次其他需求不受影响）', example: 'ReqFlow.exe --cli revert --project <id> --id <需求ID>' },
       { name: 'verify', args: '--project <id> --id <需求ID> --pass <true|false> [--note <原因>]', desc: '人工验证：通过 → 归档；未通过 → 退回待执行并记录原因', example: 'ReqFlow.exe --cli verify --project <id> --id <需求ID> --pass false --note "样式未生效"' },
       { name: 'regress', args: '--project <id> --id <需求ID> [--note <回归原因>]', desc: '归档需求回归：退回待执行，原因带入下一轮 Prompt', example: 'ReqFlow.exe --cli regress --project <id> --id <需求ID> --note "线上复现"' },

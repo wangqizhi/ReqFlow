@@ -61,6 +61,8 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .brand small { display: block; font-weight: 400; font-size: 11px; color: var(--side-muted); }
 .side-label { font-size: 11px; letter-spacing: 0.12em; color: var(--side-muted); padding: 12px 8px 4px; text-transform: uppercase; }
 .side-label-row { display: flex; align-items: center; justify-content: space-between; }
+.side-label-action { text-align: left; cursor: pointer; border-radius: 8px; }
+.side-label-action:hover { background: rgba(255, 255, 255, 0.07); color: var(--side-ink); }
 .side-add-folder { width: 20px; height: 20px; border-radius: 6px; color: var(--side-muted); margin-right: -2px; }
 .side-add-folder:hover { background: rgba(255, 255, 255, 0.07); color: var(--side-ink); box-shadow: none; }
 .side-projects { display: flex; flex-direction: column; gap: 2px; }
@@ -132,6 +134,11 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 /* 窗口尺寸固定（主进程锁定 1440×900）：main 不滚动，列表区内部滚动 */
 .workspace-grid { display: grid; grid-template-columns: minmax(430px, 1fr) 400px; gap: 18px; padding: 14px 22px 8px; flex: 1; min-height: 0; }
 .workspace-grid.single { grid-template-columns: 1fr; }
+.workspace-grid.scheduling { padding-bottom: 0; }
+.gen-panel.schedule-bottom { margin-bottom: 0; border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.completion-note { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-size: 13px; }
+.completion-note strong { font-weight: 600; }
+.completion-note p { margin: 5px 0 0; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .requirements { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .navtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; flex-shrink: 0; }
 .navtab { display: flex; align-items: center; gap: 6px; padding: 8px 13px; color: var(--muted); font-size: 13.5px; border-bottom: 2px solid transparent; white-space: nowrap; }

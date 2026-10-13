@@ -5,6 +5,18 @@ import { validateRemote, type RemoteSettings } from './remote';
 import { validateDate } from './dates';
 export type Attachment = { id: string; label: string; name: string; dataUrl: string; path?: string };
 
+function completionSummary(a: any): string {
+  if (a.summary !== undefined) {
+    if (typeof a.summary !== 'string' || !a.summary.trim()) throw Error('完成说明不能为空');
+    const text = a.summary.trim();
+    if (Array.from(text).length > 50) throw Error('完成说明不能超过50字');
+    return text;
+  }
+  // Existing agents send a full report in --note; keep that in history and show a short excerpt.
+  const note = String(a.note || '').replace(/^\[ReqFlow[^\n]*\]\s*\n/, '').trim();
+  return Array.from(note).slice(0, 50).join('');
+}
+
 export type Item = {
   id: string;
   number: string;
@@ -25,6 +37,8 @@ export type Item = {
   gitCommittedVersion?: number;
   gitCommitHash?: string;
   executionVersion?: number;
+  completionNote?: string;
+  completionNoteVersion?: number;
   scheduledDate?: string;
   executor?: string; // ai | human | plugin:<id> | agent:<id>；旧需求默认 ai
   archived?: boolean;
@@ -297,7 +311,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   }));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!(localOps.includes(a?.op) || a?.op === 'requirementDraft') || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -713,6 +727,7 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
   if (a.op === 'complete') {
+    const completionNote = completionSummary(a);
     if (a.batch) {
       const batch = scheduledBatch(p, i);
       if (!batch || batch.id !== a.batch || (i.executor || 'ai') !== 'ai' || !['ready', 'in_progress'].includes(i.status) || i.archived || a.version !== i.version) throw Error('AI 排期任务或版本已变化');
@@ -723,7 +738,22 @@ async function applyOperation(s: Workspace, a: any) {
     }
     i.status = 'pending_verification';
     i.link = String(a.link || '');
-    i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || '') });
+    if (completionNote) {
+      i.completionNote = completionNote;
+      i.completionNoteVersion = i.version;
+    } else {
+      delete i.completionNote;
+      delete i.completionNoteVersion;
+    }
+    i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}) });
+    return;
+  }
+  if (a.op === 'completionNote') {
+    if (i.status !== 'pending_verification' || i.executionVersion !== i.version) throw Error('只能为当前版本的待验证需求写入完成说明');
+    if (a.version !== undefined && a.version !== i.version) throw Error('需求版本已变化');
+    i.completionNote = completionSummary({ summary: a.summary });
+    i.completionNoteVersion = i.version;
+    i.history.unshift({ event: '更新完成说明', time: now, summary: i.completionNote, version: i.version });
     return;
   }
   if (a.op === 'revert') {

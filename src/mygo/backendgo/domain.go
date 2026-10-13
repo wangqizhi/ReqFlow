@@ -18,6 +18,32 @@ import (
 )
 
 const DefaultDelivery = "说明改动、测试命令和结果、未解决的问题。"
+
+func coreCompletionSummary(a map[string]any) (string, error) {
+	if coreHas(a, "summary") {
+		text, ok := a["summary"].(string)
+		text = strings.TrimSpace(text)
+		if !ok || text == "" {
+			return "", errors.New("完成说明不能为空")
+		}
+		if len([]rune(text)) > 50 {
+			return "", errors.New("完成说明不能超过50字")
+		}
+		return text, nil
+	}
+	note := coreString(a["note"])
+	if strings.HasPrefix(note, "[ReqFlow") {
+		if end := strings.Index(note, "]\n"); end >= 0 {
+			note = note[end+2:]
+		}
+	}
+	runes := []rune(strings.TrimSpace(note))
+	if len(runes) > 50 {
+		runes = runes[:50]
+	}
+	return string(runes), nil
+}
+
 const DefaultGuidance = "请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。"
 const DefaultBaselineTemplate = "完善项目基线配置：\n1. 检查 .gitignore：构建产物、依赖与运行时生成目录（如 node_modules、dist、release、日志等）应已被忽略；\n2. 安装包输出：如项目会生成安装包，指定固定的生成目录，并确认该目录的忽略策略正确；\n3. 运行包：如项目有可独立运行的运行包/绿色版，指定固定的输出或运行目录；\n4. 编译与发布脚本：在固定位置 scripts/ 下提供编译脚本与发布脚本（可直接运行，注明用法与依赖）；\n5. 核对以上配置与当前项目结构一致，缺失或失效的项请补齐或修正。\n完成后说明改动、脚本用法与未解决的问题。"
 const DefaultPublishTemplate = "配置项目发布与部署脚本：\n1. 检查项目现有部署脚本及发布配置，优先复用用户已有的部署流程；\n2. 如果没有部署脚本，先与用户确认目标位置、部署方式、运行环境、所需凭据与产物、覆盖及回滚策略，再创建可部署到该目标的脚本，不猜测部署细节；\n3. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.bat），点击应用的「发布」按钮时实际调用用户的部署脚本；仅构建或生成安装包不能视为部署完成；\n4. 按项目交付引导构建并生成产物，再部署到用户确认的目标位置；脚本失败时返回非零退出码，成功时打印部署目标与结果；\n5. 注明脚本运行方式、依赖及配置方法，不将凭据写入代码仓库，并验证发布入口能够触发部署流程。\n完成后说明发布入口、实际部署脚本、目标位置、验证结果与未解决的问题。"
@@ -527,7 +553,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -1156,6 +1182,10 @@ func coreApplyOperation(s, a map[string]any) error {
 		coreHistory(i, map[string]any{"event": "标记待提交", "time": now})
 		return nil
 	case "complete":
+		summary, e := coreCompletionSummary(a)
+		if e != nil {
+			return e
+		}
 		if coreTruthy(a["batch"]) {
 			batch := ScheduledBatch(p, i)
 			if batch == nil || batch["id"] != a["batch"] || coreExecutor(i) != "ai" || !coreIn(coreString(i["status"]), "ready", "in_progress") || coreTruthy(i["archived"]) || !coreSafeInt(a["version"]) || coreNum(a["version"]) != coreNum(i["version"]) {
@@ -1170,7 +1200,31 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		i["status"] = "pending_verification"
 		i["link"] = coreString(a["link"])
-		coreHistory(i, map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])})
+		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
+		if summary != "" {
+			i["completionNote"] = summary
+			i["completionNoteVersion"] = i["version"]
+			history["summary"] = summary
+		} else {
+			delete(i, "completionNote")
+			delete(i, "completionNoteVersion")
+		}
+		coreHistory(i, history)
+		return nil
+	case "completionNote":
+		if i["status"] != "pending_verification" || !coreHas(i, "executionVersion") || coreNum(i["executionVersion"]) != coreNum(i["version"]) {
+			return errors.New("只能为当前版本的待验证需求写入完成说明")
+		}
+		if coreHas(a, "version") && (!coreSafeInt(a["version"]) || coreNum(a["version"]) != coreNum(i["version"])) {
+			return errors.New("需求版本已变化")
+		}
+		summary, e := coreCompletionSummary(map[string]any{"summary": a["summary"]})
+		if e != nil {
+			return e
+		}
+		i["completionNote"] = summary
+		i["completionNoteVersion"] = i["version"]
+		coreHistory(i, map[string]any{"event": "更新完成说明", "time": now, "summary": summary, "version": i["version"]})
 		return nil
 	case "revert":
 		if i["status"] != "in_progress" {

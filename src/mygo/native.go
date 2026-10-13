@@ -11,7 +11,8 @@ import (
 )
 
 type nativeHost struct {
-	window atomic.Pointer[mygo.Window]
+	window        atomic.Pointer[mygo.Window]
+	notifications desktopNotifications
 }
 
 type dialogOptions struct {
@@ -130,9 +131,7 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		if w.IsFocused() && !w.IsMinimized() {
 			return nil, nil
 		}
-		notification := mygo.NewNotification(opts)
-		notification.OnClick(func() { w.Restore(); w.Show(); w.Focus() })
-		return nil, notification.Show()
+		return nil, n.notifications.show(w, opts)
 	default:
 		return nil, fmt.Errorf("unsupported native operation: %s", method)
 	}

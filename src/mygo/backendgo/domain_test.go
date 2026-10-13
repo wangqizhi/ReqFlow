@@ -6,6 +6,54 @@ import (
 	"testing"
 )
 
+func TestCompletionNoteLifecycle(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "完成说明"})
+	i := coreMap(coreList(p["items"])[0])
+	a := map[string]any{"op": "completionNote", "project": p["id"], "id": i["id"], "summary": "说明"}
+	if Apply(s, a) == nil {
+		t.Fatal("ready item accepted completion note")
+	}
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	complete := map[string]any{"op": "complete", "project": p["id"], "id": i["id"], "summary": strings.Repeat("中", 51)}
+	if Apply(s, complete) == nil || i["status"] != "ready" {
+		t.Fatal("oversize summary changed lifecycle")
+	}
+	delete(complete, "summary")
+	complete["note"] = "[ReqFlow Codex run test]\n已实现CLI字段\n验证：生命周期测试通过"
+	coreTestApply(t, s, complete)
+	if i["completionNote"] != "已实现CLI字段\n验证：生命周期测试通过" || coreNum(i["completionNoteVersion"]) != coreNum(i["version"]) {
+		t.Fatal(i)
+	}
+	for _, invalid := range []string{"", "   ", strings.Repeat("😀", 51)} {
+		a["summary"] = invalid
+		if Apply(s, a) == nil {
+			t.Fatal("invalid summary accepted")
+		}
+	}
+	a["summary"] = strings.Repeat("😀", 50)
+	a["version"] = 99
+	if Apply(s, a) == nil {
+		t.Fatal("stale version accepted")
+	}
+	a["version"] = i["version"]
+	coreTestApply(t, s, a)
+	if len([]rune(coreString(i["completionNote"]))) != 50 {
+		t.Fatal("Unicode limit mismatch")
+	}
+	version := i["version"]
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": p["id"], "id": i["id"], "pass": false, "note": "返工"})
+	if Apply(s, a) == nil || i["completionNoteVersion"] != version || coreNum(i["version"]) == coreNum(version) {
+		t.Fatal("old completion note not version bound")
+	}
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	complete["summary"] = "新版本完成并测试"
+	coreTestApply(t, s, complete)
+	if i["completionNote"] != "新版本完成并测试" || i["completionNoteVersion"] != i["version"] {
+		t.Fatal("new completion did not replace note")
+	}
+}
+
 func coreTestApply(t *testing.T, s map[string]any, a map[string]any) {
 	t.Helper()
 	if e := Apply(s, a); e != nil {

@@ -236,7 +236,11 @@ export class Cli {
         return { version: r.version };
       }
       case 'complete': {
-        const r = await this.service(a).mutate({ op: 'complete', project: a.project, id: a.id, batch: a.batch, version: a['item-version'] === undefined ? undefined : Number(a['item-version']), link: a.link || '', note: a.note || '' }, null);
+        const r = await this.service(a).mutate({ op: 'complete', project: a.project, id: a.id, batch: a.batch, version: a['item-version'] === undefined ? undefined : Number(a['item-version']), link: a.link || '', note: a.note || '', summary: a.summary }, null);
+        return { version: r.version };
+      }
+      case 'item completion-note': {
+        const r = await this.service(a).mutate({ op: 'completionNote', project: a.project, id: a.id, summary: a.summary, version: a['item-version'] === undefined ? undefined : Number(a['item-version']) }, null);
         return { version: r.version };
       }
       case 'revert': {
@@ -316,7 +320,7 @@ export class Cli {
       id: i.id, number: i.number, title: i.title, type: i.type, priority: i.priority,
       status: i.status, archived: !!i.archived, version: i.version,
       executionVersion: i.executionVersion, scheduledDate: i.scheduledDate, executor: i.executor || 'ai', aiValidation: i.aiValidation,
-      deliveryGuidance: i.deliveryGuidance, link: i.link,
+      deliveryGuidance: i.deliveryGuidance, link: i.link, completionNote: i.completionNote, completionNoteVersion: i.completionNoteVersion,
       criteria: i.criteria, bodyPreview: String(i.body || '').slice(0, 120)
     };
   }

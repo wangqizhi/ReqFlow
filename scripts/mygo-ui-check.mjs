@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdtemp, mkdir, readFile, copyFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -24,8 +24,17 @@ try {
   const original = new DatabaseSync(path.join(installed, 'requirements.sqlite'), { readOnly: true });
   try { await backup(original, path.join(data, 'requirements.sqlite')); }
   finally { original.close(); }
+  const cli = args => {
+    const r = spawnSync(path.join(portable, 'ReqFlow.exe'), ['--cli', ...args, '--data-dir', data], { windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30_000 });
+    assert.equal(r.status, 0, r.error?.message || r.stderr || r.stdout.slice(0, 500));
+    return JSON.parse(r.stdout);
+  };
+  const project = cli(['workspace', 'get']).state.projects[0].id;
+  const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
+  cli(['generate', '--project', project, '--items', item]);
+  cli(['complete', '--project', project, '--id', item, '--summary', '已补齐完成说明，CLI检查通过']);
   const reportPath = path.join(temporary, 'report.json');
-  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1' };
+  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1', REQFLOW_UI_NOTIFICATION: '1' };
   let stderr = '';
   child = spawn(path.join(portable, 'ReqFlow.exe'), ['--smoke-ui', reportPath], {
     cwd: portable, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
@@ -44,6 +53,10 @@ try {
   await copyFile(reportPath + '.compact.png', path.join(root, 'tmp/mygo-ui-compact.png'));
   const compact = JSON.parse(await readFile(reportPath + '.compact.json', 'utf8'));
   assert.equal(compact.ok, true, JSON.stringify(compact));
+  const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
+  assert.equal(schedule.ok, true, JSON.stringify(schedule));
+  await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
+  assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));
   assert.equal(report.ok, true, JSON.stringify(report));
   assert.match(report.title, /ReqFlow/);
   assert.equal(report.checks['app:info'].backend, 'go');
