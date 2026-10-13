@@ -26,11 +26,24 @@ export function agentName(id: string) {
   return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id;
 }
 
+// Codex 版插件引用（与 docs/reqflow-codex-plugin.md、mods.tsx 同源使用）
+export const AGENT_MENTION = '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)';
+
 export async function sendToCodex(projectDir: string, prompt: string) {
   const url = 'codex://threads/new?path=' + encodeURIComponent(projectDir) + '&prompt=' + encodeURIComponent(prompt);
   await navigator.clipboard.writeText(prompt);
   const result = await bridge.openCodexDeepLink?.(url);
   if (!result?.ok) throw Error(result?.error || '调起 Codex 仅桌面版可用');
+}
+
+// REQ-114：ZCode 版实验功能。ZCode 是 CLI，没有深链协议：复制 Agent 引用后在项目目录
+// 打开新终端窗口运行 zcode；引用里的 marketplace 标识与 plugins/marketplace.json 同源。
+export const ZCODE_MENTION = '[@reqflow-agent-zcode](plugin://reqflow-agent-zcode@dev-reqflow-0621a305)';
+
+export async function sendToZcode(projectDir: string, prompt: string) {
+  await navigator.clipboard.writeText(prompt);
+  const result = await bridge.openZcode?.(projectDir);
+  if (!result?.ok) throw Error(result?.error || '调起 ZCode 仅桌面版可用');
 }
 
 // 执行方式显示名：agent:opencode → OpenCode，未知标识原样展示

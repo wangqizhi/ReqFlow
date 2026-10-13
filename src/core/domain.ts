@@ -328,6 +328,17 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
 
+  // 删除文件夹（REQ-111）：default 固定保留；删除后其中的项目自动迁移到 default，
+  // 项目与需求本身不受影响（normalizeWorkspace 也会把未知 folderId 归位到 default）。
+  if (a.op === 'deleteFolder') {
+    if (a.folderId === 'default') throw Error('default 文件夹不可删除');
+    const folder = s.folders!.find((f) => f.id === a.folderId);
+    if (!folder) throw Error('文件夹不存在');
+    s.folders!.splice(s.folders!.indexOf(folder), 1);
+    for (const p of s.projects) if (p.folderId === folder.id) p.folderId = 'default';
+    return;
+  }
+
   if (a.op === 'project') {
     const project = makeProject(needed(a.name, '项目名称'), String(a.description || ''));
     if (a.dir !== undefined) {

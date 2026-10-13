@@ -18,7 +18,7 @@ import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
-import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
+import { executorLabel, useLocalAgents, agentName, sendToCodex, sendToZcode, ZCODE_MENTION } from './assignment';
 import { ModsOverlay } from './mods';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -72,6 +72,7 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
   const [browserOpen, setBrowserOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -103,6 +104,7 @@ export default function App() {
   // REQ-101：指派入口移入提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
   const { agents: localAgents } = useLocalAgents(!!completeConfirm || tab === 'generate');
   const [codexBusy, setCodexBusy] = useState(false);
+  const [zcodeBusy, setZcodeBusy] = useState(false); // REQ-114：排期表派发 ZCode
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
   const [sort, setSort] = useState('desc');
@@ -339,8 +341,11 @@ export default function App() {
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }));
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
+      // REQ-110：整个发布流程结束时上报，窗口不在最前端时由主进程弹系统通知
+      void bridge.publishNotice?.({ ok: !!r.ok, project: project.name, detail: r.ok ? '发布脚本已执行完毕，产物位置见应用内发布输出。' : r.error || '发布脚本执行失败' });
     } catch (e: any) {
       update({ result: { ok: false, output: '', error: e?.message || '执行发布脚本失败' } });
+      void bridge.publishNotice?.({ ok: false, project: project.name, detail: e?.message || '发布流程执行失败' });
     } finally {
       publishingIds.current.delete(project.id);
       update({ running: false, step: '' });
@@ -356,6 +361,17 @@ export default function App() {
       notify('已调起 Codex，任务内容已复制');
     } catch (e: any) { notify(e.message, 'err'); }
     finally { setCodexBusy(false); }
+  }
+
+  // REQ-114：派发给 ZCode —— 复制任务内容后在项目目录打开终端窗口运行 zcode
+  async function dispatchZcode(item: Item) {
+    if (!p?.dir || zcodeBusy) return;
+    setZcodeBusy(true);
+    try {
+      await sendToZcode(p.dir, ZCODE_MENTION + '\n\n本轮只执行 ' + item.number + '（需求 ID：' + item.id + '），其他排期需求不属于本轮。');
+      notify('已调起 ZCode 终端窗口，任务内容已复制');
+    } catch (e: any) { notify(e.message, 'err'); }
+    finally { setZcodeBusy(false); }
   }
 
   // 运行验证源（REQ-077）：按钮移到顶部「浏览项目 / 发布」旁，仅项目配置了验证源时出现
@@ -545,7 +561,13 @@ export default function App() {
         </div>
         <nav className="side-projects">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
-          {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} />{folder.name}</summary>{data.projects.filter((pr) => (pr.folderId || 'default') === folder.id).map((pr) => (
+          {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} />{folder.name}{folder.id !== 'default' && (
+            // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
+            <button className="side-folder-del" aria-label={'删除文件夹 ' + folder.name} title="删除文件夹（项目迁移到 default）"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
+              <Trash size={12} />
+            </button>
+          )}</summary>{data.projects.filter((pr) => (pr.folderId || 'default') === folder.id).map((pr) => (
             <div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragStart={(e) => e.dataTransfer.setData('application/reqflow-project', pr.id)}
               className={'side-project' + (p?.id === pr.id ? ' active' : '')}
@@ -781,7 +803,6 @@ export default function App() {
                           : '已归档，历史记录仍可查看。'}
                       </div>
                       <div className="card-actions">
-                        {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
                         {i.status === 'in_progress' && <button className="btn" onClick={() => copyPrompt([i])}>复制 Prompt</button>}
                         {i.status === 'ready' && tab === 'generate' && <button className="btn accent" disabled={busy} onClick={async () => { const draft = scheduledBatch(p!, i); if (draft && await act({ op: 'submit', batch: draft.id }, true)) notify('已继续排期，进入待开发'); }}>继续排期</button>}
                         {i.status === 'ready' && tab !== 'generate' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
@@ -802,6 +823,9 @@ export default function App() {
                         )}
                         {i.status === 'archived' && <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看历史</button>
+                        {/* REQ-114：实验室开关开启后，Codex / ZCode 派发按钮统一放在「查看历史」后面 */}
+                        {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
+                        {tab === 'generate' && localAgents?.includes('zcode') && <button className="btn" disabled={zcodeBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 ZCode" onClick={() => void dispatchZcode(i)}>ZCode</button>}
                       </div>
                     </div>
                   </article>
@@ -849,7 +873,7 @@ export default function App() {
 
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
-      {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} />}
+      {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
@@ -937,10 +961,11 @@ export default function App() {
           <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : modal === 'guide' ? ' project-guide-dialog' : '')}>
             <div className="dialog-head">
               <div>
-                <h3>{({ item: editing ? '编辑需求' : '记录新需求', project: '创建项目', guide: '项目与交付设置', detail: editing ? (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '', verify: editing ? '未通过退回 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '记录未通过的问题', regress: editing ? '重新打开 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '重新打开归档需求', deleteProject: '删除项目', moveItem: '迁移需求', deleteItem: '删除需求' } as any)[modal]}</h3>
+                <h3>{({ item: editing ? '编辑需求' : '记录新需求', project: '创建项目', guide: '项目与交付设置', detail: editing ? (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '', verify: editing ? '未通过退回 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '记录未通过的问题', regress: editing ? '重新打开 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '重新打开归档需求', deleteProject: '删除项目', deleteFolder: '删除文件夹', moveItem: '迁移需求', deleteItem: '删除需求' } as any)[modal]}</h3>
                 <p>{modal === 'item' ? '标题与验收条件选填；已有需求编辑后自动保存。'
                   : modal === 'verify' ? '未通过的内容会显示在需求卡片中，并带入下一轮 Prompt。'
                   : modal === 'deleteProject' ? '删除会一并移除该项目全部需求、批次与历史，且不可恢复。'
+                  : modal === 'deleteFolder' ? '文件夹会被移除，其中的项目自动迁移到 default，需求不受影响。'
                   : modal === 'moveItem' ? '保留需求内容、设置与历史，在目标项目中分配新编号。'
                   : modal === 'deleteItem' ? '删除后无法恢复该需求；已有批次中的历史快照仍会保留。'
                   : '修改与操作记录会保留在工作区。'}</p>
@@ -1188,6 +1213,27 @@ export default function App() {
                       notify('已重新打开，需求回到待执行');
                     }
                   }}>退回待执行</button>
+              </>
+            )}
+
+            {modal === 'deleteFolder' && deletingFolder && (
+              <>
+                <p className="detail-body">
+                  即将删除文件夹「<strong>{deletingFolder.name}</strong>」，其中 {data.projects.filter((pr) => (pr.folderId || 'default') === deletingFolder.id).length} 个项目将迁移到 default 文件夹。
+                </p>
+                <p className="detail-body">项目与需求不受影响，可随时拖拽回其他文件夹。</p>
+                <div className="editor-footer">
+                  <button className="btn" disabled={busy} onClick={() => { setDeletingFolder(null); setModal(''); }}>取消</button>
+                  <button className="btn danger" disabled={busy}
+                    onClick={async () => {
+                      if (await act({ op: 'deleteFolder', folderId: deletingFolder.id })) {
+                        setDeletingFolder(null); setModal('');
+                        notify('文件夹已删除，项目已迁移到 default');
+                      }
+                    }}>
+                    <Trash size={14} />确认删除
+                  </button>
+                </div>
               </>
             )}
 

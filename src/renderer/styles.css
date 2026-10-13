@@ -601,6 +601,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .segmented[data-api-format] { display: flex; width: 100%; }
 .segmented[data-api-format] button { flex: 0 0 50%; box-sizing: border-box; min-height: 36px; }
 .project-folder summary { display: flex; align-items: center; gap: 8px; padding: 10px; color: var(--side-muted); cursor: pointer; font-size: 13px; }
+/* REQ-111：文件夹悬浮显示删除按钮（default 不渲染按钮），样式与项目删除一致 */
+.side-folder-del { display: none; flex: none; align-items: center; justify-content: center; padding: 3px; margin-left: auto; border-radius: 6px; color: var(--side-muted); }
+.project-folder summary:hover .side-folder-del, .side-folder-del:focus-visible { display: inline-flex; }
+.side-folder-del:hover { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
 .project-folder .side-project { padding-left: 20px; }
 .folder-form { padding: 8px; display: flex; align-items: center; gap: 6px; }
 .folder-form .field { flex: 1; min-width: 0; margin: 0; }
@@ -734,3 +738,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .lab-target > span { flex-shrink: 0; color: var(--muted); }
 .lab-target code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-link { display: block; word-break: break-all; white-space: normal; }
+/* REQ-112：设置 · 数据 tab 的归档分区与日期控件 */
+.data-archive-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.data-archive-section .settings-actions { flex-wrap: wrap; }
+.archive-date { margin: 0; }

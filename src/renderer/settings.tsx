@@ -6,6 +6,83 @@ import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSetting
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
 import { Eye, X, FolderOpen } from './icons';
 
+type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
+
+function formatSize(bytes: number | undefined): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return (unit === 0 ? String(value) : value.toFixed(1)) + ' ' + units[unit];
+}
+
+/** 数据用量与归档（REQ-112）：大小每 2 秒刷新，归档后立即能看到清理效果。 */
+function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void }) {
+  const [usage, setUsage] = useState<DataUsage | null>(null);
+  const [usageError, setUsageError] = useState('');
+  const [date, setDate] = useState('');
+  const [preview, setPreview] = useState<{ items: number; batches: number } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    if (!bridge.getDataUsage) { setUsageError('数据大小统计仅桌面版可用'); return; }
+    const refresh = () => bridge.getDataUsage!().then((r) => {
+      if (!r.ok) throw Error(r.error || '统计数据大小失败');
+      setUsage({ dataDir: r.dataDir!, backend: r.backend!, dirSize: r.dirSize || 0, databasePath: r.databasePath!, databaseSize: r.databaseSize || 0 });
+      setUsageError('');
+    }).catch((e: any) => setUsageError(e.message));
+    refresh();
+    const timer = setInterval(refresh, 2000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    setConfirming(false);
+    if (!date) { setPreview(null); return; }
+    if (!bridge.previewDataArchive) return;
+    let cancelled = false;
+    bridge.previewDataArchive(date).then((r) => {
+      if (cancelled) return;
+      if (!r.ok) { setPreview(null); setMessage(r.error || '统计归档数据失败'); return; }
+      setPreview({ items: r.items || 0, batches: r.batches || 0 });
+    }).catch(() => { if (!cancelled) setPreview(null); });
+    return () => { cancelled = true; };
+  }, [date]);
+  async function archive() {
+    if (archiving || !date || !bridge.archiveData) return;
+    setArchiving(true); setMessage('');
+    try {
+      const r = await bridge.archiveData(date);
+      if (!r.ok) throw Error(r.error || '数据归档失败');
+      if (!r.canceled) {
+        setConfirming(false);
+        setMessage(`已导出 ${r.items || 0} 条需求、${r.batches || 0} 个批次到 ${r.file}，工作区已清理。`);
+        notify('数据归档完成');
+        onArchived?.();
+      }
+    } catch (e: any) { setMessage(e.message); notify(e.message, 'err'); }
+    finally { setArchiving(false); }
+  }
+  return <>
+    <p className="settings-hint" title={usage?.dataDir}>{usage?.dataDir || usageError || '读取中…'}</p>
+    <div className="validation-setting"><div><label>数据目录总大小</label><p>目录内全部文件（含图片附件、日志与备份配置）</p></div><span>{usage ? formatSize(usage.dirSize) : '—'}</span></div>
+    <div className="validation-setting"><div><label>{usage?.backend === 'sqlite' ? 'SQLite 数据库大小' : '工作区文件大小'}</label><p title={usage?.databasePath}>{usage?.backend === 'sqlite' ? 'requirements.sqlite 实时大小，清理后立即变小' : 'workspace.json 当前大小'}</p></div><span>{usage ? formatSize(usage.databaseSize) : '—'}</span></div>
+    <div className="data-archive-section">
+      <div className="validation-setting"><div><label>数据归档</label><p>导出归档时间早于所选日期的已归档需求（含历史）与不再被排期引用的历史批次，并从工作区清理这些内容。导出前请先确认弹出的保存位置。</p></div></div>
+      <div className="settings-actions">
+        <label className="field archive-date"><input type="date" aria-label="归档日期" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} /></label>
+        {!confirming ? <button className="btn" disabled={!date || archiving || (!bridge.archiveData)} title={bridge.archiveData ? '导出所选日期以前的归档数据并清理' : '仅桌面版可用'} onClick={() => setConfirming(true)}>导出并清理…</button>
+          : <>
+            <button className="btn danger" disabled={archiving} onClick={() => void archive()}>{archiving ? '归档中…' : '确认导出并清理'}</button>
+            <button className="btn" disabled={archiving} onClick={() => setConfirming(false)}>取消</button>
+          </>}
+      </div>
+      {date && preview && <p className="settings-hint">将导出并清理 {preview.items} 条已归档需求、{preview.batches} 个历史批次；没有可归档数据时不会生成文件。</p>}
+      {message && <p className="settings-message" role="status">{message}</p>}
+    </div>
+  </>;
+}
+
 export function RemoteFields({ value, change, disabled }: { value: RemoteSettings; change(v: RemoteSettings): void; disabled: boolean }) {
   return <fieldset className="remote-fields" disabled={disabled}>
     <div className="segmented" role="group" aria-label="仓库平台">{(['github', 'gitlab'] as const).map((provider) => <button key={provider} type="button" aria-pressed={value.provider === provider} className={value.provider === provider ? 'on' : ''} onClick={() => change({ ...value, provider })}>{provider === 'github' ? 'GitHub' : 'GitLab'}</button>)}</div>
@@ -15,7 +92,7 @@ export function RemoteFields({ value, change, disabled }: { value: RemoteSetting
   </fieldset>;
 }
 
-export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(text: string, kind?: 'ok' | 'err'): void }) {
+export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): void; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void }) {
   const [tab, setTab] = useState('ai');
   const [form, setForm] = useState<AISettings>({ provider: '', url: '', apiKey: '' });
   const [backup, setBackup] = useState<BackupSettings>({ ...emptyBackup });
@@ -82,10 +159,12 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
     catch (e: any) { setMessage(e.message); notify(e.message, 'err'); return false; }
     finally { setBusy(false); }
   }
-  // REQ-091：各 tab 的保存统一为底部一个「保存并完成」按钮，保存当前 tab 后关闭浮层
+  // REQ-091：各 tab 的保存统一为底部一个「保存并完成」按钮，保存当前 tab 后关闭浮层；
+  // 数据 tab（REQ-112）无保存项，操作即时生效
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
     : tab === 'logs' ? loaded && (!bridge.savePublishLogSettings || publishLogLoaded)
+    : tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
     if (tab === 'ai') return perform(() => bridge.saveAISettings(form), 'AI 设置已保存');
@@ -100,6 +179,7 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
       if (!aiResult.ok) return aiResult;
       return bridge.savePublishLogSettings ? bridge.savePublishLogSettings({ enabled: publishLogging }) : aiResult;
     }, '日志设置已保存');
+    if (tab === 'data') return true;
     return perform(() => bridge.saveBackupSettings!(backup), '备份设置已保存');
   }
   async function saveAndFinish() {
@@ -107,8 +187,8 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
   }
   return <div className="overlay" onClick={(e) => { if (!busy && e.target === e.currentTarget) onClose(); }}>
     <div className="dialog settings-dialog" role="dialog" aria-label="设置">
-      <div className="dialog-head"><div><h3>设置</h3><p>配置 AI、需求模板与数据备份；项目仓库请从浏览目录中设置</p></div><button className="icon-btn" disabled={busy} aria-label="关闭设置" onClick={onClose}><X /></button></div>
-      <div className="settings-tabs" role="tablist">{[['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志']].map(([id, title]) => <button key={id} role="tab" aria-selected={tab === id} disabled={busy} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(''); }}>{title}</button>)}</div>
+      <div className="dialog-head"><div><h3>设置</h3><p>配置 AI、需求模板、数据备份与数据归档；项目仓库请从浏览目录中设置</p></div><button className="icon-btn" disabled={busy} aria-label="关闭设置" onClick={onClose}><X /></button></div>
+      <div className="settings-tabs" role="tablist">{[['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']].map(([id, title]) => <button key={id} role="tab" aria-selected={tab === id} disabled={busy} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(''); }}>{title}</button>)}</div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -145,9 +225,10 @@ export function SettingsOverlay({ onClose, notify }: { onClose(): void; notify(t
           <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running} onClick={() => perform(async () => { const saved = await bridge.saveBackupSettings!(backup); if (!saved.ok) return saved; const r = await bridge.syncBackup!(); setStatus(r.status); return r; }, '备份同步完成')}>立即同步</button><button className="btn" disabled={busy || !backupLoaded || !backup.url || !bridge.testRemote} onClick={() => perform(() => bridge.testRemote!(backup), '备份仓库连接成功')}>测试连接</button></div>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
+        {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}
-      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button><button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()} title="保存当前标签页的设置并关闭">保存并完成</button></div>
+      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()} title="保存当前标签页的设置并关闭">保存并完成</button>}</div>
     </div>
   </div>;
 }
