@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -33,6 +34,11 @@ try {
   const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
   cli(['generate', '--project', project, '--items', item]);
   cli(['complete', '--project', project, '--id', item, '--summary', '已补齐完成说明，CLI检查通过']);
+  const executionItems = ['codex', 'zcode', 'pi'].map(client => ({ client,
+    id: cli(['item', 'add', '--project', project, '--title', '领取状态UI检查 ' + client]).item.id }));
+  const executionBatch = cli(['generate', '--project', project, '--items', executionItems.map(i => i.id).join(',')]).batch;
+  for (const entry of executionItems) cli(['execution', 'claim', '--project', project, '--run', randomUUID(), '--client', entry.client,
+    '--claims', JSON.stringify([{ id: entry.id, version: 1, batchId: executionBatch.id, hash: executionBatch.hash }])]);
   const reportPath = path.join(temporary, 'report.json');
   const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1', REQFLOW_UI_NOTIFICATION: '1' };
   let stderr = '';

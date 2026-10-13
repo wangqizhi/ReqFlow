@@ -9,7 +9,7 @@ export default function (pi: ExtensionAPI) {
   let active: { runFile: string; cwd: string } | undefined;
   pi.on("session_start", () => { active = undefined; });
 
-  async function read(ctx: any, projectId?: string, forceSelect = false) {
+  async function read(ctx: any, projectId?: string, forceSelect = false, execute = false) {
     active = undefined;
     const list = await main(["projects", "--cwd", ctx.cwd]);
     if (!list.ok) return list;
@@ -28,10 +28,10 @@ export default function (pi: ExtensionAPI) {
     const match = await matchProject(list.projects, project.dir);
     if (match.project.id !== id) throw new Error("项目目录绑定不唯一，或发生变化，请先检查 ReqFlow 绑定。");
     const cwd = id === list.matchedProjectId ? ctx.cwd : project.dir;
-    const result = await main(["read", "--cwd", cwd]);
+    const result = await main([execute ? "read" : "inspect", "--cwd", cwd]);
     if (!result.ok) return result;
     if (result.project.id !== id) throw new Error("读取过程中项目绑定变化，请重新选择。");
-    active = result.runFile ? { runFile: result.runFile, cwd } : undefined;
+    active = execute && result.runFile ? { runFile: result.runFile, cwd } : undefined;
     return { ...result, executionCwd: cwd, piCwd: ctx.cwd, instructions: rules };
   }
 
@@ -39,7 +39,7 @@ export default function (pi: ExtensionAPI) {
     description: "执行 ReqFlow 需求；匹配当前目录，否则让用户选项目。/reqflow select 重新选择",
     handler: async (args, ctx) => {
       try {
-        const result = await read(ctx, undefined, args.trim() === "select");
+        const result = await read(ctx, undefined, args.trim() === "select", true);
         if (!result.ok) { ctx.ui.notify(result.pluginUpdate?.instruction || result.error || "插件版本检查失败", "error"); return; }
         if (result.cancelled || result.selectionRequired) return;
         if (!result.requirements?.length) {
@@ -62,8 +62,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "reqflow_read", label: "ReqFlow 领取需求", executionMode: "sequential",
     description: "用户要求读取/分析/执行 ReqFlow 需求时使用。自动匹配当前目录；未匹配时通过 UI 请用户选项目。非交互模式返回项目列表，必须询问用户后传 projectId，不可自行猜测。返回 executionCwd、runFile 和有效需求。读取本身不授权执行。",
-    parameters: Type.Object({ projectId: Type.Optional(Type.String({ description: "用户明确选择的项目 ID" })) }),
-    async execute(_id, params, _signal, _update, ctx) { return output(await read(ctx, params.projectId)); },
+    parameters: Type.Object({ projectId: Type.Optional(Type.String({ description: "用户明确选择的项目 ID" })), execute: Type.Optional(Type.Boolean({ description: "仅用户明确授权执行时为 true；领取独占任务。省略或 false 为只读查看，不锁定任务。" })) }),
+    async execute(_id, params, _signal, _update, ctx) { return output(await read(ctx, params.projectId, false, params.execute === true)); },
   });
 
   pi.registerTool({

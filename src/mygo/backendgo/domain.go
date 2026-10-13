@@ -553,7 +553,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -860,6 +860,9 @@ func coreApplyOperation(s, a map[string]any) error {
 	if p == nil {
 		return errors.New("项目不存在")
 	}
+	if e := guardAIExecution(p, a); e != nil {
+		return e
+	}
 	now := coreNow()
 	items := coreList(p["items"])
 	batches := coreList(p["batches"])
@@ -1057,6 +1060,19 @@ func coreApplyOperation(s, a map[string]any) error {
 			}
 		}
 		return nil
+	case "executionClaim":
+		return claimAIExecution(p, a, now)
+	case "executionRelease":
+		i := coreFind(items, a["id"])
+		if i == nil || ActiveAIExecution(i) == nil {
+			return errors.New("需求没有正在执行的 AI 任务")
+		}
+		if coreString(a["run"]) != "" && ActiveAIExecution(i)["runId"] != a["run"] {
+			return errors.New("AI 任务属于另一运行记录")
+		}
+		finishAIExecution(i, now, "released")
+		coreHistory(i, map[string]any{"event": "释放 AI 任务", "time": now, "note": coreString(a["note"]), "execution": coreClone(i["aiExecution"])})
+		return nil
 	case "item":
 		return coreApplyItem(p, a, now)
 	case "generate":
@@ -1198,9 +1214,13 @@ func coreApplyOperation(s, a map[string]any) error {
 			}
 			i["executionVersion"] = i["version"]
 		}
+		finishAIExecution(i, now, "completed")
 		i["status"] = "pending_verification"
 		i["link"] = coreString(a["link"])
 		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
+		if coreHas(i, "aiExecution") {
+			history["execution"] = coreClone(i["aiExecution"])
+		}
 		if summary != "" {
 			i["completionNote"] = summary
 			i["completionNoteVersion"] = i["version"]

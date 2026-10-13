@@ -51,7 +51,7 @@ func coreCLIHelp(version string) map[string]any {
 }
 func coreCLIItem(i map[string]any) map[string]any {
 	r := map[string]any{"archived": coreTruthy(i["archived"]), "executor": coreExecutor(i), "bodyPreview": coreCLIPreview(coreString(i["body"]), 120)}
-	for _, k := range []string{"id", "number", "title", "type", "priority", "status", "version", "executionVersion", "completionNote", "completionNoteVersion", "scheduledDate", "aiValidation", "deliveryGuidance", "link", "criteria"} {
+	for _, k := range []string{"id", "number", "title", "type", "priority", "status", "version", "executionVersion", "completionNote", "completionNoteVersion", "scheduledDate", "aiValidation", "deliveryGuidance", "link", "criteria", "aiExecution"} {
 		if v, ok := i[k]; ok {
 			r[k] = v
 		}
@@ -161,9 +161,40 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, version string) (map[string]any, error) {
 	switch command {
 	case "version":
-		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
+		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
 	case "plugin version", "plugin bundle":
 		return pluginRelease(command, a)
+	case "execution claim":
+		var claims []any
+		if err := json.Unmarshal([]byte(coreString(a["claims"])), &claims); err != nil {
+			return nil, errors.New("--claims 需要 JSON 数组")
+		}
+		r, err := s.Mutate(map[string]any{"op": "executionClaim", "project": a["project"], "claims": claims, "run": a["run"], "client": a["client"]}, nil)
+		if err != nil {
+			return nil, err
+		}
+		p, err := coreCLIProject(coreMap(r["state"]), coreString(a["project"]))
+		if err != nil {
+			return nil, err
+		}
+		owned, skipped := []any{}, []any{}
+		for _, v := range claims {
+			request := coreMap(v)
+			i := coreFind(coreList(p["items"]), request["id"])
+			e := ActiveAIExecution(i)
+			if e != nil && e["runId"] == a["run"] && e["client"] == a["client"] {
+				owned = append(owned, i)
+			} else {
+				skipped = append(skipped, map[string]any{"id": request["id"], "reason": "任务已被其他 AI 领取，或排期内容已变化"})
+			}
+		}
+		return map[string]any{"project": p, "items": owned, "skipped": skipped, "version": r["version"]}, nil
+	case "execution release":
+		r, err := s.Mutate(map[string]any{"op": "executionRelease", "project": a["project"], "id": a["id"], "run": a["run"], "note": a["note"]}, nil)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"version": r["version"]}, nil
 	case "help":
 		return coreCLIHelp(version), nil
 	case "workspace get":
@@ -281,7 +312,7 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 		b := coreMap(coreList(p["batches"])[0])
 		return map[string]any{"batch": coreCLIBatch(b), "prompt": b["text"], "promptLength": len(utf16.Encode([]rune(coreString(b["text"])))), "version": r["version"]}, nil
 	case "submit", "cancel", "complete", "item completion-note", "revert", "verify", "regress", "archive":
-		action := map[string]any{"op": command, "project": a["project"], "id": a["id"], "note": coreString(a["note"]), "link": coreString(a["link"])}
+		action := map[string]any{"op": command, "project": a["project"], "id": a["id"], "note": coreString(a["note"]), "link": coreString(a["link"]), "run": a["run"]}
 		if command == "item completion-note" {
 			action["op"] = "completionNote"
 			if !coreHas(a, "summary") {

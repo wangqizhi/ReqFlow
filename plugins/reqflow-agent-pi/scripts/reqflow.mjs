@@ -45,6 +45,13 @@ export function submittedBatch(p, i) {
   return batches.sort((a, b) => String(b.submittedAt || b.time).localeCompare(String(a.submittedAt || a.time)))[0];
 }
 
+export function scheduledBatch(p, i) {
+  const lastSchedule = i.flowEvents?.slice().reverse().find(e => ['generate', 'revert', 'cancel', 'guidance', 'verify', 'regress'].includes(e.operation));
+  if (lastSchedule && lastSchedule.operation !== 'generate') return undefined;
+  // Latest live schedule wins; never fall back to an older snapshot after edits.
+  return p.batches.find(b => b.mode === 'develop' && b.status !== 'cancelled' && b.items.some(old => old.id === i.id));
+}
+
 export async function matchProject(projects, cwd) {
   const current = await canonical(cwd);
   const candidates = [];
@@ -62,38 +69,65 @@ export async function matchProject(projects, cwd) {
   return candidates[0];
 }
 
-export async function workspace(config) {
+async function workspace(config) {
   const info = await callCli(config, ['version']);
   if (info.app !== 'ReqFlow' || typeof info.dataFile !== 'string') fail('不是兼容的 ReqFlow CLI');
   // workspace get initializes a missing store. Prevent reading the wrong empty workspace.
   await fs.access(info.dataFile).catch(() => fail(`工作区不存在：${info.dataFile}；请核对数据目录。`));
   const result = await callCli(config, ['workspace', 'get']);
   if (!Array.isArray(result.state?.projects)) fail('工作区格式不兼容');
-  return { ...result, dataFile: await fs.realpath(info.dataFile) };
+  return { ...result, capabilities: info.capabilities || [], dataFile: await fs.realpath(info.dataFile) };
 }
 
-export async function readRun(config, cwd, runDir) {
+export async function readRun(config, cwd, runDir, options = {}) {
   const w = await workspace(config);
-  const { project: p, root } = await matchProject(w.state.projects, cwd);
-  const eligible = [], skipped = [];
+  const match = await matchProject(w.state.projects, cwd);
+  let p = match.project;
+  const root = match.root;
+  let eligible = []; const skipped = [];
+  const runId = randomUUID();
   for (const i of p.items) {
-    if (i.status !== 'in_progress' || i.archived) continue;
-    const b = submittedBatch(p, i);
+    if (options.ids && !options.ids.includes(i.id)) continue;
+    if (!['ready', 'in_progress'].includes(i.status) || i.archived) continue;
+    const b = scheduledBatch(p, i);
+    if (!b) continue;
+    if (i.aiExecution?.runId && !i.aiExecution.endedAt) {
+      skipped.push({ id: i.id, number: i.number, reason: '任务正在由 ' + i.aiExecution.client + ' 执行', execution: i.aiExecution }); continue;
+    }
+    if ((i.executor || 'ai') !== 'ai') { skipped.push({ id: i.id, number: i.number, reason: '非 AI 执行任务' }); continue; }
     const old = b?.items.find(x => x.id === i.id);
-    if (!b || old?.version !== i.version || i.executionVersion !== i.version || b.guideVersion !== p.guideVersion) {
-      skipped.push({ id: i.id, number: i.number, reason: '无有效已提交快照，或版本 / 引导词已变化' });
+    if (old?.version !== i.version || (old.executor || 'ai') !== 'ai' || b.guideVersion !== p.guideVersion) {
+      skipped.push({ id: i.id, number: i.number, reason: '排期快照版本、执行方式或引导词已变化' });
       continue;
     }
-    const { history, ...requirement } = old;
+    const { history, ...requirement } = { ...old, ...i, executor: i.executor || 'ai' };
     eligible.push({ id: i.id, batchId: b.id, hash: b.hash,
       signature: signature(p, i, b), requirement,
       history: i.history.filter(h => h.event === '验证失败' || h.event === '回归退回') });
   }
-  const run = { schema: 1, id: randomUUID(), createdAt: new Date().toISOString(),
+  if (eligible.length && options.claim !== false) {
+    if (!w.capabilities.includes('ai-execution-claim-v1')) fail('请先升级 ReqFlow 到支持原子 AI 领取的版本，未领取任务');
+    // Allocate recovery information before claiming; a crash leaves a run ID
+    // that the user can use to identify and explicitly release interrupted work.
+    await fs.mkdir(runDir, { recursive: true });
+    await fs.writeFile(path.join(runDir, runId + '.claim.json'), JSON.stringify({ runId, cwd, projectId: p.id, config, items: eligible.map(i => i.id) }), { flag: 'wx', mode: 0o600 });
+    const claimed = await callCli(config, ['execution', 'claim', '--project', p.id, '--run', runId, '--client', 'pi', '--claims',
+      JSON.stringify(eligible.map(i => ({ id: i.id, version: i.requirement.version, batchId: i.batchId, hash: i.hash })))]);
+    p = claimed.project;
+    const owned = new Set(claimed.items.map(i => i.id));
+    skipped.push(...claimed.skipped);
+    eligible = eligible.filter(snapshot => owned.has(snapshot.id)).map(snapshot => {
+      const i = p.items.find(i => i.id === snapshot.id), b = scheduledBatch(p, i);
+      const { history, ...requirement } = i;
+      return { ...snapshot, signature: signature(p, i, b), requirement,
+        history: i.history.filter(h => h.event === '验证失败' || h.event === '回归退回') };
+    });
+  }
+  const run = { schema: 2, client: 'pi', claimed: options.claim !== false, id: runId, createdAt: new Date().toISOString(),
     config, cwd: await canonical(cwd), root, dataFile: w.dataFile,
     projectId: p.id, projectName: p.name, items: eligible, completed: [] };
   let runFile = null;
-  if (eligible.length) {
+  if (eligible.length && options.claim !== false) {
     await fs.mkdir(runDir, { recursive: true });
     runFile = path.join(runDir, run.id + '.json');
     await fs.writeFile(runFile, JSON.stringify(run, null, 2), { flag: 'wx', mode: 0o600 });
@@ -112,7 +146,7 @@ export async function completeRun(runFile, report, cwd) {
   const pluginUpdate = await ensurePlugin(run.config, info, 'pi', callCli);
   if (pluginUpdate.updateRequired) return { ok: false, pluginUpdate };
   if (pluginUpdate.updated) return (await import(pathToFileURL(path.join(pluginUpdate.pluginDir, 'scripts/reqflow.mjs')).href)).completeRun(runFile, report, cwd);
-  if (run.schema !== 1 || !Array.isArray(report.items) || !report.items.length) fail('报告需要非空 items 数组');
+  if (![1, 2].includes(run.schema) || !Array.isArray(report.items) || !report.items.length) fail('报告需要非空 items 数组');
   if (await canonical(cwd) !== run.cwd) fail('当前工作目录与领取目录不一致');
   const ids = report.items.map(i => i.id);
   if (new Set(ids).size !== ids.length) fail('报告包含重复需求 ID');
@@ -121,10 +155,34 @@ export async function completeRun(runFile, report, cwd) {
     if (typeof result.summary !== 'string' || !result.summary.trim() || typeof result.validation !== 'string' || !result.validation.trim())
       fail('每条完成报告必须提供 summary 和 validation（检查结果或未运行原因）');
   }
+  if (run.schema === 1 || report.items.some(result => run.items.find(i => i.id === result.id).requirement.aiExecution?.runId !== run.id)) {
+    const w = await workspace(run.config);
+    const match = await matchProject(w.state.projects, cwd);
+    if (w.dataFile !== run.dataFile || match.project.id !== run.projectId || match.root !== run.root) fail('原领取目录、项目或数据文件已变化');
+    const p = match.project;
+    const snapshots = report.items.map(result => run.items.find(i => i.id === result.id)).filter(snapshot => snapshot.requirement.aiExecution?.runId !== run.id);
+    for (const snapshot of snapshots) {
+      const i = p.items.find(i => i.id === snapshot.id), b = i && scheduledBatch(p, i);
+      if (!i || !b || signature(p, i, b) !== snapshot.signature) fail('旧领取快照已变化，不能自动升级领取记录');
+    }
+    const claimed = await callCli(run.config, ['execution', 'claim', '--project', p.id, '--run', run.id, '--client', 'pi', '--claims',
+      JSON.stringify(snapshots.map(i => ({ id: i.id, version: i.requirement.version, batchId: i.batchId, hash: i.hash })))]);
+    const owned = new Set(claimed.items.map(i => i.id));
+    for (const snapshot of snapshots) {
+      if (!owned.has(snapshot.id)) fail('旧快照任务已由其他 AI 领取，未回写完成状态');
+      const i = claimed.project.items.find(i => i.id === snapshot.id);
+      snapshot.signature = signature(claimed.project, i, scheduledBatch(claimed.project, i));
+      snapshot.requirement = i;
+    }
+    run.schema = 2; run.client = 'pi'; run.claimed = true;
+    await fs.writeFile(runFile, JSON.stringify(run, null, 2), { mode: 0o600 });
+  }
+  if (!run.claimed || run.client !== 'pi') fail('本运行记录没有属于当前客户端的领取凭据');
   const outcomes = [];
   for (const result of report.items) {
     try {
       const w = await workspace(run.config);
+      if (!w.capabilities.includes('scheduled-ai-complete')) fail('ReqFlow 桌面版需升级到支持 AI 排期条件完成的版本，未进行回写');
       if (w.dataFile !== run.dataFile) fail('ReqFlow 数据文件已变化');
       const match = await matchProject(w.state.projects, cwd);
       if (match.project.id !== run.projectId || match.root !== run.root) fail('项目绑定已变化');
@@ -134,12 +192,13 @@ export async function completeRun(runFile, report, cwd) {
       if (prior && i.status === 'pending_verification' && i.history[0]?.note === prior.note) {
         outcomes.push({ id: i.id, status: 'already_completed' }); continue;
       }
-      const snapshot = run.items.find(x => x.id === i.id), b = submittedBatch(p, i);
-      if (i.status !== 'in_progress' || i.archived || !b || signature(p, i, b) !== snapshot.signature)
+      const snapshot = run.items.find(x => x.id === i.id), b = scheduledBatch(p, i);
+      if (i.aiExecution?.runId !== run.id || i.aiExecution?.client !== 'pi' || i.aiExecution?.endedAt) fail('任务已释放或由另一 AI 执行，未回写');
+      if (!['ready', 'in_progress'].includes(i.status) || (i.executor || 'ai') !== 'ai' || i.archived || !b || signature(p, i, b) !== snapshot.signature)
         fail('需求、批次或项目设置已变化，请重新领取并核对实现');
       const note = `[ReqFlow Pi run ${run.id}]\n${result.summary}\n验证：${result.validation}`;
       // Legacy CLI has no conditional-write API. Pre/post checks narrow but cannot eliminate the race.
-      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--note', note]);
+      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id]);
       const after = await workspace(run.config);
       const updated = after.state.projects.find(p => p.id === run.projectId)?.items.find(x => x.id === i.id);
       if (updated?.status !== 'pending_verification' || updated.version !== i.version || updated.history[0]?.note !== note)
@@ -205,8 +264,8 @@ export async function main(argv) {
     return { ok: true, matchedProjectId, matchError,
       projects: w.state.projects.map(p => ({ id: p.id, name: p.name, dir: p.dir || null })) };
   }
-  if (command === 'read') return readRun(config, cwd, path.join(path.dirname(configFile), 'runs'));
-  fail('支持 configure / doctor / projects / read / complete');
+  if (command === 'read' || command === 'inspect') return readRun(config, cwd, path.join(path.dirname(configFile), 'runs'), { claim: command === 'read', ids: opts.ids ? opts.ids.split(',').filter(Boolean) : undefined });
+  fail('支持 configure / doctor / projects / inspect / read / complete');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

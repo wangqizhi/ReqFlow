@@ -17,3 +17,7 @@
 read、doctor、projects（Pi）与 complete 在执行前使用 ReqFlow 内置的插件版本查询接口。仅在内置版本更新时下载离线更新包，校验 SHA256 与清单；失败时停止，不领取或回写需求。版本来自当前安装的 ReqFlow，升级 ReqFlow 即更新插件发布目录；不访问第三方下载地址、不降级插件。
 
 Codex 使用 plugin marketplace / plugin add；ZCode 使用安装目录附带的 resources/glm/zcode.cjs 的 plugins 命令（非标准安装路径可配置 zcodeCli 或 REQFLOW_ZCODE_CLI）；保留插件和市场名称，仅独立本地市场可自动切换到已校验更新包，失败恢复原来源。Pi 更新本地 extensions/reqflow 源目录；包安装使用稳定的 ~/.reqflow-pi/plugin 路径以避免重复注册。更新后需重新加载宿主技能或 Pi 扩展注册；当前命令自动使用最新桥接脚本。保留用户独立配置与领取快照。
+
+## 独占执行（ReqFlow 2.2.4+）
+
+执行使用 read 原子领取；只读使用 inspect，返回 runFile=null，不锁定任务。用户限定范围时使用 --ids <id1,id2>。领取记录包含 runId、client、startedAt；完成保留 endedAt 和 durationMs。其他客户端不能领取或完成，GUI 执行中页展示当前任务与实时用时。中断任务由用户确认释放，释放后旧凭据失效，不自动超时抢占。Pi 的 reqflow_read 默认只读，只有用户授权执行时 execute=true；/reqflow 为执行入口。

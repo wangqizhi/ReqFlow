@@ -225,7 +225,7 @@ func smokeUI(w *mygo.Window, path string) {
           await waitFor(()=>document.querySelector('.workspace-toolbar'));
           await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
           const panel=document.querySelector('.workspace-toolbar');const buttons=[...panel.querySelectorAll('button')];
-          return {ok:panel.getBoundingClientRect().bottom<document.querySelector('.list-scroll').getBoundingClientRect().bottom&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
+          return {ok:panel.getBoundingClientRect().top>=document.querySelector('.list-scroll').getBoundingClientRect().bottom&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
         })()`)
 		if e != nil {
 			schedule = map[string]any{"ok": false, "error": e.Error()}

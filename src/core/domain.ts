@@ -4,6 +4,15 @@
 import { validateRemote, type RemoteSettings } from './remote';
 import { validateDate } from './dates';
 export type Attachment = { id: string; label: string; name: string; dataUrl: string; path?: string };
+export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
+export const activeAIExecution = (i: Item) => i.aiExecution?.runId && !i.aiExecution.endedAt ? i.aiExecution : undefined;
+function finishAIExecution(i: Item, now: string, outcome: 'completed' | 'released') {
+  const execution = activeAIExecution(i);
+  if (!execution) return;
+  execution.endedAt = now;
+  execution.outcome = outcome;
+  execution.durationMs = Math.max(0, Date.parse(now) - Date.parse(execution.startedAt));
+}
 
 function completionSummary(a: any): string {
   if (a.summary !== undefined) {
@@ -42,6 +51,7 @@ export type Item = {
   scheduledDate?: string;
   executor?: string; // ai | human | plugin:<id> | agent:<id>；旧需求默认 ai
   archived?: boolean;
+  aiExecution?: AIExecution;
 };
 
 export type Batch = {
@@ -312,7 +322,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
 }
 export function mutationProjectIds(a: any): string[] | null {
   const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
-  if (!(localOps.includes(a?.op) || a?.op === 'requirementDraft') || typeof a.project !== 'string') return null;
+  if (!(localOps.includes(a?.op) || ['requirementDraft', 'executionClaim', 'executionRelease'].includes(a?.op)) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
 export async function apply(s: Workspace, a: any) {
@@ -405,6 +415,16 @@ async function applyOperation(s: Workspace, a: any) {
 
   const p = s.projects.find((p) => p.id === a.project);
   if (!p) throw new Error('项目不存在');
+  if (!['executionClaim', 'executionRelease', 'gitCommitted', 'requirementDraft', 'completionNote'].includes(a.op)) {
+    const ids = [...(a.ids || []), ...(a.id ? [a.id] : [])];
+    if (['cancel', 'submit'].includes(a.op)) ids.push(...(p.batches.find(b => b.id === a.batch)?.items.map(i => i.id) || []));
+    if (['deleteProject', 'guidance', 'projectDir', 'projectDescription'].includes(a.op)) ids.push(...p.items.map(i => i.id));
+    for (const id of ids) {
+      const item = p.items.find(i => i.id === id);
+      const execution = item && activeAIExecution(item);
+      if (execution && !(a.op === 'complete' && execution.runId === a.run)) throw Error('需求正在由 ' + execution.client + ' 执行，请先释放任务');
+    }
+  }
 
   if (a.op === 'requirementDraft') {
     if (!a.draft || typeof a.draft !== 'object' || Array.isArray(a.draft)) throw Error('草稿格式无效');
@@ -430,6 +450,32 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
   const now = new Date().toISOString();
+  if (a.op === 'executionClaim') {
+    if (!['codex', 'zcode', 'pi'].includes(a.client) || !/^[a-f0-9-]{36}$/.test(a.run || '')) throw Error('AI 领取客户端或运行 ID 无效');
+    if (!Array.isArray(a.claims) || !a.claims.length) throw Error('AI 领取请求不能为空');
+    const seen = new Set();
+    for (const r of a.claims) {
+      if (!r?.id || seen.has(r.id) || !Number.isSafeInteger(r.version) || !r.batchId || !r.hash) throw Error('AI 领取请求格式无效');
+      seen.add(r.id);
+    }
+    for (const r of a.claims) {
+      const i = p.items.find(i => i.id === r.id);
+      if (!i || i.archived || (i.executor || 'ai') !== 'ai' || !['ready', 'in_progress'].includes(i.status) || activeAIExecution(i)) continue;
+      const b = scheduledBatch(p, i);
+      if (!b || b.id !== r.batchId || b.hash !== r.hash || i.version !== r.version) continue;
+      i.aiExecution = { runId: a.run, client: a.client, startedAt: now, version: i.version, batchId: b.id };
+      i.history.unshift({ event: 'AI 领取任务', time: now, client: a.client, runId: a.run });
+    }
+    return;
+  }
+  if (a.op === 'executionRelease') {
+    const i = p.items.find(i => i.id === a.id);
+    if (!i || !activeAIExecution(i)) throw Error('需求没有正在执行的 AI 任务');
+    if (a.run && i.aiExecution!.runId !== a.run) throw Error('AI 任务属于另一运行记录');
+    finishAIExecution(i, now, 'released');
+    i.history.unshift({ event: '释放 AI 任务', time: now, note: String(a.note || ''), execution: structuredClone(i.aiExecution) });
+    return;
+  }
 
   if (a.op === 'projectDescription') {
     p.description = String(a.description || '');
@@ -736,6 +782,7 @@ async function applyOperation(s: Workspace, a: any) {
       if (i.status !== 'ready' || i.archived || !scheduledBatch(p, i)) throw new Error('需求不在执行中或有效排期中');
       i.executionVersion = i.version;
     }
+    finishAIExecution(i, now, 'completed');
     i.status = 'pending_verification';
     i.link = String(a.link || '');
     if (completionNote) {
@@ -745,7 +792,7 @@ async function applyOperation(s: Workspace, a: any) {
       delete i.completionNote;
       delete i.completionNoteVersion;
     }
-    i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}) });
+    i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}), ...(i.aiExecution ? { execution: structuredClone(i.aiExecution) } : {}) });
     return;
   }
   if (a.op === 'completionNote') {

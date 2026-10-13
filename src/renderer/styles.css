@@ -146,12 +146,25 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .navtab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .navtab.active span { background: var(--accent-soft); color: var(--accent-dark); }
 .list-tools-side { display: flex; align-items: center; gap: 10px; }
-.workspace-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; padding: 14px 0; flex-shrink: 0; }
-.workspace-actions, .workspace-filters, .workspace-schedule-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+/* REQ-139/140：列表上方的固定信息条（需求池排序 / 排期批次与日期筛选） */
+.list-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 2px 10px; flex-shrink: 0; }
+.list-header .gen-count { font-size: 13px; color: var(--ink-2); }
+.list-header .gen-warning { flex-basis: 100%; margin: 0; }
+.workspace-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; padding: 14px 0 10px; flex-shrink: 0; border-top: 1px solid var(--line); }
+.workspace-actions, .workspace-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .workspace-actions strong { font-size: 14px; }
+.workspace-actions { min-height: 37px; }
 .workspace-filters { justify-content: flex-end; }
-.workspace-schedule-filters { grid-column: 1 / -1; }
-.workspace-schedule-filters .gen-warning { flex-basis: 100%; margin: 0; }
+.flow-main { position: relative; }
+/* REQ-138：窗口栏横贯主区顶部整条作为拖动区（保存状态与窗口按钮除外），
+   透明悬浮不占布局，项目标题与操作按钮保持在原位置 */
+.flow-main > .top { position: absolute; top: 0; left: 0; right: 0; background: transparent; backdrop-filter: none; }
+/* 错误条置于拖动条之下方独立区域，避免被透明拖动条盖住「刷新数据」按钮 */
+.flow-main > .error { position: relative; z-index: 6; margin-top: 42px; }
+.flow-main .title-row { padding-top: 12px; }
+.flow-main .title-actions { padding-top: 36px; }
+.execution-info { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 12px; }
+.execution-info strong, .status.executing { color: var(--accent-dark); }
 @media (max-width: 1250px) {
   .workspace-toolbar { grid-template-columns: 1fr; }
   .workspace-filters { justify-content: flex-start; }
@@ -632,7 +645,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .folder-form .field input { width: 100%; height: 30px; padding: 5px 8px; font-size: 12px; background: var(--side-hover); color: var(--side-ink); border-color: var(--side-muted); }
 .folder-form .icon-btn { width: 28px; height: 28px; color: var(--side-muted); }
 .folder-form .icon-btn:hover:not(:disabled) { background: var(--side-hover); color: var(--side-ink); }
-.requirement-sort { margin: 0 0 16px; }
+.requirement-sort { margin: 0; }
 .ai-requirements-dialog { width: min(860px, 94vw); display: flex; flex-direction: column; max-height: 90vh; padding: 24px; overflow: hidden; }
 .ai-requirements-body { overflow-y: auto; min-height: 0; padding: 0 4px 16px; }
 .ai-discussion { white-space: pre-wrap; line-height: 1.7; font-size: 13px; }

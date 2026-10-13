@@ -34,9 +34,10 @@ var notificationShell = syscall.NewLazyDLL("shell32.dll").NewProc("Shell_NotifyI
 var notificationComctl = syscall.NewLazyDLL("comctl32.dll")
 
 type desktopNotifications struct {
-	window   uintptr
-	callback uintptr
-	added    bool
+	window        uintptr
+	callback      uintptr
+	added         bool
+	soundAccepted bool
 }
 
 func loadNotificationIcon() (uintptr, error) {
@@ -64,7 +65,9 @@ func notificationText(dst []uint16, text string) {
 }
 
 func notificationData(window, icon uintptr, opts mygo.NotificationOptions) notificationIconData {
-	d := notificationIconData{Window: window, ID: notificationID, Flags: 0x01 | 0x02 | 0x04 | 0x10, CallbackMessage: notificationMessage, Icon: icon, BalloonIcon: icon, InfoFlags: 0x04 | 0x20}
+	// Play one explicit Windows information sound after Shell accepts delivery;
+	// suppress Shell's implicit sound to avoid playing the effect twice.
+	d := notificationIconData{Window: window, ID: notificationID, Flags: 0x01 | 0x02 | 0x04 | 0x10, CallbackMessage: notificationMessage, Icon: icon, BalloonIcon: icon, InfoFlags: 0x04 | 0x20 | 0x10}
 	d.Size = uint32(unsafe.Sizeof(d))
 	if opts.Silent {
 		d.InfoFlags |= 0x10
@@ -141,6 +144,11 @@ func (n *desktopNotifications) show(w *mygo.Window, opts mygo.NotificationOption
 			return
 		}
 		n.added = true
+		n.soundAccepted = false
+		if !opts.Silent {
+			accepted, _, _ := notificationUser32.NewProc("MessageBeep").Call(0x40) // MB_ICONINFORMATION, Windows configured sound.
+			n.soundAccepted = accepted != 0
+		}
 	})
 	return result
 }
@@ -163,8 +171,14 @@ func checkNotificationDelivery(w *mygo.Window) map[string]any {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	shown := n.added
+	silentRespected := !n.soundAccepted
+	err = n.show(w, mygo.NotificationOptions{Title: "ReqFlow 音效检查", Body: "Windows 通知音效与点击返回检查"})
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	soundAccepted := n.soundAccepted
 	mygo.RunOnMain(func() {
 		notificationUser32.NewProc("SendMessageW").Call(w.NativeHandle(), notificationMessage, notificationID, 0x405)
 	})
-	return map[string]any{"ok": shown && !n.added && w.IsVisible() && !w.IsMinimized(), "shellAccepted": shown, "clickRemovedTray": !n.added}
+	return map[string]any{"ok": shown && !n.added && w.IsVisible() && !w.IsMinimized() && soundAccepted && silentRespected, "shellAccepted": shown, "clickRemovedTray": !n.added, "soundAccepted": soundAccepted, "silentRespected": silentRespected}
 }

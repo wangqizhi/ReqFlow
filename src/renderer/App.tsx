@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
-  scheduledBatch, type Item, type Project, type Workspace
+  scheduledBatch, activeAIExecution, type Item, type Project, type Workspace
 } from '../core/domain';
 import { bridge } from './api';
 import { publishProject } from './publish';
@@ -31,6 +31,11 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi' };
+function executionDuration(start: string, end = Date.now()) {
+  const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
+  return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
+}
 const emptyForm = { title: '', body: '', criteria: '', type: 'feature', priority: 'P1', executor: 'ai' };
 // 上次使用的项目（REQ-029）：启动时恢复；项目切换即记录，关闭程序时最近一次选择已保存
 const LAST_PROJECT_KEY = 'reqflow-last-project';
@@ -41,6 +46,8 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('');
   const [pid, setPid] = useState('');
   const [tab, setTab] = useState('feature');
+  const [executionClock, setExecutionClock] = useState(Date.now());
+  const [releaseItem, setReleaseItem] = useState<Item | null>(null);
   const [archiveView, setArchiveView] = useState('items');
   const [scheduleMode, setScheduleMode] = useState('through');
   const [scheduleDate, setScheduleDate] = useState(localDate());
@@ -443,18 +450,25 @@ export default function App() {
   }
 
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
-  const eligible = (i: Item) => !i.archived && (i.status === 'ready' || i.status === 'in_progress');
+  const eligible = (i: Item) => !i.archived && !activeAIExecution(i) && (i.status === 'ready' || i.status === 'in_progress');
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
-  const allInProgress = (p?.items || []).filter((i) => !i.archived && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
+  const executingItems = (p?.items || []).filter(i => !!activeAIExecution(i));
+  const allInProgress = (p?.items || []).filter((i) => !i.archived && !activeAIExecution(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
   // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
   const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
   const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
     && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
+  useEffect(() => {
+    if (!executingItems.length) { setTab(current => current === 'executing' ? 'generate' : current); return; }
+    const timer = window.setInterval(() => setExecutionClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [executingItems.length, tab]);
+  const shownPhases: [string, string][] = executingItems.length ? [...phases.slice(0, 2), ['executing', '执行中'], ...phases.slice(2)] : phases;
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
-    (tab === 'archived' ? !!i.archived
+    (tab === 'executing' ? !!activeAIExecution(i) : tab === 'archived' ? !!i.archived
       : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledBatch(p!, i) : tab === 'generate' ? allInProgress.some(item => item.id === i.id) : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
     && (typeFilter === 'all' || i.type === typeFilter)
@@ -660,7 +674,7 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main">
+      <main className={"main" + (mode === 'FLOW' ? ' flow-main' : '')}>
         <header className="top">
           <div className="save">
             <Check size={14} />{saved}
@@ -725,45 +739,32 @@ export default function App() {
           }}>编辑设置</button>
         </section>
 
-        <div className={'workspace-grid single' + (tab === 'generate' ? ' scheduling' : '')}>
+        <div className="workspace-grid single">
           <section className="requirements">
             <div className="navtabs">
-              {phases.map(([v, l]) => (
+              {shownPhases.map(([v, l]) => (
                 <button key={v} className={'navtab' + (tab === v ? ' active' : '')} onClick={() => changeTab(v)}>
                   {l}
-                  <span>{v === 'generate' ? allInProgress.length
+                  <span>{v === 'executing' ? executingItems.length : v === 'generate' ? allInProgress.length
                     : p!.items.filter((i) =>
-                      v === 'archived' ? !!i.archived : !i.archived && (v === 'feature' ? i.status === 'ready' : i.status === v)).length}</span>
+                      v === 'archived' ? !!i.archived : !i.archived && (v === 'feature' ? i.status === 'ready' && !activeAIExecution(i) && !scheduledBatch(p!, i) : i.status === v)).length}</span>
                 </button>
               ))}
             </div>
 
-            <div className="workspace-toolbar" aria-label="需求操作与筛选">
-              <div className="workspace-actions">
-                {tab === 'feature' && <><label className="check-label"><input type="checkbox"
-                  checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every(i => selected.includes(i.id))}
-                  onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(eligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
-                  <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
-                {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
-                  <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
-                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · 当前 {inProgress.length} 条</button></>}
-                {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
-                {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
-                  <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button>
-                  <button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button>
-                </div>}
+            {/* REQ-139/140：批次与排序信息固定在需求列表上方，不随列表滚动 */}
+            {(tab === 'feature' || tab === 'generate') && (
+              <div className="list-header">
+                {tab === 'feature' && <div className="requirement-sort segmented" role="group" aria-label="需求排序">{[['desc', '最新在前'], ['asc', '最早在前'], ['priority', '优先级']].map(([id, label]) => <button key={id} aria-pressed={sort === id} className={sort === id ? 'on' : ''} onClick={() => setSort(id)}>{label}</button>)}</div>}
+                {tab === 'generate' && <>
+                  <span className="gen-count">{batch ? '批次 ' + String(batch.number).padStart(2, '0') : '暂无批次'}</span>
+                  <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '当天'], ['all', '全部日期']].map(([id, label]) => <button key={id} className={scheduleMode === id ? 'on' : ''} aria-pressed={scheduleMode === id} onClick={() => setScheduleMode(id)}>{label}</button>)}</div>
+                  <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
+                  {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
+                </>}
               </div>
-              {!viewingHistory && <div className="workspace-filters">
-                <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
-                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
-              </div>}
-              {tab === 'generate' && <div className="workspace-schedule-filters">
-                <span className="gen-count">{batch ? '批次 ' + String(batch.number).padStart(2, '0') : '暂无批次'}</span>
-                <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '当天'], ['all', '全部日期']].map(([id, label]) => <button key={id} className={scheduleMode === id ? 'on' : ''} aria-pressed={scheduleMode === id} onClick={() => setScheduleMode(id)}>{label}</button>)}</div>
-                <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
-                {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
-              </div>}
-            </div>
+            )}
+
             <div className="list-scroll">
               {viewingHistory ? (
               <div className="batch-list">
@@ -789,13 +790,12 @@ export default function App() {
             ) : (
               <>
                 {!visible.length && (
-                  <div className="empty"><Layers size={28} /><h3>{query ? '没有匹配的需求' : tab === 'generate' ? '还没有待开发的需求' : '这里还没有需求'}</h3>
+                  <div className="empty"><Layers size={28} /><h3>{query ? '没有匹配的需求' : tab === 'executing' ? '没有正在执行的任务' : tab === 'generate' ? '还没有待开发的需求' : '这里还没有需求'}</h3>
                     <p>{tab === 'feature' ? '记录想法，按需求说明加入下一轮任务。'
                       : tab === 'generate' ? '排期后需求进入这里跟踪；开发完成后提交验证。'
                       : '需求进入此阶段后，会在这里显示。'}</p></div>
                 )}
 
-                {tab === 'feature' && <div className="requirement-sort segmented" role="group" aria-label="需求排序">{[['desc', '最新在前'], ['asc', '最早在前'], ['priority', '优先级']].map(([id, label]) => <button key={id} aria-pressed={sort === id} className={sort === id ? 'on' : ''} onClick={() => setSort(id)}>{label}</button>)}</div>}
                 {tab === 'archived' && archiveDates.length > 0 && (
                   <nav className="archive-folders" aria-label="归档日期文件夹">
                     <button className={'archive-row archive-root' + (!archiveDate ? ' chosen' : '')} onClick={() => setArchiveDate('')}><FolderOpen size={16} /><strong>全部日期</strong><span>{visible.length} 条需求</span></button>
@@ -836,7 +836,7 @@ export default function App() {
                         <code>{i.number}</code>
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
-                        <span className={'status ' + i.status}>{labels[i.status]}</span>
+                        <span className={'status ' + (activeAIExecution(i) ? 'executing' : i.status)}>{activeAIExecution(i) ? '执行中' : labels[i.status]}</span>
                         <span className="revision">v{i.version}</span><span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
@@ -857,13 +857,19 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
+                      {i.aiExecution && <div className="execution-info">
+                        <strong>{clientLabels[i.aiExecution.client]} {activeAIExecution(i) ? '正在执行' : i.aiExecution.outcome === 'completed' ? '执行完成' : '任务已释放'}</strong>
+                        <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
+                        <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, executionClock) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
+                      </div>}
                       <div className="next-step">
-                        {i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
+                        {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。' : i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
                           : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回需求池重新编辑。'
                           : i.status === 'pending_verification' ? '验证完成后，直接记录通过或未通过。'
                           : '已归档，历史记录仍可查看。'}
                       </div>
                       <div className="card-actions">
+                        {!activeAIExecution(i) && <>
                         {i.status === 'in_progress' && <button className="btn" onClick={() => copyPrompt([i])}>复制 Prompt</button>}
                         {i.status === 'ready' && tab === 'generate' && <button className="btn accent" disabled={busy} onClick={async () => { const draft = scheduledBatch(p!, i); if (draft && await act({ op: 'submit', batch: draft.id }, true)) notify('已继续排期，进入待开发'); }}>继续排期</button>}
                         {i.status === 'ready' && tab !== 'generate' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
@@ -883,9 +889,11 @@ export default function App() {
                           </>
                         )}
                         {i.status === 'archived' && <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>}
+                        </>}
+                        {activeAIExecution(i) && <button className="btn" disabled={busy} onClick={() => setReleaseItem(i)}>释放任务</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
                         {/* 实验室开关开启后，在「查看详情」后面显示 Codex 派发按钮 */}
-                        {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
+                        {tab === 'generate' && !activeAIExecution(i) && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
                       </div>
                     </div>
                   </article>
@@ -897,6 +905,27 @@ export default function App() {
               </>
               )}
             </div>
+            <div className="workspace-toolbar" aria-label="需求操作与筛选">
+              <div className="workspace-actions">
+                {tab === 'feature' && <><label className="check-label"><input type="checkbox"
+                  checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every(i => selected.includes(i.id))}
+                  onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(eligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
+                  <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
+                {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
+                  <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
+                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · 当前 {inProgress.length} 条</button></>}
+                {tab === 'executing' && <><strong>执行中</strong><span className="gen-count">{visible.length} 条任务正在由 AI 执行</span></>}
+                {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
+                {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
+                  <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button>
+                  <button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button>
+                </div>}
+              </div>
+              {!viewingHistory && <div className="workspace-filters">
+                <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
+                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
+              </div>}
+            </div>
           </section>
 
 
@@ -905,6 +934,11 @@ export default function App() {
         </>}
       </main>
 
+      {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
+        <div className="dialog"><div className="dialog-head"><h3>释放 AI 任务</h3><button className="icon-btn" disabled={busy} aria-label="关闭释放确认" onClick={() => setReleaseItem(null)}><X /></button></div>
+          <p>确认 {releaseItem.number} 的 {releaseItem.aiExecution && clientLabels[releaseItem.aiExecution.client]} 已停止执行后释放。释放后其他 AI 可以领取，原运行记录将不能再提交完成。</p>
+          <div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setReleaseItem(null)}>取消</button><button className="btn primary" disabled={busy} onClick={async () => { if (await act({ op: 'executionRelease', id: releaseItem.id, run: releaseItem.aiExecution?.runId, note: '用户手动释放中断任务' })) { setReleaseItem(null); notify('任务已释放，可重新领取'); } }}>确认释放</button></div>
+        </div></div>}
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} />}

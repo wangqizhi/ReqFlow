@@ -33,6 +33,9 @@
   const controlsDragRegion = getComputedStyle(document.querySelector('.window-controls')).getPropertyValue('--app-region').trim();
   const rightGap = innerWidth - document.querySelector('.window-close').getBoundingClientRect().right;
   checks.windowSpacing = { ok: Math.abs(rightGap - 8) < 1, rightGap };
+  // REQ-138：顶部窗口栏横贯主区整条且为拖动区
+  const topBar = document.querySelector('.desktop-app .top');
+  checks.topDragStrip = { ok: getComputedStyle(topBar).getPropertyValue('--app-region').trim() === 'drag' && Math.abs(topBar.getBoundingClientRect().width - document.querySelector('.main').getBoundingClientRect().width) < 1 };
 
   if (__REQFLOW_INTERACTIONS__) {
     const footer = document.querySelector('.side-foot');
@@ -66,17 +69,46 @@
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
     const toolbar = document.querySelector('.workspace-toolbar');
-    const toolbarTop = toolbar.getBoundingClientRect().top;
-    checks.scheduleToolbar = { ok: !document.querySelector('.schedule-bottom') && toolbarTop < document.querySelector('.list-scroll').getBoundingClientRect().top && [...toolbar.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom < innerHeight) };
+    const actionsBottom = toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom;
+    const searchBottom = toolbar.querySelector('.search').getBoundingClientRect().bottom;
+    checks.scheduleToolbar = { ok: toolbar.getBoundingClientRect().top >= document.querySelector('.list-scroll').getBoundingClientRect().bottom && [...toolbar.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom < innerHeight) };
+    // REQ-139：批次与日期筛选在列表上方，底部工具栏只有一行（操作与筛选同行、无排期筛选块）
+    const scheduleHeader = document.querySelector('.requirements > .list-header');
+    checks.listHeader = { ok: !!scheduleHeader && !!scheduleHeader.querySelector('.gen-count') && !!scheduleHeader.querySelector('[aria-label="排期日期范围"]') && scheduleHeader.getBoundingClientRect().bottom <= document.querySelector('.list-scroll').getBoundingClientRect().top + 1 && !toolbar.querySelector('.workspace-schedule-filters') && Math.abs(toolbar.querySelector('.workspace-actions').getBoundingClientRect().top - toolbar.querySelector('.workspace-filters').getBoundingClientRect().top) < 1 };
+    checks.workspaceHeading = { ok: document.querySelector('.eyebrow').getBoundingClientRect().top <= 16 && document.querySelector('.title-actions > button').getBoundingClientRect().top >= document.querySelector('.top').getBoundingClientRect().bottom };
     checks.sharedToolbar = { ok: true };
     for (const phase of ['需求池', '待验证', '归档', '排期']) {
       await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith(phase)));
-      checks.sharedToolbar.ok &&= Math.abs(document.querySelector('.workspace-toolbar').getBoundingClientRect().top - toolbarTop) < 1 && !!document.querySelector('.workspace-toolbar [aria-label="搜索需求"]');
+      const current = document.querySelector('.workspace-toolbar');
+      checks.sharedToolbar.ok &&= Math.abs(current.querySelector('.workspace-actions').getBoundingClientRect().bottom - actionsBottom) < 1 && Math.abs(current.querySelector('.search').getBoundingClientRect().bottom - searchBottom) < 1 && current.getBoundingClientRect().top >= document.querySelector('.list-scroll').getBoundingClientRect().bottom;
+      // REQ-140：需求池排序固定在列表上方，滚动列表时位置不变
+      if (phase === '需求池') {
+        const sort = document.querySelector('.requirement-sort');
+        const scroll = document.querySelector('.list-scroll');
+        const fixed = sort && sort.parentElement.classList.contains('list-header') && sort.getBoundingClientRect().bottom <= scroll.getBoundingClientRect().top + 1;
+        const before = sort.getBoundingClientRect().top;
+        scroll.scrollTop = 160;
+        const stable = Math.abs(sort.getBoundingClientRect().top - before) < 1;
+        scroll.scrollTop = 0;
+        checks.poolSort = { ok: !!fixed && stable };
+      }
     }
     if (completionProject.name !== originalProject) {
       await switchProject(completionProject.name);
       await waitFor(() => document.querySelector('.main h1')?.textContent === completionProject.name);
     }
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
+    const executionCards = [...document.querySelectorAll('.req-card')];
+    checks.executionTab = { ok: executionCards.length === 3 && ['Codex', 'ZCode', 'Pi'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
+    const timeBefore = document.querySelector('.execution-info').textContent;
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    checks.executionClock = { ok: document.querySelector('.execution-info').textContent !== timeBefore };
+    for (let n = 0; n < 3; n++) {
+      await click(button('释放任务'));
+      await click(button('确认释放'));
+      await waitFor(() => !document.querySelector('[aria-label="释放 AI 任务"]'));
+    }
+    checks.executionRelease = { ok: ![...document.querySelectorAll('.navtab')].some(el => el.textContent.startsWith('执行中')) };
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
     const reportCard = [...document.querySelectorAll('.card-body')].find(el => el.querySelector('.item-title')?.textContent === '完成说明UI检查');
     const completionNote = reportCard?.querySelector('.completion-note');
