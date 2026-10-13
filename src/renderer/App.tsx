@@ -282,17 +282,34 @@ export default function App() {
     }
   }
 
+  function defaultRequirementForm() {
+    return {
+      ...emptyForm, aiValidation: false,
+      deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
+        ? '说明改动、未解决的问题。' : p!.deliveryGuidance
+    };
+  }
+
+  async function clearRequirement() {
+    if (editing || busyRef.current || uploading) return;
+    clearTimeout(autoRef.current);
+    const defaults = defaultRequirementForm();
+    if (!await act({ op: 'requirementDraft', draft: defaults }, true)) return;
+    dirtyRef.current = false;
+    formRef.current = defaults;
+    setForm(defaults);
+    setAdvanced(false); setBodyExpanded(false); setBodyOverflows(false);
+    if (imageInput.current) imageInput.current.value = '';
+    bodyInput.current?.focus();
+  }
+
   function edit(i?: Item) {
     dirtyRef.current = false;
     clearTimeout(autoRef.current);
     setEditing(i || null);
     setForm(i
       ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n') }
-      : p!.requirementDraft || {
-          ...emptyForm, aiValidation: false,
-          deliveryGuidance: p!.deliveryGuidance === DEFAULT_DELIVERY
-            ? '说明改动、未解决的问题。' : p!.deliveryGuidance
-        });
+      : p!.requirementDraft || defaultRequirementForm());
     setAdvanced(false); setNewMenu(false);
     setModal('item');
   }
@@ -549,6 +566,13 @@ export default function App() {
 
       <aside className="side">
         <div className="brand"><img className="mark" src="./app-icon.png" alt="ReqFlow" /><div>ReqFlow<small>需求流{appVersion ? ` v${appVersion}` : ''}</small></div></div>
+        {mode === 'CONTENT' ? <>
+          <div className="side-label">CONTENT 功能</div>
+          <nav className="side-projects" aria-label="CONTENT 功能菜单">
+            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
+            <div className="side-project active" aria-current="page"><FileText size={16} /><span>上下文 · 提示词</span></div>
+          </nav>
+        </> : <>
         <div className="side-label side-label-row">我的项目
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
         </div>
@@ -578,12 +602,14 @@ export default function App() {
               )}
             </div>
           ))}</details>)}
+          <button className="side-project" onClick={() => { setMode('CONTENT'); setSwitcherOpen(false); setNewMenu(false); }}><FileText size={16} /><span>CONTENT</span></button>
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span>新建项目</span>
           </button>
         </nav>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
+        </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
           <button className="btn plain" onClick={() => setSettingsOpen(true)}><Settings />设置</button>
@@ -599,25 +625,25 @@ export default function App() {
 
       <main className="main">
         <header className="top">
-          <div className="switcher" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSwitcherOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSwitcherOpen(false); }}>
-            <button className="mode-switch" aria-label="切换模式" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen(!switcherOpen)}>
+          {mode === 'FLOW' && <div className="switcher" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSwitcherOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSwitcherOpen(false); }}>
+            <button className="mode-switch" aria-label="切换项目" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen(!switcherOpen)}>
             <span className="switcher-icon"><Layers size={18} /></span>
-            <span className="switcher-text"><small>切换模式</small><strong>{mode}</strong></span>
+            <span className="switcher-text"><small>切换项目</small><strong>{p?.name}</strong></span>
             <ChevronDown size={16} className={'chev' + (switcherOpen ? ' up' : '')} />
             </button>
             {switcherOpen && (
               <div className="switcher-menu">
-                <div className="switcher-label">工作模式</div>
-                {(['FLOW', 'CONTENT'] as const).map((value) => (
-                  <button key={value} className={'switcher-row' + (value === mode ? ' current' : '')}
-                    onClick={() => { setMode(value); setSwitcherOpen(false); }}>
-                    <strong>{value}</strong>
-                    <small>{value === 'FLOW' ? '项目需求与排期' : '常用提示词与标签'}</small>
+                <div className="switcher-label">我的项目</div>
+                {data.projects.map((project) => (
+                  <button key={project.id} className={'switcher-row' + (project.id === p?.id ? ' current' : '')}
+                    onClick={() => { switchProject(project.id); setSwitcherOpen(false); }}>
+                    <strong>{project.name}</strong>
+                    <small>{project.items.filter(item => !item.archived).length} 条需求</small>
                   </button>
                 ))}
               </div>
             )}
-          </div>
+          </div>}
           <div className="save">
             <Check size={14} />{saved}
             <button className="icon-btn" aria-label="刷新数据" title="数据每 15 秒自动刷新，点击立即刷新" onClick={() => void load()}><RefreshCw size={15} /></button>
@@ -819,8 +845,8 @@ export default function App() {
                           </>
                         )}
                         {i.status === 'archived' && <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>}
-                        <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看历史</button>
-                        {/* 实验室开关开启后，在「查看历史」后面显示 Codex 派发按钮 */}
+                        <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
+                        {/* 实验室开关开启后，在「查看详情」后面显示 Codex 派发按钮 */}
                         {tab === 'generate' && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
                       </div>
                     </div>
@@ -1068,6 +1094,7 @@ export default function App() {
                 </div>}
                 <div className="editor-footer">
                   <span>{editing ? saved : '关闭时保留草稿'}</span>
+                  {!editing && <button type="button" className="btn" disabled={busy || uploading} onClick={() => void clearRequirement()}>清空需求</button>}
                   <button className="btn primary" disabled={busy || uploading}>保存需求</button>
                 </div>
               </form>
@@ -1241,6 +1268,7 @@ export default function App() {
                   和 {deleting.batches.length} 个 Prompt 批次。
                 </p>
                 <p className="delete-warning">删除后无法恢复。如需保留备份，请先在左下角「导出全部数据」。</p>
+                <p className="muted">这里只删除 ReqFlow 中的项目记录，不会删除项目的源文件或目录。</p>
                 <div className="editor-footer">
                   <button className="btn" disabled={busy} onClick={() => { setDeleting(null); setModal(''); }}>取消</button>
                   <button className="btn danger" disabled={busy}

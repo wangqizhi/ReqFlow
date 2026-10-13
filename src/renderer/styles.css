@@ -302,7 +302,8 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .switch input:checked + .slider::after { left: 20px; }
 .switch-state { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .switch input:checked ~ .switch-state { color: var(--ok); font-weight: 600; }
-.editor-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.editor-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px; }
+.editor-footer > span { margin-right: auto; }
 .editor-footer span { color: var(--muted); font-size: 12.5px; }
 .modal-section { margin: 18px 0 9px; font-size: 14px; border-top: 1px solid var(--line); padding-top: 15px; }
 .detail-body { white-space: pre-wrap; color: var(--ink-2); line-height: 1.65; font-size: 14px; }
@@ -660,7 +661,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .request-log-kind { margin-top: 14px; }
 .publish-log-terminal pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .settings-message, .backup-status { background: var(--bg); padding: 10px 12px; border-radius: 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.requirement-dialog { width: min(860px, 100%); overflow: hidden; }
+.requirement-dialog { width: min(860px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; }
+.requirement-dialog .editor-footer { position: sticky; bottom: 0; background: var(--panel); padding-top: 12px; }
 .requirement-dialog .choice-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px; gap: 12px; }
 .requirement-dialog .requirement-date { margin: 0; display: flex; flex-direction: row; align-items: center; gap: 6px; }
 .requirement-date > span { white-space: nowrap; }
@@ -703,7 +705,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .desktop-app { grid-template-rows: minmax(0, 1fr); }
 .desktop-app > .side { grid-column: 1; grid-row: 1; }
 .desktop-app > .main { grid-column: 2; grid-row: 1; }
-.desktop-app .top { -webkit-app-region: drag; padding-right: 0; }
+.desktop-app .top { -webkit-app-region: drag; padding-right: 8px; }
 .desktop-app .top .switcher, .desktop-app .top .save { -webkit-app-region: no-drag; }
 .top .window-bar { height: auto; align-self: stretch; padding: 0; border: 0; background: transparent; flex-shrink: 0; }
 .top .window-controls button { min-height: 34px; }

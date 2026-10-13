@@ -42,7 +42,8 @@ const resources = path.join(goRoot, 'rsrc_windows_amd64.syso');
 const config = path.join(goRoot, 'reqflow-winres.json');
 const windowsVersion = `${version.split('-')[0]}.0`;
 await writeFile(config, JSON.stringify({
-  RT_GROUP_ICON: { APP: { '0000': '../../build/icon.ico' } },
+  // MyGO's Windows notifications load the application's icon by resource ID 1.
+  RT_GROUP_ICON: { '#1': { '0000': '../../build/icon.ico' } },
   RT_MANIFEST: { '#1': { '0409': '../../build/mygo.manifest' } },
   RT_VERSION: { '#1': { '0000': {
     fixed: { file_version: windowsVersion, product_version: windowsVersion },

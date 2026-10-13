@@ -19,6 +19,9 @@ import (
 
 //go:embed all:frontend
 var frontend embed.FS
+
+//go:embed ui-smoke.js
+var uiSmokeScript string
 var appVersion = "2.0.0"
 
 type ReqFlow struct{ backend *backendgo.Backend }
@@ -173,20 +176,30 @@ func writeReport(path string, value any) error {
 func smokeUI(w *mygo.Window, path string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
-	script := `(async()=>{
-  let deadline=Date.now()+25000;while(Date.now()<deadline){if(document.querySelector('#root')?.children.length)break;await new Promise(r=>setTimeout(r,100));}
-  let checks={};for(const channel of ['app:info','workspace:get','ai:settings:get','storage:status']){try{let r=await window.mygo.call('ReqFlow.Invoke',channel,[]);checks[channel]={ok:!!r&&r.ok!==false};if(channel==='app:info'){checks[channel].ok=r?.version===__REQFLOW_VERSION__&&r?.backend==='go';checks[channel].backend=r?.backend;checks[channel].version=r?.version;}if(channel==='workspace:get')checks[channel].count=r?.state?.projects?.length||0;}catch(e){checks[channel]={ok:false};}}
-  let expected=checks['workspace:get']?.count;let until=Date.now()+5000;while(Date.now()<until&&document.querySelectorAll('.side-project[role="button"]').length!==expected){await new Promise(r=>setTimeout(r,100));}
-  let sidebarProjects=document.querySelectorAll('.side-project[role="button"]').length;let controls=document.querySelectorAll('.window-controls button').length;let bar=document.querySelector('.window-bar');let dragRegion=bar?getComputedStyle(bar).getPropertyValue('--app-region').trim():'';let control=document.querySelector('.window-controls');let controlsDragRegion=control?getComputedStyle(control).getPropertyValue('--app-region').trim():'';
-  return {ok:document.querySelector('#root')?.children.length>0&&Object.values(checks).every(x=>x.ok)&&sidebarProjects===expected&&controls===2&&dragRegion==='drag'&&controlsDragRegion==='no-drag',title:document.title,bodyTextLength:document.body?.innerText?.length||0,sidebarProjects,controls,dragRegion,controlsDragRegion,checks};
- })()`
 	versionJSON, _ := json.Marshal(appVersion)
-	result, err := w.Page().EvalContext(ctx, strings.ReplaceAll(script, "__REQFLOW_VERSION__", string(versionJSON)))
+	script := strings.ReplaceAll(uiSmokeScript, "__REQFLOW_VERSION__", string(versionJSON))
+	script = strings.ReplaceAll(script, "__REQFLOW_INTERACTIONS__", fmt.Sprint(os.Getenv("REQFLOW_UI_INTERACTIONS") == "1"))
+	result, err := w.Page().EvalContext(ctx, script)
 	if err != nil {
 		result = map[string]any{"ok": false, "error": err.Error()}
 	}
 	if e := writeReport(path, result); e != nil {
 		log.Printf("write UI smoke report: %v", e)
+	}
+	if os.Getenv("REQFLOW_UI_INTERACTIONS") == "1" {
+		if png, e := w.CapturePage(); e == nil {
+			_ = os.WriteFile(path+".png", png, 0600)
+		}
+		w.SetSize(1440, 720)
+		time.Sleep(150 * time.Millisecond)
+		compact, e := w.Page().EvalContext(ctx, `(()=>{const buttons=[...document.querySelectorAll('.editor-footer button')];return {ok:buttons.length===2&&buttons.every(button=>button.getBoundingClientRect().bottom<innerHeight),height:innerHeight};})()`)
+		if e != nil {
+			compact = map[string]any{"ok": false, "error": e.Error()}
+		}
+		_ = writeReport(path+".compact.json", compact)
+		if png, e := w.CapturePage(); e == nil {
+			_ = os.WriteFile(path+".compact.png", png, 0600)
+		}
 	}
 	mygo.App.Quit()
 }

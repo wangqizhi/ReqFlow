@@ -25,7 +25,7 @@ try {
   try { await backup(original, path.join(data, 'requirements.sqlite')); }
   finally { original.close(); }
   const reportPath = path.join(temporary, 'report.json');
-  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview') };
+  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1' };
   let stderr = '';
   child = spawn(path.join(portable, 'ReqFlow.exe'), ['--smoke-ui', reportPath], {
     cwd: portable, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
@@ -40,6 +40,10 @@ try {
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   await mkdir(path.join(root, 'tmp'), { recursive: true });
   await writeFile(path.join(root, 'tmp/mygo-ui-report.json'), JSON.stringify(report, null, 2));
+  await copyFile(reportPath + '.png', path.join(root, 'tmp/mygo-ui-check.png'));
+  await copyFile(reportPath + '.compact.png', path.join(root, 'tmp/mygo-ui-compact.png'));
+  const compact = JSON.parse(await readFile(reportPath + '.compact.json', 'utf8'));
+  assert.equal(compact.ok, true, JSON.stringify(compact));
   assert.equal(report.ok, true, JSON.stringify(report));
   assert.match(report.title, /ReqFlow/);
   assert.equal(report.checks['app:info'].backend, 'go');
