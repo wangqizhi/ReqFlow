@@ -99,11 +99,11 @@
     }
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
     const executionCards = [...document.querySelectorAll('.req-card')];
-    checks.executionTab = { ok: executionCards.length === 3 && ['Codex', 'ZCode', 'Pi'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
+    checks.executionTab = { ok: executionCards.length === 4 && ['Codex', 'ZCode', 'Pi', 'Claude Code'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
     const timeBefore = document.querySelector('.execution-info').textContent;
     await new Promise(resolve => setTimeout(resolve, 1200));
     checks.executionClock = { ok: document.querySelector('.execution-info').textContent !== timeBefore };
-    for (let n = 0; n < 3; n++) {
+    for (let n = 0; n < 4; n++) {
       await click(button('释放任务'));
       await click(button('确认释放'));
       await waitFor(() => !document.querySelector('[aria-label="释放 AI 任务"]'));

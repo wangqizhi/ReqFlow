@@ -80,6 +80,8 @@ export interface ReqFlowBridge {
   appInfo(): Promise<{ version: string; dataFile: string; platform: string }>;
   showDataFile?(): Promise<unknown>;
   openConfigDir?(): Promise<{ ok: boolean; error?: string }>;
+  // 项目目录（REQ-146）：从资源管理器打开关联的项目目录。仅桌面版提供。
+  openProjectDir?(dir: string): Promise<{ ok: boolean; error?: string }>;
   // 文件浏览仅桌面版提供；浏览器 mock 预览下为 undefined，界面做降级提示
   pickDir?(): Promise<{ ok: boolean; dir?: string; error?: string }>;
   prepareDir?(dir: string, remote?: RemoteSettings): Promise<{ ok: boolean; dir?: string; error?: string; warning?: string; summary?: string }>;

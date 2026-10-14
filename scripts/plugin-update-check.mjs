@@ -9,7 +9,7 @@ const temporary = await mkdtemp(path.join(os.tmpdir(), 'reqflow-plugin-update-ch
 const info = { capabilities: ['plugin-release-v1'] };
 const digest = files => createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)))).digest('hex');
 try {
-  for (const [host, name, manifest] of [['codex', 'reqflow-agent', 'plugin.json'], ['pi', 'reqflow-agent-pi', 'package.json'], ['zcode', 'reqflow-agent-zcode', '.zcode-plugin/plugin.json']]) {
+  for (const [host, name, manifest] of [['codex', 'reqflow-agent', 'plugin.json'], ['pi', 'reqflow-agent-pi', 'package.json'], ['zcode', 'reqflow-agent-zcode', '.zcode-plugin/plugin.json'], ['claude-code', 'reqflow-agent-claude', '.claude-plugin/plugin.json']]) {
     const root = path.join(temporary, host);
     await mkdir(path.dirname(path.join(root, manifest)), { recursive: true });
     await writeFile(path.join(root, manifest), JSON.stringify({ name, version: '0.1.0' }));
@@ -20,6 +20,7 @@ try {
       calls.push([exe, args]);
       if (args.includes('list')) return JSON.stringify({ marketplaces: [] });
       if (exe === 'codex' && args[1] === 'add') return JSON.stringify({ version: '0.2.0' });
+      if (exe === 'claude' && args[1] === 'install') return JSON.stringify({ command: 'install', outcome: 'ok', message: 'Installed' });
       return '{}';
     };
     const options = { root, updateDir: path.join(temporary, host + '-updates'), runHost,
@@ -32,7 +33,7 @@ try {
       assert.equal(calls[0][0], 'supported-adapter.exe');
     } else {
       assert.equal(updated.updated, true);
-      assert.ok(calls.some(([exe, args]) => exe === host && args.includes(host === 'pi' ? 'install' : `${name}@reqflow-local`)));
+      assert.ok(calls.some(([exe, args]) => exe === (host === 'claude-code' ? 'claude' : host) && args.includes(host === 'pi' ? 'install' : `${name}@reqflow-local`)));
     }
     calls.length = 0;
     const same = await ensurePlugin({}, info, host, async () => ({ updateAvailable: false, version: '0.1.0' }), options);

@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('reqflow', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   showDataFile: () => ipcRenderer.invoke('app:showDataFile'),
   openConfigDir: () => ipcRenderer.invoke('app:openConfigDir'),
+  openProjectDir: (dir: string) => ipcRenderer.invoke('dir:open', dir),
   pickDir: () => ipcRenderer.invoke('dir:pick'),
   prepareDir: (dir: string, remote?: any) => ipcRenderer.invoke('dir:prepare', dir, remote),
   listDir: (root: string, rel: string) => ipcRenderer.invoke('fs:list', root, rel),

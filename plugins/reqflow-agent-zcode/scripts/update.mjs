@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha256 = files => createHash('sha256').update(JSON.stringify(Object.fromEntries(
   Object.entries(files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)))).digest('hex');
-const manifests = { codex: 'plugin.json', zcode: '.zcode-plugin/plugin.json', pi: 'package.json' };
+const manifests = { codex: 'plugin.json', zcode: '.zcode-plugin/plugin.json', pi: 'package.json', 'claude-code': '.claude-plugin/plugin.json' };
 
 export async function runHost(command, args) {
   const options = { windowsHide: true, encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 };
@@ -78,6 +78,36 @@ export async function ensurePlugin(config, info, host, callCli, options = {}) {
         try {
           await run('codex', ['plugin', 'marketplace', 'remove', 'reqflow-local', '--json']);
           if (previous) await run('codex', ['plugin', 'marketplace', 'add', previous.root, '--json']);
+        } catch (restore) { throw Error(`${error.message}；恢复市场来源失败：${restore.message}`); }
+        throw error;
+      }
+    } else if (host === 'claude-code') {
+      // Claude Code marketplace.json requires name / owner / plugins; a local source is a
+      // marketplace-root-relative string starting with ./.
+      const marketplace = { name: 'reqflow-local', owner: { name: 'ReqFlow' }, description: 'ReqFlow 本地插件市场',
+        plugins: [{ name: bundle.name, source: './' + bundle.name, description: meta.description || '', category: 'productivity' }] };
+      await fs.mkdir(path.join(stage, '.claude-plugin'), { recursive: true });
+      await fs.writeFile(path.join(stage, '.claude-plugin/marketplace.json'), JSON.stringify(marketplace));
+      // `claude plugin marketplace list --json` prints a top-level array; each item has name and installLocation.
+      const sources = JSON.parse(await run('claude', ['plugin', 'marketplace', 'list', '--json']));
+      const previous = (Array.isArray(sources) ? sources : sources.marketplaces || []).find(item => item.name === 'reqflow-local');
+      if (previous) {
+        const previousManifest = JSON.parse(await fs.readFile(path.join(previous.installLocation, '.claude-plugin/marketplace.json'), 'utf8'));
+        if (previousManifest.plugins?.length !== 1 || previousManifest.plugins[0].name !== bundle.name) {
+          throw Error('reqflow-local 市场包含其他插件，请通过宿主更新 ReqFlow 插件；未更改市场');
+        }
+      }
+      try {
+        if (previous) await run('claude', ['plugin', 'marketplace', 'remove', 'reqflow-local', '--json']);
+        await run('claude', ['plugin', 'marketplace', 'add', stage, '--json']);
+        const installed = JSON.parse(await run('claude', ['plugin', 'install', `${bundle.name}@reqflow-local`, '--json']));
+        // install --json reports { command, outcome, message } with no version; the marketplace
+        // is the staged directory itself, so outcome ok implies the released version.
+        if (installed.outcome !== 'ok') throw Error(installed.message || '宿主安装失败');
+      } catch (error) {
+        try {
+          await run('claude', ['plugin', 'marketplace', 'remove', 'reqflow-local', '--json']);
+          if (previous) await run('claude', ['plugin', 'marketplace', 'add', previous.installLocation, '--json']);
         } catch (restore) { throw Error(`${error.message}；恢复市场来源失败：${restore.message}`); }
         throw error;
       }

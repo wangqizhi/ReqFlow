@@ -274,6 +274,24 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		}
 		_, e := desktopNative(b, "openExternal", value)
 		return desktopOK(nil), e
+	case "dir:open":
+		// REQ-146：从资源管理器打开项目目录；仅允许绝对路径下的目录。
+		value := desktopText(args, 0)
+		if !filepath.IsAbs(value) {
+			return nil, errors.New("目录路径无效")
+		}
+		info, e := os.Stat(value)
+		if e != nil {
+			return nil, e
+		}
+		if !info.IsDir() {
+			return nil, errors.New("路径不是目录")
+		}
+		r, e := desktopNative(b, "shell.openPath", value)
+		if e == nil && desktopString(r) != "" {
+			e = errors.New(desktopString(r))
+		}
+		return desktopOK(nil), e
 	case "verify:open":
 		source := desktopMap(desktopArg(args, 0))
 		value := strings.TrimSpace(desktopString(source["value"]))

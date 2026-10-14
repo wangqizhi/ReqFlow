@@ -176,6 +176,20 @@ export function registerIpc(dataDir: string) {
     }
   });
 
+  // 项目目录：从资源管理器打开（REQ-146）。路径校验在主进程，仅允许绝对路径下的目录。
+  ipcMain.handle('dir:open', async (_e, dir: string) => {
+    try {
+      if (!dir || typeof dir !== 'string' || !path.isAbsolute(dir)) throw new Error('目录路径无效');
+      const stat = await fs.stat(dir);
+      if (!stat.isDirectory()) throw new Error('路径不是目录');
+      const failure = await shell.openPath(dir);
+      if (failure) throw new Error('打开失败：' + failure);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || '打开目录失败' };
+    }
+  });
+
   // ---------- 发布脚本（REQ-070）：检测项目目录内的 publish 脚本，供界面显示「发布」按钮并执行 ----------
 
   ipcMain.handle('publish:detect', async (_e, root: string) => {

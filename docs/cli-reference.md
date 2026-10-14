@@ -26,9 +26,9 @@ ReqFlow.exe --cli <command> [options]
 | --- | --- | --- |
 | `help` | `` | 显示 CLI 帮助（本参考的文本版）<br/>例：`ReqFlow.exe --cli help` |
 | `version` | `` | 输出版本信息（应用版本 / 数据文件路径）<br/>例：`ReqFlow.exe --cli version` |
-| `plugin version` | `--host <codex|zcode|pi> [--plugin-version <x.y.z>]` | 查询当前 ReqFlow 内置的最新插件版本、SHA256 与更新状态<br/>例：`ReqFlow.exe --cli plugin version --host codex --plugin-version 0.2.1` |
-| `plugin bundle` | `--host <codex|zcode|pi>` | 读取当前 ReqFlow 内置插件文件及 SHA256，供插件启动前自动更新使用 |
-| `execution claim` | `--project <id> --client <codex|zcode|pi> --run <UUID> --claims <JSON数组>` | 事务领取 AI 排期任务；claims 每项包含 id/version/batchId/hash。返回成功领取项与跳过原因，执行中任务不会被覆盖 |
+| `plugin version` | `--host <codex|zcode|pi|claude-code> [--plugin-version <x.y.z>]` | 查询当前 ReqFlow 内置的最新插件版本、SHA256 与更新状态<br/>例：`ReqFlow.exe --cli plugin version --host codex --plugin-version 0.2.1` |
+| `plugin bundle` | `--host <codex|zcode|pi|claude-code>` | 读取当前 ReqFlow 内置插件文件及 SHA256，供插件启动前自动更新使用 |
+| `execution claim` | `--project <id> --client <codex|zcode|pi|claude-code> --run <UUID> --claims <JSON数组>` | 事务领取 AI 排期任务；claims 每项包含 id/version/batchId/hash。返回成功领取项与跳过原因，执行中任务不会被覆盖 |
 | `execution release` | `--project <id> --id <需求ID> [--run <UUID>] [--note <说明>]` | 显式释放已停止的 AI 任务，保留结束时间和用时；指定运行 ID 时仅允许释放自己的任务 |
 | `workspace get` | `` | 读取完整工作区，返回 {version, state}；state.projects 为项目数组<br/>例：`ReqFlow.exe --cli workspace get` |
 | `workspace export` | `[--out <file>]` | 导出完整工作区 JSON（等价于界面「导出全部数据」）<br/>例：`ReqFlow.exe --cli workspace export --out backup.json` |

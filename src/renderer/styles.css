@@ -116,8 +116,10 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .title-row h1 { margin: 4px 0 2px; font-size: 26px; }
 .title-row p { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 640px; }
 .title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* REQ-146：目录 pill 改为可点击按钮，点击后弹确认浮层从资源管理器打开 */
 .linked-dir { display: flex; align-items: center; gap: 5px; margin-top: 5px !important; font-size: 11.5px !important;
   font-family: Consolas, monospace; color: var(--accent-dark); background: var(--accent-soft);
+  border: 0; cursor: pointer; text-align: left;
   border-radius: 99px; padding: 2px 10px; width: fit-content; max-width: 100%; overflow: hidden; white-space: nowrap; }
 
 /* ---------- 引导词 ---------- */
@@ -780,10 +782,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .gen-top .gen-actions { margin-left: auto; }
 .requirements > .gen-panel { margin: 10px 0 0; }
 .guidance .linked-dir { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 6px !important; font-size: 12px; }
-/* REQ-092：目录路径并入设置摘要行，与 AI 验证、默认设置同行显示，降低项目设置区域高度 */
+/* REQ-092：目录路径并入设置摘要行，与设置标志同行显示，降低项目设置区域高度 */
 .guide-settings-summary { flex-wrap: wrap; align-items: center; }
 .guide-settings-summary > span { flex-shrink: 0; }
 .guide-settings-summary .linked-dir { margin: 0 !important; min-width: 0; max-width: 46%; flex: 0 1 auto; }
+/* REQ-147：简要设置标志（引导词 / 引导交付 / 历史需求总数），有配置的带勾并加深文字，未配置保持弱化 */
+.guide-flag { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; }
+.guide-flag.on { color: var(--ink-2); }
+.guide-flag.on svg { color: var(--accent); }
 @media (max-width: 1250px) { .gen-top { flex-wrap: wrap; } .gen-filter { flex-wrap: wrap; } }
 
 .project-guide-dialog { overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; clip-path: inset(0 round 14px); }

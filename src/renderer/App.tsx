@@ -31,7 +31,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
@@ -113,6 +113,7 @@ export default function App() {
   const publishStep = publishStates[p?.id || '']?.step || '';
   const publishResult = publishStates[p?.id || '']?.result || null;
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
+  const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
   useEffect(() => {
     if (!publishConfirm) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !publishing) setPublishConfirm(false); };
@@ -179,6 +180,15 @@ export default function App() {
       if (!await act({ op: 'projectDir', dir: r.dir }, true)) return;
     }
     setBrowserOpen(true);
+  }
+
+  // REQ-146：确认后用系统资源管理器打开项目目录；浏览器预览无本地能力时降级提示
+  async function openProjectDir() {
+    if (!p?.dir) return;
+    if (!bridge.openProjectDir) { notify('仅桌面版支持从资源管理器打开', 'err'); setDirConfirm(false); return; }
+    const r = await bridge.openProjectDir(p.dir);
+    setDirConfirm(false);
+    if (!r.ok) notify(r.error || '打开目录失败', 'err');
   }
 
   async function load(opts: { quiet?: boolean } = {}) {
@@ -275,6 +285,14 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [publishResult]);
+
+  // REQ-146：Esc 关闭目录打开确认浮层
+  useEffect(() => {
+    if (!dirConfirm) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDirConfirm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dirConfirm]);
 
   async function act(a: any, quiet = false): Promise<(Workspace & { createdProjectId?: string }) | false> {
     if (busyRef.current) {
@@ -733,8 +751,11 @@ export default function App() {
             <h2>项目设置 <span>v{p?.guideVersion}</span></h2>
             <p>{p?.guidance}</p>
             <div className="guide-settings-summary">
-              {p?.dir && <span className="linked-dir" title={p.dir}><FolderOpen size={13} />{p.dir}</span>}
-              <span>新需求的默认设置</span>
+              {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
+              {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
+              <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
+              <span className={'guide-flag' + (p?.deliveryGuidance ? ' on' : '')} title={p?.deliveryGuidance ? '已配置引导交付' : '未配置引导交付'}>{p?.deliveryGuidance && <Check size={12} />}引导交付</span>
+              <span className="guide-flag" title="该项目记录的全部需求数">历史需求 {p?.items.length ?? 0} 条</span>
             </div>
           </div>
           <button className="btn plain" onClick={() => {
@@ -1022,6 +1043,26 @@ export default function App() {
               <button className="btn" onClick={() => setPublishConfirm(false)}>取消</button>
               <button className="btn" disabled={publishing} onClick={() => void runPublish()}>仍要发布</button>
               <button className="btn primary" onClick={() => { setPublishConfirm(false); changeTab('pending_verification'); }}>去验证</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* REQ-146：从资源管理器打开项目目录前的确认浮层 */}
+      {dirConfirm && !!p?.dir && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="从资源管理器打开项目目录"
+          onClick={(e) => { if (e.target === e.currentTarget) setDirConfirm(false); }}>
+          <div className="dialog">
+            <div className="dialog-head">
+              <div>
+                <h3>从资源管理器打开</h3>
+                <p>将在系统资源管理器中打开项目目录。</p>
+              </div>
+              <button className="icon-btn" aria-label="关闭确认框" onClick={() => setDirConfirm(false)}><X size={18} /></button>
+            </div>
+            <p className="detail-body">{p.dir}</p>
+            <div className="settings-actions">
+              <button className="btn" onClick={() => setDirConfirm(false)}>取消</button>
+              <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
             </div>
           </div>
         </div>
