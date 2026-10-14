@@ -798,7 +798,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .project-guide-dialog .settings-footer .guide-footer-note { margin-right: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
 /* REQ-150：引导词输入框头部（标题 + AI 优化按钮）与 @ 补全下拉 */
 .guidance-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.guidance-field-head .btn.sm { flex-shrink: 0; white-space: nowrap; }
+.guidance-field-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.guidance-field-head .btn.sm { white-space: nowrap; }
+/* 引导词默认以只读文本块展示，点击进入编辑；外观与输入框一致以示可点 */
+.guidance-view { display: block; width: 100%; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 13.5px; font-weight: 400; color: var(--ink-2); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 11px 13px; min-height: 50px; }
+.guidance-view:hover { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.guidance-view.empty { color: var(--muted); }
 .guidance-input-wrap { position: relative; }
 .guidance-field-hint { margin: -2px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); }
 .mention-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 236px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 12px 32px rgba(28, 25, 23, 0.18); padding: 5px; }

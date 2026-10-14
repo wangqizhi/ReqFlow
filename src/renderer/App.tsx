@@ -1230,8 +1230,8 @@ export default function App() {
                 </div>
                 <div className="settings-body">
                   {guideTab === 'guide' && <>
-                    <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={4} disabled={busy} />
-                    <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={3} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
+                    <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={8} disabled={busy} />
+                    <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={6} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
                     <p className="settings-hint">{p!.dir ? '输入 @ 可补全项目内文件或目录（↑↓ 选择、回车确认、Esc 关闭）；「AI 优化」会结合最近提交与变更差异给出对比稿。' : '关联项目目录后，可在引导词中输入 @ 引用项目文件；「AI 优化」会结合最近提交与变更差异给出对比稿。'}</p>
                   </>}
                   {guideTab === 'template' && <>

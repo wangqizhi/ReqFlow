@@ -1,6 +1,7 @@
 // 项目设置里的引导词输入（REQ-150 / REQ-151）：
-// - 输入 @ 补全项目文件与目录：目录列表按需加载并缓存，输入过程只在内存里过滤，
-//   下拉支持 ↑↓ 选择、回车/Tab 确认、Esc 关闭；选择目录后追加 / 继续深入。
+// - 默认以只读文本块展示当前引导词，点击进入编辑；编辑框支持输入 @ 补全项目文件与目录：
+//   目录列表按需加载并缓存，输入过程只在内存里过滤，下拉支持 ↑↓ 选择、回车/Tab 确认、
+//   Esc 关闭；选择目录后追加 / 继续深入。焦点离开字段（且无进行中的 AI 优化）自动收起为文本块。
 // - AI 优化：携带最近提交与差异统计请求后端，返回后展示「原文 / 可编辑的优化稿」对比视图。
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { bridge, type FileEntry } from './api';
@@ -19,10 +20,11 @@ function detectMention(value: string, caret: number): string | null {
   return query;
 }
 
-export function GuidanceField({ label, value, onChange, root, projectId, kind, rows = 4, placeholder, disabled, hint }:
+export function GuidanceField({ label, value, onChange, root, projectId, kind, rows = 8, placeholder, disabled, hint }:
   { label: string; value: string; onChange(v: string): void; root: string; projectId: string; kind: 'guidance' | 'delivery'; rows?: number; placeholder?: string; disabled?: boolean; hint?: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const dirCache = useRef(new Map<string, FileEntry[]>());
+  const [editing, setEditing] = useState(false);
   const [mention, setMention] = useState<{ query: string; caret: number } | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [listing, setListing] = useState<{ dir: string; entries: FileEntry[] } | null>(null);
@@ -115,6 +117,7 @@ export function GuidanceField({ label, value, onChange, root, projectId, kind, r
   async function runOptimize() {
     if (ai.running || disabled || !value.trim()) return;
     if (!bridge.optimizeGuidance) { setAi({ running: false, error: 'AI 优化仅桌面版可用', compare: null }); return; }
+    setEditing(true); // 对比视图挂在编辑区内，优化前先进入编辑态
     setAi({ running: true, error: '', compare: null });
     try {
       const r = await bridge.optimizeGuidance(projectId, kind, value);
@@ -125,49 +128,58 @@ export function GuidanceField({ label, value, onChange, root, projectId, kind, r
     }
   }
 
-  return <div className="field guidance-field">
+  return <div className="field guidance-field" onBlur={(e) => {
+    // 焦点移出整个字段（标题按钮、输入框、对比区之外）时收起为文本块；AI 优化进行中或对比未处理时保持展开
+    if (!e.currentTarget.contains(e.relatedTarget as Node) && !ai.running && !ai.compare) { setEditing(false); setDismissed(true); }
+  }}>
     <div className="guidance-field-head">
       <span>{label}</span>
-      <button type="button" className="btn sm" disabled={disabled || ai.running || !value.trim()} title="结合最近提交与变更差异，让 AI 优化当前引导词"
-        onClick={() => void runOptimize()}><Wand size={14} />{ai.running ? 'AI 优化中…' : 'AI 优化'}</button>
+      <div className="guidance-field-actions">
+        {editing && <button type="button" className="btn sm" disabled={disabled} title="收起编辑框，回到文本块展示" onClick={() => { setEditing(false); setDismissed(true); }}>收起</button>}
+        <button type="button" className="btn sm" disabled={disabled || ai.running || !value.trim()} title="结合最近提交与变更差异，让 AI 优化当前引导词"
+          onClick={() => void runOptimize()}><Wand size={14} />{ai.running ? 'AI 优化中…' : 'AI 优化'}</button>
+      </div>
     </div>
-    <div className="guidance-input-wrap">
-      <textarea className="guide-edit" rows={rows} value={value} disabled={disabled} placeholder={placeholder}
-        ref={input} onChange={(e) => { onChange(e.target.value); refreshMention(); }} onKeyDown={onKeyDown}
-        onClick={refreshMention} onKeyUp={refreshMention} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) window.setTimeout(() => setDismissed(true), 120); }} />
-      {open && <div className={'mention-menu' + (shown.length || fetching || loadError ? '' : ' empty')} role="listbox" aria-label="文件与目录补全" ref={menu}>
-        {fetching ? <p className="mention-status">正在读取目录…</p>
-          : loadError ? <p className="mention-status">{'目录读取失败：' + loadError}</p>
-          : shown.length === 0 ? <p className="mention-status">没有匹配“{filterText}”的文件或目录</p>
-          : <>
-            {shown.map((entry, i) => (
-              <button type="button" key={entry.rel} role="option" aria-selected={i === index} className={'mention-item' + (i === index ? ' on' : '')}
-                onMouseDown={(e) => { e.preventDefault(); applyMention(entry); }} onMouseEnter={() => setIndex(i)}
-                title={entry.rel + (entry.dir ? '/' : '')}>
-                {entry.dir ? <Folder size={14} /> : <FileText size={14} />}
-                <span className="mention-name">{entry.name}</span>
-                <span className="mention-path">{entry.rel}</span>
-              </button>
-            ))}
-            {hidden > 0 && <p className="mention-status">还有 {hidden} 项未展示，继续输入可缩小范围</p>}
-          </>}
+    {!editing && <button type="button" className={'guidance-view' + (value.trim() ? '' : ' empty')} title="点击编辑，输入 @ 可补全项目文件路径" onClick={() => setEditing(true)}>{value.trim() || `点击填写${label}`}</button>}
+    {editing && <>
+      <div className="guidance-input-wrap">
+        <textarea className="guide-edit" autoFocus rows={rows} value={value} disabled={disabled} placeholder={placeholder}
+          ref={input} onChange={(e) => { onChange(e.target.value); refreshMention(); }} onKeyDown={onKeyDown}
+          onClick={refreshMention} onKeyUp={refreshMention} />
+        {open && <div className={'mention-menu' + (shown.length || fetching || loadError ? '' : ' empty')} role="listbox" aria-label="文件与目录补全" ref={menu}>
+          {fetching ? <p className="mention-status">正在读取目录…</p>
+            : loadError ? <p className="mention-status">{'目录读取失败：' + loadError}</p>
+            : shown.length === 0 ? <p className="mention-status">没有匹配“{filterText}”的文件或目录</p>
+            : <>
+              {shown.map((entry, i) => (
+                <button type="button" key={entry.rel} role="option" aria-selected={i === index} className={'mention-item' + (i === index ? ' on' : '')}
+                  onMouseDown={(e) => { e.preventDefault(); applyMention(entry); }} onMouseEnter={() => setIndex(i)}
+                  title={entry.rel + (entry.dir ? '/' : '')}>
+                  {entry.dir ? <Folder size={14} /> : <FileText size={14} />}
+                  <span className="mention-name">{entry.name}</span>
+                  <span className="mention-path">{entry.rel}</span>
+                </button>
+              ))}
+              {hidden > 0 && <p className="mention-status">还有 {hidden} 项未展示，继续输入可缩小范围</p>}
+            </>}
+        </div>}
+      </div>
+      {hint && <p className="guidance-field-hint">{hint}</p>}
+      {ai.error && <p className="settings-message" role="alert">{ai.error}</p>}
+      {ai.compare && <div className="guidance-compare">
+        <div className="guidance-compare-head">
+          <strong>AI 优化对比</strong>
+          {ai.compare.note && <span title={ai.compare.note}>{ai.compare.note}</span>}
+        </div>
+        <label className="field">原文（优化前）<textarea className="guide-edit" rows={rows} readOnly value={ai.compare.original} /></label>
+        <label className="field">优化后 · 可编辑<textarea className="guide-edit" rows={rows} value={ai.compare.optimized}
+          onChange={(e) => setAi((s) => s.compare ? { ...s, compare: { ...s.compare, optimized: e.target.value } } : s)} /></label>
+        <div className="settings-actions">
+          <button type="button" className="btn primary" disabled={disabled || !ai.compare.optimized.trim()}
+            onClick={() => { onChange(ai.compare!.optimized.trim()); setAi({ running: false, error: '', compare: null }); }}>应用优化结果</button>
+          <button type="button" className="btn" disabled={disabled} onClick={() => setAi({ running: false, error: '', compare: null })}>放弃</button>
+        </div>
       </div>}
-    </div>
-    {hint && <p className="guidance-field-hint">{hint}</p>}
-    {ai.error && <p className="settings-message" role="alert">{ai.error}</p>}
-    {ai.compare && <div className="guidance-compare">
-      <div className="guidance-compare-head">
-        <strong>AI 优化对比</strong>
-        {ai.compare.note && <span title={ai.compare.note}>{ai.compare.note}</span>}
-      </div>
-      <label className="field">原文（优化前）<textarea className="guide-edit" rows={rows} readOnly value={ai.compare.original} /></label>
-      <label className="field">优化后 · 可编辑<textarea className="guide-edit" rows={rows} value={ai.compare.optimized}
-        onChange={(e) => setAi((s) => s.compare ? { ...s, compare: { ...s.compare, optimized: e.target.value } } : s)} /></label>
-      <div className="settings-actions">
-        <button type="button" className="btn primary" disabled={disabled || !ai.compare.optimized.trim()}
-          onClick={() => { onChange(ai.compare!.optimized.trim()); setAi({ running: false, error: '', compare: null }); }}>应用优化结果</button>
-        <button type="button" className="btn" disabled={disabled} onClick={() => setAi({ running: false, error: '', compare: null })}>放弃</button>
-      </div>
-    </div>}
+    </>}
   </div>;
 }

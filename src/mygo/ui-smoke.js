@@ -190,7 +190,11 @@
     const guideDialog = document.querySelector('.project-guide-dialog');
     const guideTabs = [...guideDialog.querySelectorAll('.settings-tabs button')];
     checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
+    // 引导词默认只读文本块，点击进入编辑框；点另一个字段时前一个自动收起
+    checks.guideView = { ok: guideDialog.querySelectorAll('.guidance-view').length === 2 && !guideDialog.querySelector('.guidance-input-wrap textarea') };
     if (linkedDir) {
+      await click(guideDialog.querySelector('.guidance-field .guidance-view'));
+      await waitFor(() => !!guideDialog.querySelector('.guidance-field .guidance-input-wrap textarea'));
       const guideInput = guideDialog.querySelector('.guidance-field .guidance-input-wrap textarea');
       const originalGuide = guideInput.value;
       const typeGuide = text => {
@@ -233,6 +237,13 @@
         checks.guideMention = { ok: keyboardOK && insertOK && escOK, items: items.length, keyboardOK, insertOK, escOK };
       }
       typeGuide(originalGuide);
+      // 「收起」回到文本块展示，再点击文本块重新进入编辑
+      await click([...guideDialog.querySelectorAll('.guidance-field-actions .btn')].find(el => el.textContent.trim() === '收起'));
+      await waitFor(() => guideDialog.querySelectorAll('.guidance-view').length === 2 && !guideDialog.querySelector('.guidance-input-wrap textarea'));
+      const collapsed = guideDialog.querySelectorAll('.guidance-view').length === 2 && !guideDialog.querySelector('.guidance-input-wrap textarea');
+      await click(guideDialog.querySelector('.guidance-view'));
+      await settle();
+      checks.guideCollapse = { ok: collapsed && guideDialog.querySelectorAll('.guidance-input-wrap textarea').length === 1 };
     } else checks.guideMention = { ok: true, note: 'project dir not linked' };
     await click(guideTabs.find(el => el.textContent === '版本历史'));
     await click(guideTabs.find(el => el.textContent === '验证与发布'));
