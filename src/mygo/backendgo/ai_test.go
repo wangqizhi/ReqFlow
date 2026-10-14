@@ -241,3 +241,63 @@ func TestAICommitChannelUsesActualStagedGitDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAIGuidanceOptimizeUsesRecentChanges(t *testing.T) {
+	b := aiTestBackend(t)
+	workspace, err := b.Workspace.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := aiArray(aiMap(workspace["state"])["projects"])
+	if len(projects) == 0 {
+		t.Fatal("workspace lacks default project")
+	}
+	id := aiString(aiMap(projects[0])["id"])
+	repo := t.TempDir()
+	if _, err = RunRemoteGit([]string{"init"}, repo, nil); err != nil {
+		t.Skip("Git not available")
+	}
+	for _, config := range [][]string{{"config", "user.email", "t@example.com"}, {"config", "user.name", "tester"}} {
+		if _, err = RunRemoteGit(config, repo, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.WriteFile(filepath.Join(repo, "change.txt"), []byte("guidance-fact\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "--", "change.txt"}, {"commit", "-m", "feat: 新增测试行为"}} {
+		if _, err = RunRemoteGit(args, repo, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": id, "dir": repo}, nil); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages := aiArray(payload["messages"])
+		var context map[string]any
+		if len(messages) != 2 || json.Unmarshal([]byte(aiString(aiMap(messages[1])["content"])), &context) != nil {
+			t.Error("AI guidance context missing")
+		}
+		if context["kind"] != "delivery" || aiString(context["text"]) != "说明改动与未解决的问题" || aiMap(context["project"])["name"] == nil {
+			t.Error("AI guidance kind/text/project differ")
+		}
+		if !strings.Contains(aiString(context["recentDiffStat"]), "change.txt") || !strings.Contains(aiString(context["recentLog"]), "新增测试行为") {
+			t.Error("AI guidance omitted recent diff facts")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "```\n优化后的交付引导\n```"}}}})
+	}))
+	defer server.Close()
+	if _, err = b.saveAISettings(aiTestSettings(server.URL)); err != nil {
+		t.Fatal(err)
+	}
+	value, handled, err := b.InvokeAI("ai:guidance:optimize", []any{id, "delivery", "说明改动与未解决的问题"})
+	if err != nil || !handled || aiMap(value)["ok"] != true || aiMap(value)["text"] != "优化后的交付引导" {
+		t.Fatalf("Go guidance optimize channel failed: %v", err)
+	}
+	if _, _, err = b.InvokeAI("ai:guidance:optimize", []any{id, "unknown", "文本"}); err == nil {
+		t.Fatal("invalid kind must be rejected")
+	}
+}

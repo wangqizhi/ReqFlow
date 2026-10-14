@@ -183,6 +183,64 @@
     checks.clearDraft = { ok: draft.body === '' && !draft.attachments?.length && draft.title === '' && draft.criteria === '' && draft.executor === 'ai' && draft.aiValidation === false };
     document.querySelector('.requirement-dialog').closest('.overlay').click();
     await waitFor(() => !document.querySelector('.requirement-dialog'));
+    // REQ-151：编辑设置浮层按功能分 tab；REQ-150：引导词输入 @ 补全文件与目录
+    const linkedDir = document.querySelector('.guide-settings-summary .linked-dir');
+    await click(button('编辑设置'));
+    await waitFor(() => !!document.querySelector('.project-guide-dialog'));
+    const guideDialog = document.querySelector('.project-guide-dialog');
+    const guideTabs = [...guideDialog.querySelectorAll('.settings-tabs button')];
+    checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
+    if (linkedDir) {
+      const guideInput = guideDialog.querySelector('.guidance-field .guidance-input-wrap textarea');
+      const originalGuide = guideInput.value;
+      const typeGuide = text => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(guideInput, text);
+        guideInput.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const settle = () => new Promise(resolve => setTimeout(resolve, 120));
+      typeGuide(originalGuide + ' 遵守@');
+      await waitFor(() => {
+        const menu = document.querySelector('.mention-menu');
+        return !!menu && !menu.textContent.includes('正在读取目录');
+      });
+      const items = [...document.querySelectorAll('.mention-item')];
+      if (items.length === 0) {
+        checks.guideMention = { ok: true, note: 'mention list unavailable: ' + (document.querySelector('.mention-menu')?.textContent.trim() || '') };
+      } else {
+        let keyboardOK = true;
+        if (items.length > 1) {
+          const firstOn = items[0].classList.contains('on');
+          guideInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+          await settle();
+          keyboardOK = firstOn && !items[0].classList.contains('on') && items[1].classList.contains('on');
+        }
+        // 目录在列表前排（选中后追加 / 继续浏览），继续 ↓ 直到选中一个文件再回车插入
+        for (let n = 0; n <= items.length && items.some(el => el.classList.contains('on')); n++) {
+          const on = items.findIndex(el => el.classList.contains('on'));
+          if (on >= 0 && !items[on].title.endsWith('/')) break;
+          guideInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+          await settle();
+        }
+        guideInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await settle();
+        const insertOK = /@[^\s]+ $/.test(guideInput.value) && !document.querySelector('.mention-menu');
+        typeGuide(originalGuide + ' 遵守@');
+        await waitFor(() => !!document.querySelector('.mention-menu'));
+        await settle();
+        guideInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        await settle();
+        const escOK = !document.querySelector('.mention-menu') && !!document.querySelector('.project-guide-dialog');
+        checks.guideMention = { ok: keyboardOK && insertOK && escOK, items: items.length, keyboardOK, insertOK, escOK };
+      }
+      typeGuide(originalGuide);
+    } else checks.guideMention = { ok: true, note: 'project dir not linked' };
+    await click(guideTabs.find(el => el.textContent === '版本历史'));
+    await click(guideTabs.find(el => el.textContent === '验证与发布'));
+    checks.guideRunTab = { ok: guideDialog.querySelectorAll('[aria-label="验证源类型"] button').length === 3 && guideDialog.querySelectorAll('[aria-label="发布设置"] button').length === 3 };
+    await click(guideTabs.find(el => el.textContent === '基线模板'));
+    checks.guideTemplateTab = { ok: !!guideDialog.querySelector('.settings-body textarea') };
+    guideDialog.closest('.overlay').click();
+    await waitFor(() => !document.querySelector('.project-guide-dialog'));
     await click(button('记录新需求'));
     checks.reopenDraft = { ok: reset() && !document.querySelector('.requirement-advanced') };
     const buttons = [...document.querySelectorAll('.editor-footer button')];

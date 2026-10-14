@@ -792,7 +792,31 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .guide-flag.on svg { color: var(--accent); }
 @media (max-width: 1250px) { .gen-top { flex-wrap: wrap; } .gen-filter { flex-wrap: wrap; } }
 
-.project-guide-dialog { overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; clip-path: inset(0 round 14px); }
+/* REQ-151：编辑设置浮层按功能分 tab（复用 settings-dialog 的固定高度与滚动结构） */
+.project-guide-dialog { width: min(720px, 100%); clip-path: inset(0 round 14px); }
+.project-guide-dialog .settings-body { padding-right: 6px; }
+.project-guide-dialog .settings-footer .guide-footer-note { margin-right: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
+/* REQ-150：引导词输入框头部（标题 + AI 优化按钮）与 @ 补全下拉 */
+.guidance-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.guidance-field-head .btn.sm { flex-shrink: 0; white-space: nowrap; }
+.guidance-input-wrap { position: relative; }
+.guidance-field-hint { margin: -2px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); }
+.mention-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 236px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 12px 32px rgba(28, 25, 23, 0.18); padding: 5px; }
+.mention-menu.empty { padding: 0 5px; }
+.mention-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border-radius: 6px; font-size: 13px; color: var(--ink); text-align: left; min-width: 0; }
+.mention-item svg { flex-shrink: 0; color: var(--muted); }
+.mention-item.on { background: var(--accent-soft); color: var(--accent-dark); }
+.mention-item.on svg { color: var(--accent-dark); }
+.mention-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+.mention-path { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 3; min-width: 0; }
+.mention-item.on .mention-path { color: var(--accent-dark); }
+.mention-status { margin: 0; padding: 7px 9px; font-size: 12px; color: var(--muted); }
+/* REQ-151：AI 优化后的对比视图（上原文、下可编辑优化稿） */
+.guidance-compare { margin-top: 12px; padding: 14px; border: 1px dashed var(--line-2); border-radius: 10px; background: var(--bg); }
+.guidance-compare-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; flex-wrap: wrap; }
+.guidance-compare-head span { color: var(--muted); font-size: 12px; }
+.guidance-compare .field { margin-bottom: 12px; }
+.guidance-compare .settings-actions { margin: 0; }
 .local-agent-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
 .local-agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
 .local-agent-card code { overflow-wrap: anywhere; }

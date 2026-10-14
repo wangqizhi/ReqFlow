@@ -16,6 +16,7 @@ import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
 import { ProjectBrowser } from './browser';
 import { SettingsOverlay } from './settings';
+import { GuidanceField } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
 import { ContentWorkspace } from './content';
@@ -76,6 +77,7 @@ export default function App() {
   const [verifyKind, setVerifyKind] = useState<'none' | 'exe' | 'url'>('none'); // 验证源类型（REQ-060）
   const [verifyValue, setVerifyValue] = useState('');
   const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
+  const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -763,6 +765,7 @@ export default function App() {
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
             setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
+            setGuideTab('guide');
             setModal('guide');
           }}>编辑设置</button>
         </section>
@@ -1098,7 +1101,7 @@ export default function App() {
       )}
       {modal && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) void closeModal(); }}>
-          <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : modal === 'guide' ? ' project-guide-dialog' : '')}>
+          <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : modal === 'guide' ? ' settings-dialog project-guide-dialog' : '')}>
             <div className="dialog-head">
               <div>
                 <h3>{({ item: editing ? '编辑需求' : '记录新需求', project: '创建项目', guide: '项目与交付设置', detail: editing ? (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '', verify: editing ? '未通过退回 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '记录未通过的问题', regress: editing ? '重新打开 · ' + (editing.title ? editing.number + ' · ' + editing.title : editing.number) : '重新打开归档需求', deleteProject: '删除项目', deleteFolder: '删除文件夹', moveItem: '迁移需求', deleteItem: '删除需求' } as any)[modal]}</h3>
@@ -1219,61 +1222,83 @@ export default function App() {
 
             {modal === 'guide' && (
               <>
-                <label className="field">项目引导词<textarea className="guide-edit" rows={4} value={guide} onChange={(e) => setGuide(e.target.value)} /></label>
-                <label className="field">默认交付引导<textarea rows={3} value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder="填写希望 AI 交付时提供的内容" /></label>
-                <label className="field">基线需求模板（选填）<textarea rows={4} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE} /></label>
-                <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
-                <div className="field"><span>验证源</span>
-                  <div className="segmented" role="group" aria-label="验证源类型">
-                    {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (
-                      <button type="button" key={v} aria-pressed={verifyKind === v} className={verifyKind === v ? 'on' : ''}
-                        onClick={() => { setVerifyKind(v as 'none' | 'exe' | 'url'); if (v === 'none') setVerifyValue(''); }}>{l}</button>
-                    ))}
-                  </div>
+                {/* REQ-151：内容较多，按功能分 tab；保存按钮固定在底部，一次保存全部标签页的修改 */}
+                <div className="settings-tabs" role="tablist" aria-label="项目设置分类">
+                  {[['guide', '引导词'], ['template', '基线模板'], ['run', '验证与发布'], ['history', '版本历史']].map(([id, title]) => (
+                    <button key={id} role="tab" aria-selected={guideTab === id} disabled={busy} className={guideTab === id ? 'on' : ''} onClick={() => setGuideTab(id)}>{title}</button>
+                  ))}
                 </div>
-                {verifyKind !== 'none' && (
-                  <label className="field">{verifyKind === 'exe' ? '验证程序路径' : '验证网页地址'}
-                    <div className="input-action">
-                      <input value={verifyValue} onChange={(e) => setVerifyValue(e.target.value)}
-                        placeholder={verifyKind === 'exe' ? '选择或填写可执行程序的绝对路径' : 'https://example.com/preview'} />
-                      {verifyKind === 'exe' && (
-                        <button type="button" className="icon-btn" aria-label="选择验证程序" title="浏览本地验证程序"
-                          disabled={!bridge.pickVerifyProgram}
-                          onClick={async () => { const r = await bridge.pickVerifyProgram?.(); if (r?.path) setVerifyValue(r.path); }}>
-                          <FolderOpen />
-                        </button>
-                      )}
+                <div className="settings-body">
+                  {guideTab === 'guide' && <>
+                    <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={4} disabled={busy} />
+                    <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={3} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
+                    <p className="settings-hint">{p!.dir ? '输入 @ 可补全项目内文件或目录（↑↓ 选择、回车确认、Esc 关闭）；「AI 优化」会结合最近提交与变更差异给出对比稿。' : '关联项目目录后，可在引导词中输入 @ 引用项目文件；「AI 优化」会结合最近提交与变更差异给出对比稿。'}</p>
+                  </>}
+                  {guideTab === 'template' && <>
+                    <label className="field">基线需求模板（选填）<textarea rows={8} value={baselineTpl} onChange={(e) => setBaselineTpl(e.target.value)} placeholder={data?.baselineTemplate || DEFAULT_BASELINE_TEMPLATE} /></label>
+                    <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
+                  </>}
+                  {guideTab === 'run' && <>
+                    <div className="field"><span>验证源</span>
+                      <div className="segmented" role="group" aria-label="验证源类型">
+                        {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (
+                          <button type="button" key={v} aria-pressed={verifyKind === v} className={verifyKind === v ? 'on' : ''}
+                            onClick={() => { setVerifyKind(v as 'none' | 'exe' | 'url'); if (v === 'none') setVerifyValue(''); }}>{l}</button>
+                        ))}
+                      </div>
                     </div>
-                  </label>
-                )}
-                <p className="settings-hint">配置验证源后，顶部「浏览项目」旁会出现绿色「运行」按钮，一键打开验证程序或网页。</p>
-                <div className="field"><span>发布脚本</span><div className="segmented" role="group" aria-label="发布设置">{[['auto', '自动检测'], ['script', '指定脚本'], ['none', '不使用']].map(([id, label]) => <button type="button" key={id} className={publishMode === id ? 'on' : ''} aria-pressed={publishMode === id} onClick={() => setPublishMode(id)}>{label}</button>)}</div></div>
-                {publishMode === 'script' && <label className="field">发布脚本路径<input value={publishPath} onChange={e => setPublishPath(e.target.value)} placeholder="项目内相对路径，如 scripts/deploy.mjs" /></label>}
-                <p className="settings-hint">支持 mjs、js、cjs、bat、cmd、ps1、sh、py。自动检测 publish 脚本；指定脚本后，顶部「发布」按钮执行该脚本。</p>
-                <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
-                  onClick={async () => {
-                    if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
-                    if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
-                    if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
-                    const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
-                    if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery }, true)) return;
-                    setModal('');
-                    if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
-                    else notify('设置已保存');
-                  }}>
-                  保存设置
-                </button>
-                <h4 className="modal-section">版本历史</h4>
-                {p!.guideHistory.map((g: any) => (
-                  <details key={g.version} className="guide-version">
-                    <summary>v{g.version} · {new Date(g.time).toLocaleString('zh-CN')}</summary>
-                    <pre>{g.text + (g.deliveryGuidance ? '\n\n交付引导：\n' + g.deliveryGuidance : '')}</pre>
-                    <button className="btn" onClick={() => {
-                      setGuide(g.text);
-                      if (g.deliveryGuidance !== undefined) setDelivery(g.deliveryGuidance);
-                    }}>载入此版本</button>
-                  </details>
-                ))}
+                    {verifyKind !== 'none' && (
+                      <label className="field">{verifyKind === 'exe' ? '验证程序路径' : '验证网页地址'}
+                        <div className="input-action">
+                          <input value={verifyValue} onChange={(e) => setVerifyValue(e.target.value)}
+                            placeholder={verifyKind === 'exe' ? '选择或填写可执行程序的绝对路径' : 'https://example.com/preview'} />
+                          {verifyKind === 'exe' && (
+                            <button type="button" className="icon-btn" aria-label="选择验证程序" title="浏览本地验证程序"
+                              disabled={!bridge.pickVerifyProgram}
+                              onClick={async () => { const r = await bridge.pickVerifyProgram?.(); if (r?.path) setVerifyValue(r.path); }}>
+                              <FolderOpen />
+                            </button>
+                          )}
+                        </div>
+                      </label>
+                    )}
+                    <p className="settings-hint">配置验证源后，顶部「浏览项目」旁会出现绿色「运行」按钮，一键打开验证程序或网页。</p>
+                    <div className="field"><span>发布脚本</span><div className="segmented" role="group" aria-label="发布设置">{[['auto', '自动检测'], ['script', '指定脚本'], ['none', '不使用']].map(([id, label]) => <button type="button" key={id} className={publishMode === id ? 'on' : ''} aria-pressed={publishMode === id} onClick={() => setPublishMode(id)}>{label}</button>)}</div></div>
+                    {publishMode === 'script' && <label className="field">发布脚本路径<input value={publishPath} onChange={e => setPublishPath(e.target.value)} placeholder="项目内相对路径，如 scripts/deploy.mjs" /></label>}
+                    <p className="settings-hint">支持 mjs、js、cjs、bat、cmd、ps1、sh、py。自动检测 publish 脚本；指定脚本后，顶部「发布」按钮执行该脚本。</p>
+                  </>}
+                  {guideTab === 'history' && <>
+                    <p className="settings-hint">项目引导词每次保存都会记录版本；载入历史版本会替换「引导词」标签页中的两个输入框，确认后仍需保存设置。</p>
+                    {p!.guideHistory.length === 0 && <p className="settings-hint">还没有历史版本。</p>}
+                    {p!.guideHistory.map((g: any) => (
+                      <details key={g.version} className="guide-version">
+                        <summary>v{g.version} · {new Date(g.time).toLocaleString('zh-CN')}</summary>
+                        <pre>{g.text + (g.deliveryGuidance ? '\n\n交付引导：\n' + g.deliveryGuidance : '')}</pre>
+                        <button className="btn" onClick={() => {
+                          setGuide(g.text);
+                          if (g.deliveryGuidance !== undefined) setDelivery(g.deliveryGuidance);
+                          setGuideTab('guide');
+                        }}>载入此版本</button>
+                      </details>
+                    ))}
+                  </>}
+                </div>
+                <div className="settings-footer">
+                  <span className="guide-footer-note">保存会应用全部标签页的修改</span>
+                  <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
+                    onClick={async () => {
+                      if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
+                      if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
+                      if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
+                      const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
+                      if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery }, true)) return;
+                      setModal('');
+                      if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
+                      else notify('设置已保存');
+                    }}>
+                    保存设置
+                  </button>
+                </div>
               </>
             )}
 
