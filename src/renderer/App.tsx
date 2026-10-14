@@ -56,6 +56,8 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [archiveDate, setArchiveDate] = useState('');
+  // REQ-142：从批次历史进入某一批次后，归档列表只显示该批次的需求
+  const [archiveBatchId, setArchiveBatchId] = useState('');
   // REQ-131：归档日期按「年 → 月 → 日」文件夹树展开浏览；同一层只保留一个展开项
   const [archiveOpenYear, setArchiveOpenYear] = useState('');
   const [archiveOpenMonth, setArchiveOpenMonth] = useState('');
@@ -160,7 +162,7 @@ export default function App() {
     setNewMenu(false);
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
-    setBrowserOpen(false); setTypeFilter('all'); setArchiveDate('');
+    setBrowserOpen(false); setTypeFilter('all'); setArchiveDate(''); setArchiveBatchId('');
     setPublishConfirm(false); setPublishScript('');
     void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
   }
@@ -495,7 +497,11 @@ export default function App() {
     }
     return { years, unknown: archiveDates.filter(date => !/^\d{4}-\d{2}-\d{2}$/.test(date)) };
   })();
-  const shownItems = tab === 'archived' ? visible.filter(i => archivedDate(i) === archiveDate) : visible;
+  // REQ-141/142：归档列表一行一条；可按批次筛选；未选日期时显示全部归档
+  const archiveBatch = archiveBatchId ? p?.batches.find((b) => b.id === archiveBatchId) : undefined;
+  const shownItems = tab === 'archived'
+    ? visible.filter(i => (!archiveDate || archivedDate(i) === archiveDate) && (!archiveBatch || archiveBatch.items.some((old) => old.id === i.id)))
+    : visible;
   const windowBar = bridge.windowControl && <div className="window-bar"><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
   const batch = p?.batches.find((b) => b.id === batchId) || p?.batches.find((b) => b.mode === 'develop');
   const stale = !!batch && !!p && (
@@ -565,6 +571,7 @@ export default function App() {
     // 这里必须直接统计归档需求：当前渲染的 visible 仍是旧 tab 的过滤结果，取不到归档日期
     if (v === 'archived') {
       setArchiveView('items');
+      setArchiveBatchId('');
       const latest = /^(\d{4})-(\d{2})-\d{2}$/.exec([...new Set((p?.items || []).filter(i => i.archived).map(archivedDate))].sort().reverse()[0] || '');
       setArchiveOpenYear(latest?.[1] || '');
       setArchiveOpenMonth(latest?.[2] || '');
@@ -772,9 +779,9 @@ export default function App() {
                   <div className="empty"><History size={28} /><h3>还没有批次</h3><p>选择待执行需求，创建第一轮排期。</p></div>
                 ) : p!.batches.map((b) => (
                   <article key={b.id} className={'batch-card' + (batch?.id === b.id ? ' chosen' : '')}>
-                    <button className="batch-open" onClick={() => { setBatchId(b.id); setScheduleMode('all'); setTab('generate'); }}>
+                    <button className="batch-open" title="查看该批次的归档需求" onClick={() => { setArchiveBatchId(b.id); setArchiveView('items'); setArchiveDate(''); }}>
                       <strong>批次 {String(b.number).padStart(2, '0')}</strong>
-                      <span>开发任务 · {b.items.length} 条需求</span>
+                      <span>开发任务 · {b.items.length} 条需求 · 已归档 {(p?.items || []).filter(i => i.archived && b.items.some((old) => old.id === i.id)).length} 条</span>
                       <small>{new Date(b.time).toLocaleString('zh-CN')}</small>
                     </button>
                     <span className={'batch-badge ' + b.status}>
@@ -789,14 +796,23 @@ export default function App() {
               </div>
             ) : (
               <>
-                {!visible.length && (
-                  <div className="empty"><Layers size={28} /><h3>{query ? '没有匹配的需求' : tab === 'executing' ? '没有正在执行的任务' : tab === 'generate' ? '还没有待开发的需求' : '这里还没有需求'}</h3>
-                    <p>{tab === 'feature' ? '记录想法，按需求说明加入下一轮任务。'
+                {!shownItems.length && (
+                  <div className="empty"><Layers size={28} /><h3>{archiveBatch ? '该批次还没有归档的需求' : query ? '没有匹配的需求' : tab === 'executing' ? '没有正在执行的任务' : tab === 'generate' ? '还没有待开发的需求' : '这里还没有需求'}</h3>
+                    <p>{archiveBatch ? '批次中的需求完成验证后会归档到这里。'
+                      : tab === 'feature' ? '记录想法，按需求说明加入下一轮任务。'
                       : tab === 'generate' ? '排期后需求进入这里跟踪；开发完成后提交验证。'
                       : '需求进入此阶段后，会在这里显示。'}</p></div>
                 )}
 
-                {tab === 'archived' && archiveDates.length > 0 && (
+                {tab === 'archived' && archiveBatch && (
+                  <div className="archive-batch-bar">
+                    <strong>批次 {String(archiveBatch.number).padStart(2, '0')}</strong>
+                    <span className="gen-count">开发任务 · {archiveBatch.items.length} 条需求 · 已归档 {shownItems.length} 条 · 创建于 {new Date(archiveBatch.time).toLocaleString('zh-CN')}</span>
+                    <button className="btn sm" onClick={() => setArchiveBatchId('')}>返回全部归档</button>
+                  </div>
+                )}
+
+                {tab === 'archived' && !archiveBatch && archiveDates.length > 0 && (
                   <nav className="archive-folders" aria-label="归档日期文件夹">
                     <button className={'archive-row archive-root' + (!archiveDate ? ' chosen' : '')} onClick={() => setArchiveDate('')}><FolderOpen size={16} /><strong>全部日期</strong><span>{visible.length} 条需求</span></button>
                     {archiveTree.years.map(n => (
@@ -823,7 +839,22 @@ export default function App() {
                     ))}
                   </nav>
                 )}
-                {[...shownItems].sort(tab === 'archived' ? compareArchivedItems : tab === 'feature' && sort !== 'priority' ? (a, b) => (sort === 'desc' ? -1 : 1) * (Number(a.number.replace('REQ-', '')) - Number(b.number.replace('REQ-', ''))) : (a, b) => a.priority.localeCompare(b.priority)).map((i) => (
+                {[...shownItems].sort(tab === 'archived' ? compareArchivedItems : tab === 'feature' && sort !== 'priority' ? (a, b) => (sort === 'desc' ? -1 : 1) * (Number(a.number.replace('REQ-', '')) - Number(b.number.replace('REQ-', ''))) : (a, b) => a.priority.localeCompare(b.priority)).map((i) => tab === 'archived' ? (
+                  // REQ-141：归档需求合并为一行一条，正文缩略显示，其余信息放进「查看详情」
+                  <article key={i.id} className="archived-item">
+                    <code>{i.number}</code>
+                    <span className={'badge ' + i.type}>{labels[i.type]}</span>
+                    <span className="priority">{i.priority}</span>
+                    <button className="archived-excerpt" title={(i.title ? i.title + '\n\n' : '') + (i.body || '暂无详细说明')} onClick={() => { setEditing(i); setModal('detail'); }}>
+                      {(i.title ? i.title + ' — ' : '') + (i.body || '暂无详细说明')}
+                    </button>
+                    <span className="archived-date">{archivedDate(i)}</span>
+                    <div className="archived-item-actions">
+                      <button className="btn sm" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>
+                      <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
+                    </div>
+                  </article>
+                ) : (
                   <article key={i.id} className={'req-card' + (selected.includes(i.id) ? ' chosen' : '')}>
                     {tab === 'feature' && eligible(i) && (
                       <div className="card-selection">
@@ -899,13 +930,17 @@ export default function App() {
                   </article>
                 ))}
                 <footer className="list-foot">
-                  <span>{tab === 'archived' && !archiveDate ? visible.length : shownItems.length} 条需求{tab === 'archived' && !archiveDate ? ` · ${archiveTree.years.length} 个年份 · ${archiveDates.length} 个日期文件夹` : ''}</span>
+                  <span>{tab === 'archived' && !archiveDate && !archiveBatch ? visible.length : shownItems.length} 条需求{tab === 'archived' && !archiveDate && !archiveBatch ? ` · ${archiveTree.years.length} 个年份 · ${archiveDates.length} 个日期文件夹` : ''}</span>
                   <span>{tab === 'archived' ? '归档时间倒序' : '优先级排序'}{tab === 'feature' ? ` · 已选择 ${picked.length} 条` : ''}</span>
                 </footer>
               </>
               )}
             </div>
             <div className="workspace-toolbar" aria-label="需求操作与筛选">
+              {!viewingHistory && <div className="workspace-filters">
+                <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
+                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
+              </div>}
               <div className="workspace-actions">
                 {tab === 'feature' && <><label className="check-label"><input type="checkbox"
                   checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every(i => selected.includes(i.id))}
@@ -917,14 +952,10 @@ export default function App() {
                 {tab === 'executing' && <><strong>执行中</strong><span className="gen-count">{visible.length} 条任务正在由 AI 执行</span></>}
                 {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
                 {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
-                  <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => setArchiveView('items')}>归档需求</button>
+                  <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => { setArchiveView('items'); setArchiveBatchId(''); }}>归档需求</button>
                   <button className={archiveView === 'batches' ? 'on' : ''} aria-pressed={archiveView === 'batches'} onClick={() => setArchiveView('batches')}>批次历史 · {p!.batches.length}</button>
                 </div>}
               </div>
-              {!viewingHistory && <div className="workspace-filters">
-                <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
-                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
-              </div>}
             </div>
           </section>
 
@@ -1208,7 +1239,8 @@ export default function App() {
             {modal === 'detail' && editing && (
               <>
                 <p className="detail-body">{editing.body}</p><div className="attachment-grid">{editing.attachments?.map((a) => <figure key={a.id}><img src={a.dataUrl} alt={a.label} /><figcaption>{a.label} · {a.name}</figcaption></figure>)}</div>
-                <p className="detail-meta">状态：{labels[editing.status]} · 版本 v{editing.version}</p>
+                <p className="detail-meta">{labels[editing.type]} · {editing.priority} · 状态：{labels[editing.status]} · 版本 v{editing.version}</p>
+                {editing.archived && <p className="detail-meta">归档时间：{archivedDate(editing)}</p>}
                 {editing.link && <p className="detail-meta">实现关联：<a href={editing.link} target="_blank" rel="noreferrer">{editing.link}</a></p>}
                 <h4 className="modal-section">操作与验证历史</h4>
                 <div className="history-list">

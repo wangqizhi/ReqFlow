@@ -150,11 +150,12 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .list-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 2px 10px; flex-shrink: 0; }
 .list-header .gen-count { font-size: 13px; color: var(--ink-2); }
 .list-header .gen-warning { flex-basis: 100%; margin: 0; }
-.workspace-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; padding: 14px 0 10px; flex-shrink: 0; border-top: 1px solid var(--line); }
+/* REQ-143：底部工具栏一行内左侧为筛选搜索，右侧为排期/提交等操作键 */
+.workspace-toolbar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px 18px; padding: 14px 0 10px; flex-shrink: 0; border-top: 1px solid var(--line); }
 .workspace-actions, .workspace-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .workspace-actions strong { font-size: 14px; }
-.workspace-actions { min-height: 37px; }
-.workspace-filters { justify-content: flex-end; }
+.workspace-actions { min-height: 37px; justify-content: flex-end; margin-left: auto; }
+.workspace-filters { justify-content: flex-start; }
 .flow-main { position: relative; }
 /* REQ-138：窗口栏横贯主区顶部整条作为拖动区（保存状态与窗口按钮除外），
    透明悬浮不占布局，项目标题与操作按钮保持在原位置 */
@@ -165,10 +166,6 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .flow-main .title-actions { padding-top: 36px; }
 .execution-info { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 12px; }
 .execution-info strong, .status.executing { color: var(--accent-dark); }
-@media (max-width: 1250px) {
-  .workspace-toolbar { grid-template-columns: 1fr; }
-  .workspace-filters { justify-content: flex-start; }
-}
 .list-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 2px; }
 
 /* ---------- 生成 Prompt 标签页 ---------- */
@@ -761,6 +758,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .archive-day { padding-left: 62px; }
 .archive-chevron { color: var(--muted); flex-shrink: 0; transform: rotate(-90deg); transition: transform 0.15s ease; }
 .archive-chevron.open { transform: none; }
+/* REQ-141：归档需求一行一条 —— 编号/类型/优先级 + 正文缩略一行 + 日期与操作，其余信息进「查看详情」 */
+.archived-item { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 12px; margin-bottom: 8px; box-shadow: var(--shadow); }
+.archived-item > code, .archived-item .badge, .archived-item .priority, .archived-item .archived-date, .archived-item-actions { flex-shrink: 0; }
+.archived-excerpt { flex: 1; min-width: 0; text-align: left; font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.archived-excerpt:hover { color: var(--accent-dark); }
+.archived-date { color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }
+.archived-item-actions { display: flex; gap: 8px; }
+/* REQ-142：从批次历史进入某一批次的归档列表时，顶部显示批次信息与返回入口 */
+.archive-batch-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.archive-batch-bar strong { font-size: 14px; }
+.archive-batch-bar .btn { margin-left: auto; }
+/* REQ-145：标签筛选/卡片标签按钮 —— 与「我的项目」的分段选择一致，选中态为 accent-soft 底 + accent 描边 */
+.tag-btn { padding: 6px 12px; border: 1px solid var(--line-2); border-radius: 7px; font-size: 12.5px; color: var(--muted); background: var(--panel); white-space: nowrap; flex-shrink: 0; }
+.tag-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-dark); }
+.tag-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
 .list-tools-side { flex-wrap: wrap; }
 .gen-top { flex-wrap: nowrap; }
 .gen-head span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -792,7 +804,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .content-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .content-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 28px 20px; flex-wrap: wrap; }
-.content-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.content-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .content-list { flex: 1; min-height: 0; overflow: auto; padding: 0 28px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-content: start; gap: 20px; }
 .content-card { background: var(--panel); border: 1px solid var(--line); padding: 20px; border-radius: 12px; min-width: 0; }
 .content-card h2 { margin: 0 0 14px; font-size: 18px; overflow-wrap: anywhere; }

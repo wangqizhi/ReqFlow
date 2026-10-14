@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ContextPrompt } from '../core/domain';
-import { Plus, Search, X } from './icons';
+import { Plus, Search, Trash, X } from './icons';
 
 export function ContentWorkspace({ prompts, busy, apply, notify }: {
   prompts: ContextPrompt[]; busy: boolean;
@@ -30,11 +30,11 @@ export function ContentWorkspace({ prompts, busy, apply, notify }: {
   return <section className="content-workspace">
     <div className="title-row"><div><div className="eyebrow">CONTENT WORKSPACE</div><h1>上下文 · 提示词</h1><p className="muted">保存常用提示词，用自定义标签分类，供各项目复用。</p></div>
       <button className="btn primary" disabled={locked} onClick={() => setForm({ title: '', body: '', tags: '' })}><Plus size={17} />新建提示词</button></div>
-    <div className="content-toolbar"><div className="search"><Search size={15} /><input aria-label="搜索提示词" placeholder="搜索标题、内容或标签" value={query} onChange={e => setQuery(e.target.value)} /></div>
-      <div className="content-tags" role="group" aria-label="按标签筛选"><button className={'btn sm' + (!tag ? ' primary' : '')} aria-pressed={!tag} onClick={() => setTag('')}>全部 · {prompts.length}</button>{tags.map(value => <button key={value} className={'btn sm' + (tag === value ? ' primary' : '')} aria-pressed={tag === value} onClick={() => setTag(value)}>{value}</button>)}</div></div>
+    <div className="content-toolbar"><div className="content-tags" role="group" aria-label="按标签筛选"><button className={'tag-btn' + (!tag ? ' on' : '')} aria-pressed={!tag} onClick={() => setTag('')}>全部 · {prompts.length}</button>{tags.map(value => <button key={value} className={'tag-btn' + (tag === value ? ' on' : '')} aria-pressed={tag === value} onClick={() => setTag(value)}>{value}</button>)}</div>
+      <div className="search"><Search size={15} /><input aria-label="搜索提示词" placeholder="搜索标题、内容或标签" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
     <div className="content-list">{visible.length ? visible.map(prompt => <article className="content-card" key={prompt.id}>
-      <h2>{prompt.title}</h2><div className="content-tags">{prompt.tags.map(value => <button className="btn sm" key={value} onClick={() => setTag(value)}>{value}</button>)}</div>
-      <p className="content-body">{prompt.body}</p><div className="settings-actions"><button className="btn sm primary" onClick={async () => { try { await navigator.clipboard.writeText(prompt.body); notify('提示词已复制'); } catch { notify('复制失败，请检查剪贴板权限', 'err'); } }}>复制</button><button className="btn sm" disabled={locked} onClick={() => setForm({ ...prompt, tags: prompt.tags.join('，') })}>编辑</button><button className="btn sm danger" disabled={locked} onClick={() => setDeleting(prompt)}>删除</button></div>
+      <h2>{prompt.title}</h2><div className="content-tags">{prompt.tags.map(value => <button className="tag-btn" key={value} onClick={() => setTag(value)}>{value}</button>)}</div>
+      <p className="content-body">{prompt.body}</p><div className="card-actions"><button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(prompt.body); notify('提示词已复制'); } catch { notify('复制失败，请检查剪贴板权限', 'err'); } }}>复制</button><button className="btn" disabled={locked} onClick={() => setForm({ ...prompt, tags: prompt.tags.join('，') })}>编辑</button><button className="btn" disabled={locked} onClick={() => setDeleting(prompt)}><Trash size={14} />删除</button></div>
     </article>) : <p className="empty">{prompts.length ? '没有符合筛选条件的提示词。' : '还没有提示词，点击「新建提示词」开始记录。'}</p>}</div>
     {(form || deleting) && <div className="overlay" role="dialog" aria-modal="true" aria-label={form ? '编辑提示词' : '删除提示词'} onClick={e => { if (e.target === e.currentTarget && !locked) { setForm(null); setDeleting(null); } }}><div className="dialog content-dialog"><div className="dialog-head"><h3>{form ? form.id ? '编辑提示词' : '新建提示词' : '删除提示词'}</h3><button className="icon-btn" aria-label="关闭提示词窗口" disabled={locked} onClick={() => { setForm(null); setDeleting(null); }}><X size={18} /></button></div>
       {form ? <form onSubmit={e => { e.preventDefault(); void save({ op: 'contextPrompt', ...form, tags: form.tags.split(/[,，;；\n]/).map(value => value.trim()).filter(Boolean) }); }}>

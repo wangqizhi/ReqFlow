@@ -139,7 +139,12 @@ func run() (int, error) {
 	backend.StartAI()
 	defer backend.StopAI()
 	mygo.App.WhenReady(func() {
-		w := mygo.NewWindow(mygo.WindowOptions{Title: "ReqFlow · 需求流", Width: 1440, Height: 900, Frameless: true, DisableResize: true, DisableMaximize: true, URL: "/", BackgroundColor: "#f5f4f1", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+		// REQ-144：多屏环境下按鼠标所在屏幕居中启动（省略 X/Y 时 mygo 固定在主屏居中）
+		const windowWidth, windowHeight = 1440, 900
+		area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
+		w := mygo.NewWindow(mygo.WindowOptions{Title: "ReqFlow · 需求流", Width: windowWidth, Height: windowHeight,
+			X: area.X + (area.Width-windowWidth)/2, Y: area.Y + (area.Height-windowHeight)/2,
+			Frameless: true, DisableResize: true, DisableMaximize: true, URL: "/", BackgroundColor: "#f5f4f1", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
 		if icon, e := fs.ReadFile(assets, "app-icon.png"); e == nil {
 			_ = w.SetIcon(icon)
 		}
