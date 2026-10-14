@@ -66,10 +66,10 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .side-add-folder { width: 20px; height: 20px; border-radius: 6px; color: var(--side-muted); margin-right: -2px; }
 .side-add-folder:hover { background: rgba(255, 255, 255, 0.07); color: var(--side-ink); box-shadow: none; }
 .side-projects { display: flex; flex-direction: column; gap: 2px; }
-.side-project { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); text-align: left; width: 100%; min-width: 0; cursor: pointer; }
+.side-project { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); font-size: 14px; font-weight: 400; letter-spacing: normal; text-align: left; width: 100%; min-width: 0; cursor: pointer; }
 .side-project:hover { background: rgba(255, 255, 255, 0.07); }
 .side-project.active { background: rgba(255, 255, 255, 0.13); }
-.side-project .project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.side-project .project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .small-count { background: rgba(255, 255, 255, 0.14); border-radius: 99px; font-size: 11px; padding: 1px 8px; color: var(--side-muted); }
 .side-project-del { display: none; flex: none; align-items: center; justify-content: center; padding: 3px; margin-left: -2px; border-radius: 6px; color: var(--side-muted); }
 .side-project:hover .side-project-del, .side-project-del:focus-visible { display: inline-flex; }
