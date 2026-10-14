@@ -992,7 +992,7 @@ export default function App() {
           <div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setReleaseItem(null)}>取消</button><button className="btn primary" disabled={busy} onClick={async () => { if (await act({ op: 'executionRelease', id: releaseItem.id, run: releaseItem.aiExecution?.runId, note: '用户手动释放中断任务' })) { setReleaseItem(null); notify('任务已释放，可重新领取'); } }}>确认释放</button></div>
         </div></div>}
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
-      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
+      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} workspace={data} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>

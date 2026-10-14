@@ -67,6 +67,25 @@
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
+    // REQ-148：实验室 · 数据面板 —— KPI、单系列折线、单色条形与明细表、项目切换
+    await click(button('插件/MOD/AGENT'));
+    await waitFor(() => !!document.querySelector('[aria-label="插件/MOD/AGENT"]'));
+    await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
+    await waitFor(() => !!document.querySelector('.stats-panel'));
+    const statsPanel = document.querySelector('.stats-panel');
+    const kpis = statsPanel.querySelectorAll('.stats-kpi').length;
+    const lines = statsPanel.querySelectorAll('.stats-plot svg path').length;
+    const barRows = statsPanel.querySelectorAll('.stats-bar-row').length;
+    await click([...statsPanel.querySelectorAll('button')].find(el => el.textContent === '展开明细表'));
+    await waitFor(() => !!document.querySelector('.stats-table tbody tr'));
+    const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
+    const projectTag = [...statsPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent !== '全部');
+    if (projectTag) await click(projectTag);
+    const rangeButton = [...statsPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
+    if (rangeButton) await click(rangeButton);
+    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && statsPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !document.querySelector('.stats-panel'));
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
     const toolbar = document.querySelector('.workspace-toolbar');
     const actionsBottom = toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom;

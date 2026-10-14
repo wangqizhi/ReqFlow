@@ -821,3 +821,39 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .data-archive-actions .archive-date { flex: 0 0 170px; width: 170px; margin: 0; }
 .data-archive-actions .archive-date input { height: 40px; }
 .data-archive-actions .btn { flex-shrink: 0; white-space: nowrap; height: 40px; }
+
+/* REQ-148：实验室 · 数据面板 —— 单系列单色折线与单色条形，hairline 网格 */
+.stats-panel { margin-bottom: 4px; }
+.stats-chart { margin: 0; }
+.stats-filters { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.stats-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+.stats-kpi { display: flex; flex-direction: column; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.stats-kpi strong { font-size: 20px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-kpi span { font-size: 12px; color: var(--muted); }
+.stats-chart-block { margin-bottom: 16px; min-width: 0; }
+.stats-chart-block > h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.stats-chart-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.stats-chart-head h4 { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-2); flex-shrink: 0; }
+.stats-project-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.stats-project-tags .tag-btn { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.stats-plot { position: relative; cursor: crosshair; touch-action: none; }
+.stats-plot svg { display: block; }
+.stats-axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.stats-end-value { fill: var(--ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-tooltip { position: absolute; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 7px 10px; pointer-events: none; z-index: 6; white-space: nowrap; }
+.stats-tooltip p { margin: 0; }
+.stats-tooltip-day { font-size: 11.5px; color: var(--muted); margin-bottom: 2px; }
+.stats-tooltip-row { font-size: 12.5px; color: var(--muted); }
+.stats-tooltip-row strong { font-size: 13px; font-weight: 600; color: var(--ink); margin-right: 5px; }
+.stats-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.stats-bars { display: flex; flex-direction: column; gap: 10px; }
+.stats-bar-row { display: grid; grid-template-columns: minmax(72px, 128px) 1fr 64px; align-items: center; gap: 10px; border-radius: 6px; padding: 2px 4px; }
+.stats-bar-row:hover { background: var(--bg); }
+.stats-bar-label { font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-bar-track { display: block; height: 16px; background: #cde2fb; border-radius: 0 4px 4px 0; overflow: hidden; }
+.stats-bar-fill { display: block; height: 100%; background: #2a78d6; border-radius: 0 4px 4px 0; min-width: 0; }
+.stats-bar-value { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.stats-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.stats-table th { font-size: 12px; font-weight: 500; color: var(--muted); text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line-2); }
+.stats-table td { font-size: 13px; color: var(--ink-2); padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.stats-table td:first-child { color: var(--ink); }
