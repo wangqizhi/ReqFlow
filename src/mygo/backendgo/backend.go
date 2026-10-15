@@ -184,6 +184,9 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 	if value, handled, e := b.InvokeAI(channel, args); handled {
 		return value, e
 	}
+	if channel == "ssh:list" || channel == "ssh:status" || (strings.HasPrefix(channel, "fs:") && strings.HasPrefix(desktopText(args, 0), "ssh://")) {
+		return b.desktopSSH(ctx, channel, args)
+	}
 	if strings.HasPrefix(channel, "git:") || channel == "dir:prepare" {
 		return b.desktopGit(ctx, channel, args)
 	}
@@ -325,6 +328,11 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 		n := desktopInt(v)
 		expected = &n
 	}
+	if desktopString(action["op"]) == "projectDir" && strings.HasPrefix(desktopString(action["dir"]), "ssh://") {
+		if _, e := b.desktopSSH(context.Background(), "ssh:status", []any{action["dir"]}); e != nil {
+			return nil, e
+		}
+	}
 	if desktopString(action["op"]) == "project" {
 		if strings.TrimSpace(desktopString(action["name"])) == "" {
 			return nil, errors.New("请填写项目名称")
@@ -364,11 +372,20 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 			}
 		}
 		if dir := desktopString(action["dir"]); dir != "" {
-			prepared, e := desktopPrepareDirectory(dir, desktopBool(action["createDirectory"]))
-			if e != nil {
-				return nil, e
+			if strings.HasPrefix(dir, "ssh://") {
+				if _, e := b.desktopSSH(context.Background(), "ssh:status", []any{dir}); e != nil {
+					return nil, e
+				}
+				if desktopString(desktopMap(action["remote"])["url"]) != "" {
+					return nil, errors.New("远程目录暂不支持本地 Git 仓库拉取")
+				}
+			} else {
+				prepared, e := desktopPrepareDirectory(dir, desktopBool(action["createDirectory"]))
+				if e != nil {
+					return nil, e
+				}
+				action["dir"] = prepared
 			}
-			action["dir"] = prepared
 		}
 	}
 	r, e := b.Workspace.Mutate(action, expected)

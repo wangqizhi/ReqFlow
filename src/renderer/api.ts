@@ -35,6 +35,8 @@ export type GitOpResult = { ok: true; summary?: string; warning?: string } | { o
 
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export interface ReqFlowBridge {
+  listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;
+  sshStatus?(root: string): Promise<{ ok: boolean; error?: string }>;
   getStorageStatus?(): Promise<{ ok: boolean; backend?: string; error?: string }>;
   migrateStorage?(): Promise<{ ok: boolean; backend?: string; error?: string }>;
   getLocalAgents?(): Promise<{ ok: boolean; enabled?: string[]; error?: string }>;

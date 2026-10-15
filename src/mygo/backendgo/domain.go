@@ -885,6 +885,48 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		p["hidden"] = hidden
 		return nil
+	case "projectReorder":
+		peers := []any{}
+		for _, v := range projects {
+			pr := coreMap(v)
+			if (strings.HasPrefix(coreString(p["dir"]), "ssh://") || pr["folderId"] == p["folderId"]) && strings.HasPrefix(coreString(pr["dir"]), "ssh://") == strings.HasPrefix(coreString(p["dir"]), "ssh://") {
+				peers = append(peers, v)
+			}
+		}
+		position := coreString(a["position"])
+		var target map[string]any
+		if position == "top" && len(peers) > 0 {
+			target = coreMap(peers[0])
+		} else {
+			target = coreFind(peers, a["target"])
+		}
+		if !coreIn(position, "top", "before", "after") || target == nil {
+			return errors.New("排序目标无效")
+		}
+		if target["id"] == p["id"] {
+			return nil
+		}
+		ordered := coreRemove(peers, p["id"])
+		for n, v := range ordered {
+			if coreMap(v)["id"] == target["id"] {
+				if position == "after" {
+					n++
+				}
+				ordered = append(ordered, nil)
+				copy(ordered[n+1:], ordered[n:])
+				ordered[n] = p
+				break
+			}
+		}
+		n := 0
+		for i, v := range projects {
+			if coreFind(peers, coreMap(v)["id"]) != nil {
+				projects[i] = ordered[n]
+				n++
+			}
+		}
+		s["projects"] = projects
+		return nil
 	case "projectMove":
 		if !coreIn(coreString(a["direction"]), "up", "down") {
 			return errors.New("排序方向无效")

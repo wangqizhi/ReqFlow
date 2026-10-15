@@ -91,7 +91,7 @@ export type Project = {
   items: Item[];
   batches: Batch[];
   nextNumber: number;
-  dir?: string; // 关联的本地项目目录（「浏览项目」查看/编辑项目文件用）
+  dir?: string; // 本地路径或 ssh://user@host:port/absolute/path
   remote?: RemoteSettings;
   verifySource?: VerifySource; // 验证源：待验证需求一键打开的程序或网页
   publishScript?: string; // 项目内发布脚本相对路径；未设置时自动检测，空串禁用
@@ -463,6 +463,17 @@ async function applyOperation(s: Workspace, a: any) {
       const from = s.projects.indexOf(p), to = s.projects.indexOf(neighbor);
       [s.projects[from], s.projects[to]] = [s.projects[to], s.projects[from]];
     }
+    return;
+  }
+  if (a.op === 'projectReorder') {
+    const peers = s.projects.filter(pr => (!!p.dir?.startsWith('ssh://') || pr.folderId === p.folderId) && !!pr.dir?.startsWith('ssh://') === !!p.dir?.startsWith('ssh://'));
+    const target = a.position === 'top' ? peers[0] : peers.find(pr => pr.id === a.target);
+    if (!['top', 'before', 'after'].includes(a.position) || !target) throw Error('排序目标无效');
+    if (target === p) return;
+    const ordered = peers.filter(pr => pr !== p);
+    ordered.splice(ordered.indexOf(target) + (a.position === 'after' ? 1 : 0), 0, p);
+    let index = 0;
+    s.projects = s.projects.map(pr => peers.includes(pr) ? ordered[index++] : pr);
     return;
   }
   if (a.op === 'aiItems') {

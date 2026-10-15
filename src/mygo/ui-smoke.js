@@ -56,13 +56,21 @@
     await click([...firstRow.querySelectorAll('button')].find(el => el.textContent === '取消隐藏'));
     await waitFor(() => document.querySelectorAll('.side-project[role="button"]').length === expected);
     firstRow = findRow();
-    const down = firstRow.querySelector('[aria-label^="下移 "]');
-    let orderOK = true;
-    if (!down.disabled) {
-      const nextID = firstRow.nextElementSibling?.dataset.projectId;
-      await click(down);
+    const dragProject = async (source, target, after = false) => {
+      const transfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer, clientY: after ? rect.bottom - 1 : rect.top + 1 }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer, clientY: after ? rect.bottom - 1 : rect.top + 1 }));
+      await new Promise(resolve => setTimeout(resolve, 100));
+    };
+    let orderOK = !manager.querySelector('[aria-label^="下移 "], [aria-label^="上移 "]');
+    const nextID = firstRow.nextElementSibling?.dataset.projectId;
+    if (nextID) {
+      const nextRow = manager.querySelector(`[data-project-id="${nextID}"]`);
+      await dragProject(firstRow, nextRow, true);
       await waitFor(() => findRow().previousElementSibling?.dataset.projectId === nextID);
-      await click(findRow().querySelector('[aria-label^="上移 "]'));
+      await click(findRow().querySelector('[aria-label^="置顶 "]'));
       await waitFor(() => findRow().nextElementSibling?.dataset.projectId === nextID);
     }
     const groupButtons = [...findRow().querySelectorAll('.project-manager-folders button')];
@@ -78,6 +86,15 @@
     checks.projectManagement = { ok: orderOK && persisted.state.projects.find(project => project.id === firstID).hidden === false && manager.getBoundingClientRect().bottom <= innerHeight, grouping: !!otherGroup };
     await click(document.querySelector('[aria-label="关闭项目管理"]'));
     await waitFor(() => !document.querySelector('.project-manager'));
+    if (nextID) {
+      const sideRow = id => document.querySelector(`.side-project[data-project-id="${id}"]`);
+      await dragProject(sideRow(firstID), sideRow(nextID), true);
+      await waitFor(() => sideRow(firstID).previousElementSibling?.dataset.projectId === nextID);
+      await dragProject(sideRow(firstID), sideRow(nextID), false);
+      await waitFor(() => sideRow(firstID).nextElementSibling?.dataset.projectId === nextID);
+      checks.sidebarProjectOrder = { ok: true };
+    }
+
     await click([...document.querySelectorAll('.side-project[role="button"]')].find(el => el.querySelector('.project-name').textContent === originalProject));
     const projects = [...document.querySelectorAll('.side-project[role="button"]')];
     checks.projectSwitcher = { ok: !document.querySelector('[aria-label="切换项目"]') && projects.length === expected };
@@ -200,6 +217,20 @@
     const contextButton = button('上下文管理');
     const newProject = button('新建项目');
     const collaboration = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '协作项目');
+    const remoteHeading = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '远程项目');
+    checks.remoteProjectSection = { ok: remoteHeading.getBoundingClientRect().top > collaboration.getBoundingClientRect().top };
+    await click(newProject);
+    await waitFor(() => !!document.querySelector('.project-create'));
+    await click(button('连接远程服务器'));
+    await waitFor(() => !!document.querySelector('.ssh-directory'));
+    const sshDialog = document.querySelector('.ssh-directory');
+    checks.sshDirectoryPicker = { ok: sshDialog.getBoundingClientRect().bottom <= innerHeight && !sshDialog.querySelector('input[type="password"]') && button('绑定当前目录').disabled && sshDialog.textContent.includes('免密') };
+    await click(document.querySelector('[aria-label="关闭远程目录"]'));
+    await waitFor(() => !document.querySelector('.ssh-directory'));
+    const projectDialog = document.querySelector('.project-create').closest('.dialog');
+    await click(projectDialog.querySelector('[aria-label="关闭"]'));
+    await waitFor(() => !document.querySelector('.project-create'));
+
     const labelStyle = getComputedStyle(collaboration);
     const contextStyle = getComputedStyle(contextButton);
     checks.contextEntry = { ok: contextButton.getBoundingClientRect().top > newProject.getBoundingClientRect().top && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };

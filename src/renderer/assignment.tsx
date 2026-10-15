@@ -30,6 +30,7 @@ export function agentName(id: string) {
 export const AGENT_MENTION = '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)';
 
 export async function sendToCodex(projectDir: string, prompt: string) {
+  if (projectDir.startsWith('ssh://')) throw Error('远程项目暂不支持调起本机 Codex，请在远程环境中手动执行');
   const url = 'codex://threads/new?path=' + encodeURIComponent(projectDir) + '&prompt=' + encodeURIComponent(prompt);
   await navigator.clipboard.writeText(prompt);
   const result = await bridge.openCodexDeepLink?.(url);

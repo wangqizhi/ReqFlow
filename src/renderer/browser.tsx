@@ -7,6 +7,7 @@ import { pendingCommitItems, buildCommitMessage, type Project } from '../core/do
 import { bridge, type FileEntry, type GitChange, type GitStatusInfo } from './api';
 import { renderMarkdown } from './markdown';
 import { ProjectRemoteOverlay } from './project-remote';
+import { SSHDirectory, isSSH } from './ssh-directory';
 import type { RemoteSettings } from '../core/remote';
 import { highlightCode } from './highlight';
 import {
@@ -91,6 +92,8 @@ type Props = {
 export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommitted, saveRemote }: Props) {
   const [remoteOpen, setRemoteOpen] = useState(false);
   const root = project.dir || '';
+  const remoteDirectory = isSSH(root);
+  const [sshPicker, setSSHPicker] = useState(false);
 
   const [tree, setTree] = useState<Record<string, FileEntry[] | 'loading' | 'error'>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
@@ -162,7 +165,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   // Git 状态：目录变化时检测本机 git 并读取仓库状态
   useEffect(() => {
     setGit(null); setGitOpen(true); setCommitMsg(''); setNewBranch(null);
-    if (!root) { setGitSupported(null); return; }
+    if (!root || remoteDirectory) { setGitSupported(false); return; }
     let cancelled = false;
     (async () => {
       const a = await bridge.gitAvailable?.();
@@ -311,7 +314,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   }
 
   async function saveFile() {
-    if (!file || saving || !dirty) return;
+    if (!file || saving || !dirty || remoteDirectory) return;
     setSaving(true);
     try {
       const r = await bridge.writeFile?.(root, file.rel, content);
@@ -423,6 +426,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   return (
     <div className="fb-overlay" role="dialog" aria-label="浏览项目文件"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      {sshPicker && <SSHDirectory initial={root} onClose={() => setSSHPicker(false)} onSelect={async dir => { await onDirChange(dir); setSSHPicker(false); }} />}
       {remoteOpen && <ProjectRemoteOverlay project={project} save={saveRemote} syncDisabled={gitBusy || aiBusy || dirty} onSynced={async () => { await refreshGit(); setTree({}); await loadDir(''); if (file && !dirty) await openFile(file); }} onClose={() => setRemoteOpen(false)} notify={notify} />}
       {commitEditor && <div className="overlay commit-editor" onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) setCommitEditor(false); }}>
         <div className="dialog" role="dialog" aria-label="编辑完整提交信息"><h3>编辑完整提交信息</h3><label className="field"><span>提交文案</span><textarea autoFocus rows={12} value={commitMsg} disabled={gitBusy || aiBusy} onChange={(e) => setCommitMsg(e.target.value)} /></label>{!stagedChanges.length && <p className="commit-status">请先 Add 暂存变动，再生成提交文案</p>}
@@ -444,7 +448,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             onClick={() => { copyText(absPath(root, fileMenu.entry.rel), fileMenu.entry.dir ? '文件夹路径' : '文件路径'); setFileMenu(null); }}>
             <Copy size={14} />{fileMenu.entry.dir ? '复制文件夹路径' : '复制文件路径'}
           </button>
-          <button role="menuitem" title="在系统资源管理器中显示"
+          <button role="menuitem" disabled={remoteDirectory} title="在系统资源管理器中显示"
             onClick={() => { bridge.revealFile?.(root, fileMenu.entry.rel); setFileMenu(null); }}>
             <ExternalLink size={14} />从资源管理器查看
           </button>
@@ -458,7 +462,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
           <div className="fb-tree-head">
             <div className="fb-tree-title">
               <FolderOpen size={15} />
-              <strong>项目文件</strong>
+              <strong>项目文件{remoteDirectory ? " · 远程只读" : ""}</strong>
               <button className="icon-btn" aria-label="刷新目录" title="刷新目录"
                 onClick={() => { setTree({}); loadDir(''); setExpanded(new Set([''])); }}>
                 <RefreshCw size={14} />
@@ -471,15 +475,16 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             )}
             <div className="fb-tree-actions">
               <button className="btn plain" disabled={picking} onClick={pickDir}>
-                <FolderOpen size={14} />{root ? '更换目录' : '选择项目目录'}
+                <FolderOpen size={14} />{root ? '更换本地目录' : '选择项目目录'}
               </button>
+              <button className="btn plain" onClick={() => setSSHPicker(true)}><FolderOpen size={14} />{remoteDirectory ? "更换远程目录" : "连接远程服务器"}</button>
               {root && (
                 <button className="btn plain" disabled={picking}
                   onClick={async () => { await onDirChange(''); notify('已取消关联目录'); }}>
                   <X size={13} />取消关联
                 </button>
               )}
-              <button className="btn plain" title="GitHub / GitLab 配置与连接测试" onClick={() => setRemoteOpen(true)}>
+              <button className="btn plain" disabled={remoteDirectory} title="GitHub / GitLab 配置与连接测试" onClick={() => setRemoteOpen(true)}>
                 <Settings size={13} />远程仓库设置
               </button>
             </div>
@@ -622,7 +627,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                   <span className="fb-file-path" title={file.rel}>{file.rel} · {humanSize(file.size)}</span>
                 </div>
                 <div className="fb-viewer-actions">
-                  {(kind === 'md') && (
+                  {(kind === 'md') && !remoteDirectory && (
                     <div className="fb-seg">
                       <button className={mdMode === 'preview' ? 'on' : ''} onClick={() => setMdMode('preview')}>
                         <Eye size={14} />预览
@@ -632,7 +637,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                       </button>
                     </div>
                   )}
-                  {kind !== 'other' && kind !== 'image' && (
+                  {kind !== 'other' && kind !== 'image' && !remoteDirectory && (
                     <button className="btn primary sm" disabled={!dirty || saving} onClick={saveFile} title="Ctrl+S">
                       <Save size={14} />{saving ? '保存中…' : dirty ? '保存' : '已保存'}
                     </button>
@@ -703,7 +708,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                 )}
                 <div className="fb-code">
                   <pre className="fb-hl" ref={hlRef} aria-hidden="true" dangerouslySetInnerHTML={{ __html: hlHtml + '\n' }} />
-                  <textarea className="fb-editor" value={content} spellCheck={false}
+                  <textarea className="fb-editor" value={content} readOnly={remoteDirectory} spellCheck={false}
                     onChange={(e) => setContent(e.target.value)}
                     onScroll={(e) => {
                       const t = e.currentTarget;

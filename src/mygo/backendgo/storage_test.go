@@ -61,6 +61,54 @@ func TestProjectManagementPersistsWithoutChangingRequirements(t *testing.T) {
 	}
 }
 
+func TestProjectDragOrderAndPinPersist(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewWorkspaceService(dir)
+	mutate := func(a map[string]any) {
+		t.Helper()
+		if _, e := svc.Mutate(a, nil); e != nil {
+			t.Fatal(e)
+		}
+	}
+	mutate(map[string]any{"op": "project", "name": "second"})
+	mutate(map[string]any{"op": "project", "name": "third"})
+	projects := coreList(coreMap(coreTestGet(t, svc)["state"])["projects"])
+	a, b, c := coreMap(projects[0])["id"], coreMap(projects[1])["id"], coreMap(projects[2])["id"]
+	mutate(map[string]any{"op": "item", "project": a, "body": "排序不会改动需求"})
+	mutate(map[string]any{"op": "projectReorder", "project": a, "target": c, "position": "after"})
+	check := func(want ...any) {
+		t.Helper()
+		ps := coreList(coreMap(coreTestGet(t, NewWorkspaceService(dir))["state"])["projects"])
+		for i, id := range want {
+			if coreMap(ps[i])["id"] != id {
+				t.Fatal("wrong persisted order", ps, want)
+			}
+		}
+	}
+	check(b, c, a)
+	mutate(map[string]any{"op": "projectReorder", "project": a, "position": "top"})
+	check(a, b, c)
+	mutate(map[string]any{"op": "projectVisibility", "project": b, "hidden": true})
+	mutate(map[string]any{"op": "projectReorder", "project": c, "target": a, "position": "before"})
+	check(c, a, b)
+	mutate(map[string]any{"op": "projectReorder", "project": c, "target": c, "position": "before"})
+	check(c, a, b)
+	for _, action := range []map[string]any{{"op": "projectReorder", "project": a, "target": "missing", "position": "after"}, {"op": "projectReorder", "project": a, "target": b, "position": "bad"}} {
+		if _, e := svc.Mutate(action, nil); e == nil {
+			t.Fatal("invalid reorder accepted", action)
+		}
+	}
+	mutate(map[string]any{"op": "projectDir", "project": b, "dir": "ssh://fixture/home/project"})
+	if _, e := svc.Mutate(map[string]any{"op": "projectReorder", "project": a, "target": b, "position": "after"}, nil); e == nil {
+		t.Fatal("local project sorted into remote projects")
+	}
+	ps := coreList(coreMap(coreTestGet(t, svc)["state"])["projects"])
+	i := coreMap(coreList(coreFind(ps, a)["items"])[0])
+	if i["body"] != "排序不会改动需求" || coreNum(i["version"]) != 1 || i["status"] != "ready" {
+		t.Fatal("reorder changed requirement", i)
+	}
+}
+
 func TestCoreSQLiteWritesOnlyChangedRows(t *testing.T) {
 	s := NewWorkspaceService(t.TempDir())
 	r := coreTestGet(t, s)

@@ -3,6 +3,7 @@ import { bridge } from './api';
 import { RemoteFields } from './settings';
 import { emptyRemote, validateRemote, type RemoteSettings } from '../core/remote';
 import { FolderOpen, Plus } from './icons';
+import { SSHDirectory, isSSH } from './ssh-directory';
 
 type ProjectInput = { name: string; description: string; dir: string; createDirectory: boolean; remote?: RemoteSettings; folderId?: string; newFolderName?: string };
 export function ProjectCreate({ submit, disabled, folders }: { submit(input: ProjectInput): Promise<boolean>; disabled: boolean; folders: { id: string; name: string }[] }) {
@@ -12,6 +13,7 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [dir, setDir] = useState('');
+  const [sshOpen, setSSHOpen] = useState(false);
   const [createDirectory, setCreateDirectory] = useState(true);
   const [bindRemote, setBindRemote] = useState(false);
   const [remote, setRemote] = useState<RemoteSettings>({ ...emptyRemote });
@@ -39,20 +41,22 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
       <div className="field"><span>项目分组文件夹</span><div className="segmented project-folder-options" role="group" aria-label="项目分组文件夹">{folders.map((folder) => <button key={folder.id} type="button" title={folder.name} aria-pressed={!newFolder && folderId === folder.id} className={!newFolder && folderId === folder.id ? 'on' : ''} onClick={() => { setFolderId(folder.id); setNewFolder(false); }}>{folder.name}</button>)}<button type="button" className={newFolder ? 'on' : ''} aria-pressed={newFolder} onClick={() => setNewFolder(true)}><Plus />新建文件夹</button></div></div>
       {newFolder && <label className="field">新文件夹名称<input required value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="ReqFlow 内的项目分组，不会创建系统目录" /></label>}
       <label className="field">项目背景<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="技术栈、目标、代码仓库与运行方式" /></label>
-      <label className="field">本地项目目录 · 可选<input value={dir} onChange={(e) => { setDir(e.target.value); setMessage(''); }} placeholder="选择文件夹，或输入完整系统路径，如 E:\\project\\my-app" /></label>
+      <label className="field">项目目录 · 可选<input value={dir} readOnly={isSSH(dir)} onChange={(e) => { setDir(e.target.value); setMessage(''); }} placeholder="选择本地文件夹或连接远程服务器" /></label>
       <div className="settings-actions">
         <button type="button" className="btn" disabled={busy || !bridge.pickDir} onClick={() => perform(async () => {
           const r = await bridge.pickDir!(); if (!r.ok) throw Error(r.error || '选择目录失败'); if (r.dir) setDir(r.dir);
         })}><FolderOpen />选择系统文件夹</button>
-        <button type="button" className="btn" disabled={busy || !dir.trim() || !bridge.prepareDir} onClick={() => perform(async () => {
+        <button type="button" className="btn" disabled={busy} onClick={() => setSSHOpen(true)}><FolderOpen />连接远程服务器</button>
+        {isSSH(dir) && <button type="button" className="btn" onClick={() => setDir('')}>取消远程绑定</button>}
+        <button type="button" className="btn" disabled={busy || isSSH(dir) || !dir.trim() || !bridge.prepareDir} onClick={() => perform(async () => {
           const settings = bindRemote ? validateRemote(remote) : undefined;
           if (settings && !settings.url) throw Error('请填写仓库地址，或关闭仓库绑定');
           const r = await bridge.prepareDir!(dir.trim(), settings); if (!r.ok) throw Error(r.error || '创建目录失败'); setDir(r.dir!); setError(!!r.warning); setMessage(r.warning || r.summary || '目录已准备好；现有文件不会被覆盖');
         })}><Plus />创建此目录</button>
       </div>
-      <div className="validation-setting"><div><label htmlFor="create-project-directory">目录不存在时创建</label><p>保存项目时创建缺失目录（含父目录）；已有目录不会被清空。不填写目录也可先建项目。</p></div><label className="switch"><input id="create-project-directory" type="checkbox" checked={createDirectory} onChange={(e) => setCreateDirectory(e.target.checked)} /><span className="slider" /><span className="switch-state">{createDirectory ? '已开启' : '已关闭'}</span></label></div>
+      {!isSSH(dir) && <div className="validation-setting"><div><label htmlFor="create-project-directory">目录不存在时创建</label><p>保存项目时创建缺失目录（含父目录）；已有目录不会被清空。不填写目录也可先建项目。</p></div><label className="switch"><input id="create-project-directory" type="checkbox" checked={createDirectory} onChange={(e) => setCreateDirectory(e.target.checked)} /><span className="slider" /><span className="switch-state">{createDirectory ? '已开启' : '已关闭'}</span></label></div>}
       {!bridge.pickDir && <p className="settings-hint">系统目录选择和创建仅桌面版可用；浏览器预览不会创建真实目录。</p>}
-      <div className="validation-setting"><div><label htmlFor="create-project-remote">绑定 GitHub / GitLab 仓库</label><p>创建时尝试拉取到本地目录：空目录克隆，匹配的干净仓库仅快进更新；不覆盖现有文件。</p></div><label className="switch"><input id="create-project-remote" type="checkbox" checked={bindRemote} onChange={(e) => { setBindRemote(e.target.checked); setMessage(''); }} /><span className="slider" /><span className="switch-state">{bindRemote ? '已开启' : '已关闭'}</span></label></div>
+      {!isSSH(dir) && <div className="validation-setting"><div><label htmlFor="create-project-remote">绑定 GitHub / GitLab 仓库</label><p>创建时尝试拉取到本地目录：空目录克隆，匹配的干净仓库仅快进更新；不覆盖现有文件。</p></div><label className="switch"><input id="create-project-remote" type="checkbox" checked={bindRemote} onChange={(e) => { setBindRemote(e.target.checked); setMessage(''); }} /><span className="slider" /><span className="switch-state">{bindRemote ? '已开启' : '已关闭'}</span></label></div>}
       {bindRemote && <>
         <RemoteFields value={remote} change={changeRemote} disabled={busy} />
         <div className="settings-actions"><button type="button" className="btn" disabled={busy || !remote.url.trim() || !bridge.testRemote} onClick={() => perform(async () => {
@@ -63,5 +67,6 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
     </fieldset>
     {message && <p className={'settings-message' + (error ? ' project-create-error' : '')} role={error ? 'alert' : 'status'}>{message}</p>}
     <div className="settings-actions"><button className="btn primary" disabled={busy || !name.trim()}>{working ? (bindRemote ? '创建并拉取中…' : '处理中…') : '创建项目'}</button></div>
+    {sshOpen && <SSHDirectory initial={dir} onClose={() => setSSHOpen(false)} onSelect={value => { setDir(value); setBindRemote(false); setSSHOpen(false); }} />}
   </form>;
 }

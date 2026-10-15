@@ -20,6 +20,8 @@ import { GuidanceField } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
 import { ProjectManager } from './project-manager';
+import { SSHDirectory, isSSH } from './ssh-directory';
+import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
@@ -93,6 +95,25 @@ export default function App() {
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [directoryPicker, setDirectoryPicker] = useState(false);
+  const [sshPicker, setSSHPicker] = useState(false);
+  const [sshConnections, setSSHConnections] = useState<Record<string, { ok: boolean; error?: string }>>({});
+  const remoteRoots = data?.projects.filter(pr => isSSH(pr.dir)).map(pr => pr.dir!).join('\n') || '';
+  useEffect(() => {
+    if (!bridge.sshStatus || !remoteRoots) return;
+    let cancelled = false, running = false;
+    const check = async () => {
+      if (running) return;
+      running = true;
+      try { await Promise.all([...new Set(remoteRoots.split('\n'))].map(async root => {
+        const result = await bridge.sshStatus!(root).catch(e => ({ ok: false, error: e.message }));
+        if (!cancelled) setSSHConnections(previous => ({ ...previous, [root]: result }));
+      })); } finally { running = false; }
+    };
+    void check(); const timer = window.setInterval(check, 15000);
+    window.addEventListener('focus', check);
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [remoteRoots]);
   const [advanced, setAdvanced] = useState(false);
   const [newMenu, setNewMenu] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
@@ -181,9 +202,8 @@ export default function App() {
       return;
     }
     if (!p?.dir) {
-      const r = await bridge.pickDir();
-      if (!r.ok || !r.dir) return;
-      if (!await act({ op: 'projectDir', dir: r.dir }, true)) return;
+      setDirectoryPicker(true);
+      return;
     }
     setBrowserOpen(true);
   }
@@ -273,6 +293,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const detect = async () => {
+      if (isSSH(p?.dir)) { setPublishScript(''); return; }
       if (p?.publishScript !== undefined) { setPublishScript(p.publishScript); return; }
       if (!p?.dir || !bridge.detectPublish) { setPublishScript(''); return; }
       const r = await bridge.detectPublish(p.dir);
@@ -642,6 +663,34 @@ export default function App() {
     );
   }
 
+  function renderSidebarProject(pr: Project) {
+    return (<div key={pr.id} role="button" tabIndex={0}
+              draggable={!busy} onDragEnd={projectDragEnd} onDragStart={(e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={busy ? undefined : projectDragOver} onDragLeave={projectDragLeave} onDrop={e => { if (!busy) projectDrop(e, pr.id, act); }}
+              data-project-id={pr.id}
+              className={'side-project' + (p?.id === pr.id ? ' active' : '')}
+              onClick={() => switchProject(pr.id)}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); switchProject(pr.id); } }}
+              title={pr.name}>
+              <Layers size={16} />
+              <span className="project-name">{pr.name}</span>
+              {isSSH(pr.dir) && sshConnections[pr.dir!]?.ok === false && <span className="ssh-disconnected" role="img" aria-label="远程连接已断开" title={sshConnections[pr.dir!]?.error || '远程连接已断开'}><X size={16} /></span>}
+              <span className="small-count">{pr.items.filter((i) => !i.archived).length}</span>
+              <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
+                e.stopPropagation();
+                const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });
+                const next = result && result.projects.find(project => !project.hidden);
+                if (result && pr.id === p?.id && next) switchProject(next.id);
+              }}><EyeOff size={13} /></button>
+              {data!.projects.length > 1 && (
+                <button className="side-project-del" aria-label={'删除项目 ' + pr.name} title="删除项目"
+                  onClick={(e) => { e.stopPropagation(); setDeleting(pr); setModal('deleteProject'); }}>
+                  <Trash size={13} />
+                </button>
+              )}
+            </div>);
+  }
+
   return (
     <div className={"app" + (bridge.windowControl ? " desktop-app" : "")}>
       {toast && <div className={'toast ' + toast.kind}>{toast.text}</div>}
@@ -674,29 +723,8 @@ export default function App() {
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
               <Trash size={12} />
             </button>
-          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id).map((pr) => (
-            <div key={pr.id} role="button" tabIndex={0}
-              draggable={!busy} onDragStart={(e) => e.dataTransfer.setData('application/reqflow-project', pr.id)}
-              className={'side-project' + (p?.id === pr.id ? ' active' : '')}
-              onClick={() => switchProject(pr.id)}
-              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); switchProject(pr.id); } }}
-              title={pr.name}>
-              <Layers size={16} />
-              <span className="project-name">{pr.name}</span>
-              <span className="small-count">{pr.items.filter((i) => !i.archived).length}</span>
-              <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
-                e.stopPropagation();
-                const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });
-                const next = result && result.projects.find(project => !project.hidden);
-                if (result && pr.id === p?.id && next) switchProject(next.id);
-              }}><EyeOff size={13} /></button>
-              {data.projects.length > 1 && (
-                <button className="side-project-del" aria-label={'删除项目 ' + pr.name} title="删除项目"
-                  onClick={(e) => { e.stopPropagation(); setDeleting(pr); setModal('deleteProject'); }}>
-                  <Trash size={13} />
-                </button>
-              )}
-            </div>
+          )}</summary>{data.projects.filter((pr) => !pr.hidden && !isSSH(pr.dir) && (pr.folderId || 'default') === folder.id).map((pr) => (
+            renderSidebarProject(pr)
           ))}</details>)}
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span>新建项目</span>
@@ -705,6 +733,10 @@ export default function App() {
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
+        <div className="side-label">远程项目</div>
+        <nav className="side-projects remote-projects" aria-label="远程项目">{data.projects.filter(pr => !pr.hidden && isSSH(pr.dir)).map(renderSidebarProject)}
+          {!data.projects.some(pr => !pr.hidden && isSSH(pr.dir)) && <p className="flow-note">新建项目或浏览目录时连接服务器</p>}
+        </nav>
         </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
@@ -773,7 +805,7 @@ export default function App() {
             <h2>项目设置 <span>v{p?.guideVersion}</span></h2>
             <p>{p?.guidance}</p>
             <div className="guide-settings-summary">
-              {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
+              {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? setBrowserOpen(true) : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
               {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
               <span className={'guide-flag' + (p?.deliveryGuidance ? ' on' : '')} title={p?.deliveryGuidance ? '已配置引导交付' : '未配置引导交付'}>{p?.deliveryGuidance && <Check size={12} />}引导交付</span>
@@ -1015,6 +1047,8 @@ export default function App() {
           <div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setReleaseItem(null)}>取消</button><button className="btn primary" disabled={busy} onClick={async () => { if (await act({ op: 'executionRelease', id: releaseItem.id, run: releaseItem.aiExecution?.runId, note: '用户手动释放中断任务' })) { setReleaseItem(null); notify('任务已释放，可重新领取'); } }}>确认释放</button></div>
         </div></div>}
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
+      {directoryPicker && <div className="overlay" role="dialog" aria-modal="true" aria-label="选择项目目录"><div className="dialog"><h3>选择项目目录</h3><p>绑定本地文件夹，或连接远程服务器选择目录。</p><div className="settings-actions"><button className="btn" onClick={async () => { const r = await bridge.pickDir?.(); if (r?.ok && r.dir && await act({ op: 'projectDir', dir: r.dir }, true)) { setDirectoryPicker(false); setBrowserOpen(true); } }}>本地文件夹</button><button className="btn primary" onClick={() => { setDirectoryPicker(false); setSSHPicker(true); }}>远程服务器</button><button className="btn" onClick={() => setDirectoryPicker(false)}>取消</button></div></div></div>}
+      {sshPicker && <SSHDirectory initial={p?.dir} onClose={() => setSSHPicker(false)} onSelect={async dir => { if (await act({ op: 'projectDir', dir }, true)) { setSSHPicker(false); setBrowserOpen(true); } else { throw Error('项目目录未保存，请查看主界面提示'); } }} />}
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} workspace={data} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
@@ -1458,7 +1492,7 @@ export default function App() {
         <ProjectBrowser
           project={p}
           onClose={() => setBrowserOpen(false)}
-          onDirChange={async (dir) => { await act({ op: 'projectDir', dir }, true); }}
+          onDirChange={async (dir) => { if (!await act({ op: 'projectDir', dir }, true)) throw Error('目录未保存，请检查提示后重试'); }}
           notify={notify}
           onCommitted={load}
           saveRemote={async (remote) => !!await act({ op: 'projectRemote', remote }, true)}

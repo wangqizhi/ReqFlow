@@ -243,18 +243,19 @@ func smokeUI(w *mygo.Window, path string) {
 		for _, height := range []int{900, 720} {
 			w.SetSize(1440, height)
 			time.Sleep(150 * time.Millisecond)
-			for _, surface := range []string{"projects", "guide"} {
+			for _, surface := range []string{"projects", "guide", "ssh"} {
 				code := `(async()=>{
                   document.querySelector('.overlay')?.click();
                   await new Promise(r=>setTimeout(r,80));
-                  const projects=SURFACE==='projects';
-                  const trigger=projects?document.querySelector('[aria-label="管理项目"]'):[...document.querySelectorAll('button')].find(b=>b.textContent==='编辑设置');
+                  const projects=SURFACE==='projects',ssh=SURFACE==='ssh';
+                  const trigger=projects?document.querySelector('[aria-label="管理项目"]'):[...document.querySelectorAll('button')].find(b=>b.textContent===(ssh?'新建项目':'编辑设置'));
                   trigger.click();await new Promise(r=>setTimeout(r,100));
-                  if(!projects){document.querySelector('.guidance-view').click();await new Promise(r=>setTimeout(r,80));}
-                  const dialog=document.querySelector(projects?'.project-manager':'.project-guide-dialog');
+                  if(ssh){[...document.querySelectorAll('button')].find(b=>b.textContent==='连接远程服务器').click();await new Promise(r=>setTimeout(r,80));}
+                  else if(!projects){document.querySelector('.guidance-view').click();await new Promise(r=>setTimeout(r,80));}
+                  const dialog=document.querySelector(projects?'.project-manager':ssh?'.ssh-directory':'.project-guide-dialog');
                   const rect=dialog.getBoundingClientRect();
-                  const list=dialog.querySelector(projects?'.project-manager-list':'.settings-body');
-                  const footer=dialog.querySelector(projects?'.dialog-foot':'.settings-footer').getBoundingClientRect();
+                  const list=dialog.querySelector(projects?'.project-manager-list':ssh?'.ssh-connection-fields':'.settings-body');
+                  const footer=dialog.querySelector(projects||ssh?'.dialog-foot':'.settings-footer').getBoundingClientRect();
                   const input=dialog.querySelector('.guidance-input-wrap textarea');
                   return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&(!input||Math.abs(input.getBoundingClientRect().width-input.parentElement.getBoundingClientRect().width)<1),height:innerHeight,scrollable:list.scrollHeight>=list.clientHeight};
                 })()`
@@ -273,6 +274,7 @@ func smokeUI(w *mygo.Window, path string) {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));
                   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  document.querySelector('[aria-label="关闭远程目录"]')?.click();await pause();
                   document.querySelector('.overlay')?.click();await pause();
                   if(!document.querySelector('.settings-page')) { button('设置').click();await pause(); }
                   const nav=document.querySelector('[aria-label="设置功能菜单"]');
