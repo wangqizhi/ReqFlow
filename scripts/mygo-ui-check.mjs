@@ -62,6 +62,12 @@ try {
   const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
   assert.equal(schedule.ok, true, JSON.stringify(schedule));
   await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
+  for (const height of [900, 720]) for (const surface of ['projects', 'guide']) {
+    const suffix = `.${surface}-${height}`;
+    const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
+    assert.equal(layout.ok, true, JSON.stringify(layout));
+    await copyFile(reportPath + suffix + '.png', path.join(root, `tmp/mygo-${surface}-${height}.png`));
+  }
   assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));
   assert.equal(report.ok, true, JSON.stringify(report));
   assert.match(report.title, /ReqFlow/);

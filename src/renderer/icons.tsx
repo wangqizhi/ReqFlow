@@ -89,6 +89,9 @@ export const Save = ({ size = 16, className }: P) => (
 export const Eye = ({ size = 16, className }: P) => (
   <svg {...svgProps(size)} className={className}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>
 );
+export const EyeOff = ({ size = 16, className }: P) => (
+  <svg {...svgProps(size)} className={className}><path d="M3 3l18 18M10 5.2a11 11 0 0 1 2-.2c6.5 0 10 7 10 7a18 18 0 0 1-3 3.8M6 6.5A20 20 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5-1.3M10 10a3 3 0 0 0 4 4" /></svg>
+);
 export const ExternalLink = ({ size = 16, className }: P) => (
   <svg {...svgProps(size)} className={className}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
 );

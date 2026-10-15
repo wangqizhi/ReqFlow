@@ -10,6 +10,57 @@ import (
 	"time"
 )
 
+func TestProjectManagementPersistsWithoutChangingRequirements(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewWorkspaceService(dir)
+	state := coreMap(coreTestGet(t, svc)["state"])
+	first := coreMap(coreList(state["projects"])[0])["id"]
+	mutate := func(a map[string]any) {
+		t.Helper()
+		if _, err := svc.Mutate(a, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mutate(map[string]any{"op": "item", "project": first, "body": "隐藏项目后保留的需求"})
+	mutate(map[string]any{"op": "folder", "name": "其他组"})
+	state = coreMap(coreTestGet(t, svc)["state"])
+	folder := coreMap(coreList(state["folders"])[1])["id"]
+	mutate(map[string]any{"op": "project", "name": "跨组项目", "folderId": folder})
+	mutate(map[string]any{"op": "project", "name": "同组项目"})
+	state = coreMap(coreTestGet(t, svc)["state"])
+	third := coreMap(coreList(state["projects"])[2])["id"]
+	mutate(map[string]any{"op": "projectVisibility", "project": first, "hidden": true})
+	mutate(map[string]any{"op": "projectMove", "project": first, "direction": "down"})
+	// Reopen the real SQLite store: array order and hidden state survive a restart.
+	svc = NewWorkspaceService(dir)
+	state = coreMap(coreTestGet(t, svc)["state"])
+	projects := coreList(state["projects"])
+	if coreMap(projects[0])["id"] != third || coreMap(projects[1])["folderId"] != folder || coreMap(projects[2])["id"] != first {
+		t.Fatal("group reorder lost or moved a different group", projects)
+	}
+	p := coreFind(projects, first)
+	if p["hidden"] != true || len(coreList(p["items"])) != 1 || coreMap(coreList(p["items"])[0])["status"] != "ready" {
+		t.Fatal("hidden state lost or requirements changed", p)
+	}
+	for _, a := range []map[string]any{
+		{"op": "projectVisibility", "project": first, "hidden": "true"},
+		{"op": "projectMove", "project": first, "direction": "invalid"},
+		{"op": "projectFolder", "project": first, "folderId": "missing"},
+	} {
+		if _, err := svc.Mutate(a, nil); err == nil {
+			t.Fatal("invalid action accepted", a)
+		}
+	}
+	mutate(map[string]any{"op": "projectMove", "project": first, "direction": "down"}) // boundary is a no-op
+	mutate(map[string]any{"op": "projectVisibility", "project": first, "hidden": false})
+	mutate(map[string]any{"op": "projectFolder", "project": first, "folderId": folder})
+	state = coreMap(coreTestGet(t, NewWorkspaceService(dir))["state"])
+	p = coreFind(coreList(state["projects"]), first)
+	if p["hidden"] != false || p["folderId"] != folder {
+		t.Fatal("restore or grouping not persisted", p)
+	}
+}
+
 func TestCoreSQLiteWritesOnlyChangedRows(t *testing.T) {
 	s := NewWorkspaceService(t.TempDir())
 	r := coreTestGet(t, s)

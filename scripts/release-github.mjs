@@ -14,7 +14,7 @@ const help = `用法：npm run release:github -- [选项]
   --dry-run          检查产物并预览，不访问 GitHub、不写文件
   --version <版本>  默认读取 package.json，必须与源码及打包内部版本一致
   --repo <仓库>     默认读取 Git origin（须与 origin 一致）
-  --notes <文件>    发布说明；默认 docs/release-<版本>.md（存在时）
+  --notes <文件>    发布说明；默认 docs/release-<版本>.md，必须含主要更新列表
   --draft           新建为草稿（已有 Release 保持其发布状态）
   --clobber         允许替换已有同名附件
   --help            显示帮助
@@ -33,6 +33,31 @@ async function hash(file) {
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(file)) digest.update(chunk);
   return digest.digest('hex');
+}
+
+// Never silently replace the version's changes with generic installation text.
+export function validateReleaseNotes(body, version) {
+  if (!body.trim()) throw Error('发布说明为空');
+  const heading = body.match(/^#\s+(.+)$/m)?.[1] || '';
+  if (!heading.includes(version) || /\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?/.exec(heading)?.[0] !== version) throw Error('发布说明标题必须包含当前版本 ' + version);
+  if (/\bTODO\b|待补充|待填写/i.test(body)) throw Error('发布说明仍包含未填写的占位内容');
+  let changes = false, bullets = 0;
+  for (const line of body.split(/\r?\n/)) {
+    if (/^##\s/.test(line)) changes = /^##\s+.*(主要更新|更新内容|新增|修复|改进|Changes|Added|Fixed|Improvements)/i.test(line);
+    if (changes && /^\s*[-*]\s+\S.{7,}/.test(line)) bullets++;
+  }
+  if (!bullets) throw Error('发布说明必须在「## 主要更新」等章节列出本版本的功能或修复，不能仅有安装说明');
+  return body;
+}
+
+export async function releaseNotes(version, filename, directory = root) {
+  const file = filename ? path.resolve(directory, filename) : path.join(directory, 'docs', `release-${version}.md`);
+  const body = await readFile(file, 'utf8').catch(error => {
+    if (error.code === 'ENOENT') throw Error(`缺少发布说明：${file}。请先编写包含主要功能/修复列表的版本说明。`);
+    throw error;
+  });
+  validateReleaseNotes(body, version);
+  return { file, body };
 }
 
 /**
@@ -72,6 +97,7 @@ async function main() {
   const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const version = options.version || pkg.version;
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw Error('版本格式应为 x.y.z 或 x.y.z-预发布版本');
+  const notes = await releaseNotes(version, options.notes);
   const originRepo = releaseRepository();
   const repo = options.repo || originRepo;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw Error('仓库格式应为 owner/repo');
@@ -93,14 +119,10 @@ async function main() {
   console.log(`版本一致性检查通过：源码、锁文件、Go 程序、安装版、绿色版均为 ${version}；Go 构建/打包清单 SHA256 已核验`);
   const sums = (await traceStep('计算安装包 SHA256', () => Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`)))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
-  let notesFile = options.notes ? path.resolve(root, options.notes) : path.join(root, 'docs', `release-${version}.md`);
-  const notesInfo = await stat(notesFile).catch(() => null);
-  if (options.notes && !notesInfo?.isFile()) throw Error('发布说明文件不存在');
-  if (!notesInfo?.isFile()) notesFile = null;
   console.log(`目标：https://github.com/${repo}/releases/tag/${tag}`);
   console.log(`附件：${[...names, path.basename(sumsFile)].join(', ')}`);
-  console.log(`说明：${notesFile || '默认安装说明'}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
-  if (options['dry-run']) { console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
+  console.log(`说明：${notes.file}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
+  if (options['dry-run']) { console.log(notes.body); console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
   traceStep('检查 GitHub 登录', () => gh(['auth', 'status', '--hostname', 'github.com'], { capture: true }));
   prepareReleaseGit(version);
   // --verify-tag 阻止 gh 默认在远程默认分支上自动创建一个可能不匹配产物的标签。
@@ -115,9 +137,10 @@ async function main() {
   await writeFile(sumsFile, sums, 'utf8');
   if (existing.status === 0) {
     traceStep('上传安装包到 GitHub', () => gh(['release', 'upload', tag, ...assets, sumsFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]));
+    traceStep('更新 Release 版本说明', () => gh(['release', 'edit', tag, '--repo', repo, '--notes-file', notes.file]));
   } else {
     traceStep('创建 Release 并上传安装包到 GitHub', () => gh(['release', 'create', tag, ...assets, sumsFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
-      ...(notesFile ? ['--notes-file', notesFile] : ['--notes', `ReqFlow ${version}\n\nWindows x64，Go/MyGO 独立应用：Setup 为保留原数据的安装升级版，Portable 为单文件绿色版。需要系统 WebView2 Runtime。下载后可用 SHA256SUMS 文件校验。`]),
+      '--notes-file', notes.file,
       ...(options.draft ? ['--draft'] : []), ...(version.includes('-') ? ['--prerelease'] : [])]));
   }
   console.log(`完成：https://github.com/${repo}/releases/tag/${tag}`);

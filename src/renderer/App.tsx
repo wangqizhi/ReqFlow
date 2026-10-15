@@ -10,7 +10,7 @@ import { bridge } from './api';
 import { publishProject } from './publish';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Trash, X, ImageIcon, Settings
+  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Trash, X, ImageIcon, Settings, EyeOff
 } from './icons';
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
@@ -19,6 +19,7 @@ import { SettingsOverlay } from './settings';
 import { GuidanceField } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
+import { ProjectManager } from './project-manager';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
@@ -107,10 +108,11 @@ export default function App() {
     };
   }, [newMenu]);
   const [aiOpen, setAiOpen] = useState(false);
+  const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
   const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null }>>({});
   const publishingIds = useRef(new Set<string>());
-  const p = data?.projects.find((x) => x.id === pid) || data?.projects[0];
+  const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
   const publishResult = publishStates[p?.id || '']?.result || null;
@@ -652,7 +654,9 @@ export default function App() {
           </nav>
         </> : <>
         <div className="side-label side-label-row">我的项目
+          <div className="side-project-tools"><button className="icon-btn side-add-folder" aria-label="管理项目" title="排序、隐藏与分组" onClick={() => setProjectManagerOpen(true)}><Settings size={15} /></button>
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
+          </div>
         </div>
         <nav className="side-projects">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
@@ -662,16 +666,22 @@ export default function App() {
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
               <Trash size={12} />
             </button>
-          )}</summary>{data.projects.filter((pr) => (pr.folderId || 'default') === folder.id).map((pr) => (
+          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id).map((pr) => (
             <div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragStart={(e) => e.dataTransfer.setData('application/reqflow-project', pr.id)}
               className={'side-project' + (p?.id === pr.id ? ' active' : '')}
               onClick={() => switchProject(pr.id)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchProject(pr.id); } }}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); switchProject(pr.id); } }}
               title={pr.name}>
               <Layers size={16} />
               <span className="project-name">{pr.name}</span>
               <span className="small-count">{pr.items.filter((i) => !i.archived).length}</span>
+              <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
+                e.stopPropagation();
+                const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });
+                const next = result && result.projects.find(project => !project.hidden);
+                if (result && pr.id === p?.id && next) switchProject(next.id);
+              }}><EyeOff size={13} /></button>
               {data.projects.length > 1 && (
                 <button className="side-project-del" aria-label={'删除项目 ' + pr.name} title="删除项目"
                   onClick={(e) => { e.stopPropagation(); setDeleting(pr); setModal('deleteProject'); }}>
@@ -995,6 +1005,7 @@ export default function App() {
           <div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setReleaseItem(null)}>取消</button><button className="btn primary" disabled={busy} onClick={async () => { if (await act({ op: 'executionRelease', id: releaseItem.id, run: releaseItem.aiExecution?.runId, note: '用户手动释放中断任务' })) { setReleaseItem(null); notify('任务已释放，可重新领取'); } }}>确认释放</button></div>
         </div></div>}
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
+      {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} workspace={data} onClose={() => setModsOpen(false)} />}
       {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>

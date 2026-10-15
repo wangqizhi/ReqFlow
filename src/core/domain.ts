@@ -97,6 +97,7 @@ export type Project = {
   publishScript?: string; // 项目内发布脚本相对路径；未设置时自动检测，空串禁用
   baselineTemplate?: string; // 基线需求模板（留空使用 DEFAULT_BASELINE_TEMPLATE）
   folderId?: string;
+  hidden?: boolean;
   revision?: number;
   requirementDraft?: Record<string, any>;
 };
@@ -435,6 +436,21 @@ async function applyOperation(s: Workspace, a: any) {
   if (a.op === 'projectFolder') {
     if (!s.folders!.some((f) => f.id === a.folderId)) throw Error('文件夹不存在');
     p.folderId = a.folderId;
+    return;
+  }
+  if (a.op === 'projectVisibility') {
+    if (typeof a.hidden !== 'boolean') throw Error('项目隐藏状态无效');
+    p.hidden = a.hidden;
+    return;
+  }
+  if (a.op === 'projectMove') {
+    if (!['up', 'down'].includes(a.direction)) throw Error('排序方向无效');
+    const peers = s.projects.filter(pr => pr.folderId === p.folderId);
+    const neighbor = peers[peers.indexOf(p) + (a.direction === 'up' ? -1 : 1)];
+    if (neighbor) {
+      const from = s.projects.indexOf(p), to = s.projects.indexOf(neighbor);
+      [s.projects[from], s.projects[to]] = [s.projects[to], s.projects[from]];
+    }
     return;
   }
   if (a.op === 'aiItems') {

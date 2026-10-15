@@ -239,6 +239,37 @@ func smokeUI(w *mygo.Window, path string) {
 		if png, e := w.CapturePage(); e == nil {
 			_ = os.WriteFile(path+".schedule.png", png, 0600)
 		}
+		// Capture the changed surfaces at the standard and lower window height.
+		for _, height := range []int{900, 720} {
+			w.SetSize(1440, height)
+			time.Sleep(150 * time.Millisecond)
+			for _, surface := range []string{"projects", "guide"} {
+				code := `(async()=>{
+                  document.querySelector('.overlay')?.click();
+                  await new Promise(r=>setTimeout(r,80));
+                  const projects=SURFACE==='projects';
+                  const trigger=projects?document.querySelector('[aria-label="管理项目"]'):[...document.querySelectorAll('button')].find(b=>b.textContent==='编辑设置');
+                  trigger.click();await new Promise(r=>setTimeout(r,100));
+                  if(!projects){document.querySelector('.guidance-view').click();await new Promise(r=>setTimeout(r,80));}
+                  const dialog=document.querySelector(projects?'.project-manager':'.project-guide-dialog');
+                  const rect=dialog.getBoundingClientRect();
+                  const list=dialog.querySelector(projects?'.project-manager-list':'.settings-body');
+                  const footer=dialog.querySelector(projects?'.dialog-foot':'.settings-footer').getBoundingClientRect();
+                  const input=dialog.querySelector('.guidance-input-wrap textarea');
+                  return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&(!input||Math.abs(input.getBoundingClientRect().width-input.parentElement.getBoundingClientRect().width)<1),height:innerHeight,scrollable:list.scrollHeight>=list.clientHeight};
+                })()`
+				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
+				report, err := w.Page().EvalContext(ctx, code)
+				if err != nil {
+					report = map[string]any{"ok": false, "error": err.Error()}
+				}
+				name := fmt.Sprintf("%s.%s-%d", path, surface, height)
+				_ = writeReport(name+".json", report)
+				if png, err := w.CapturePage(); err == nil {
+					_ = os.WriteFile(name+".png", png, 0600)
+				}
+			}
+		}
 	}
 	mygo.App.Quit()
 }

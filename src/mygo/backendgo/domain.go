@@ -874,6 +874,38 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		p["requirementDraft"] = coreClone(draft)
 		return nil
+	case "projectVisibility":
+		hidden, ok := a["hidden"].(bool)
+		if !ok {
+			return errors.New("项目隐藏状态无效")
+		}
+		p["hidden"] = hidden
+		return nil
+	case "projectMove":
+		if !coreIn(coreString(a["direction"]), "up", "down") {
+			return errors.New("排序方向无效")
+		}
+		peers := []int{}
+		current := -1
+		for n, v := range projects {
+			pr := coreMap(v)
+			if pr["folderId"] == p["folderId"] {
+				if pr["id"] == p["id"] {
+					current = len(peers)
+				}
+				peers = append(peers, n)
+			}
+		}
+		next := current + 1
+		if a["direction"] == "up" {
+			next = current - 1
+		}
+		if current >= 0 && next >= 0 && next < len(peers) {
+			from, to := peers[current], peers[next]
+			projects[from], projects[to] = projects[to], projects[from]
+			s["projects"] = projects
+		}
+		return nil
 	case "projectFolder":
 		if coreFind(folders, a["folderId"]) == nil {
 			return errors.New("文件夹不存在")

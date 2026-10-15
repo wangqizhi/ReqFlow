@@ -21,7 +21,7 @@
     checks[channel] = { ok: !!result && result.ok !== false };
     if (channel === 'app:info') checks[channel] = { ok: result.version === __REQFLOW_VERSION__ && result.backend === 'go', version: result.version, backend: result.backend };
     if (channel === 'workspace:get') {
-      checks[channel].count = result.state.projects.length;
+      checks[channel].count = result.state.projects.filter(p => !p.hidden).length;
       completionProject = result.state.projects.find(p => p.items.some(i => i.title === '完成说明UI检查'));
     }
   }
@@ -40,6 +40,43 @@
   if (__REQFLOW_INTERACTIONS__) {
     const footer = document.querySelector('.side-foot');
     const originalProject = document.querySelector('.main h1').textContent;
+    // REQ-153: exercise the actual persisted project controls on the isolated copy.
+    const sidebarFirst = document.querySelector('.side-project[role="button"]');
+    const firstName = sidebarFirst.querySelector('.project-name').textContent;
+    await click(sidebarFirst.querySelector('.side-project-hide'));
+    await waitFor(() => document.querySelectorAll('.side-project[role="button"]').length === expected - 1);
+    await click(document.querySelector('[aria-label="管理项目"]'));
+    await waitFor(() => !!document.querySelector('.project-manager'));
+    const manager = document.querySelector('.project-manager');
+    let firstRow = [...manager.querySelectorAll('.project-manager-row')].find(row => row.querySelector('strong').textContent === firstName);
+    const firstID = firstRow.dataset.projectId;
+    const findRow = () => [...manager.querySelectorAll('.project-manager-row')].find(row => row.dataset.projectId === firstID);
+    await click([...firstRow.querySelectorAll('button')].find(el => el.textContent === '取消隐藏'));
+    await waitFor(() => document.querySelectorAll('.side-project[role="button"]').length === expected);
+    firstRow = findRow();
+    const down = firstRow.querySelector('[aria-label^="下移 "]');
+    let orderOK = true;
+    if (!down.disabled) {
+      const nextID = firstRow.nextElementSibling?.dataset.projectId;
+      await click(down);
+      await waitFor(() => findRow().previousElementSibling?.dataset.projectId === nextID);
+      await click(findRow().querySelector('[aria-label^="上移 "]'));
+      await waitFor(() => findRow().nextElementSibling?.dataset.projectId === nextID);
+    }
+    const groupButtons = [...findRow().querySelectorAll('.project-manager-folders button')];
+    const originalGroup = groupButtons.find(el => el.getAttribute('aria-pressed') === 'true').textContent;
+    const otherGroup = groupButtons.find(el => el.getAttribute('aria-pressed') === 'false');
+    if (otherGroup) {
+      await click(otherGroup);
+      await waitFor(() => findRow().closest('section').querySelector('h4').textContent === otherGroup.textContent);
+      await click([...findRow().querySelectorAll('.project-manager-folders button')].find(el => el.textContent === originalGroup));
+      await waitFor(() => findRow().closest('section').querySelector('h4').textContent === originalGroup);
+    }
+    const persisted = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    checks.projectManagement = { ok: orderOK && persisted.state.projects.find(project => project.id === firstID).hidden === false && manager.getBoundingClientRect().bottom <= innerHeight, grouping: !!otherGroup };
+    await click(document.querySelector('[aria-label="关闭项目管理"]'));
+    await waitFor(() => !document.querySelector('.project-manager'));
+    await click([...document.querySelectorAll('.side-project[role="button"]')].find(el => el.querySelector('.project-name').textContent === originalProject));
     const projects = [...document.querySelectorAll('.side-project[role="button"]')];
     checks.projectSwitcher = { ok: !document.querySelector('[aria-label="切换项目"]') && projects.length === expected };
     const switchProject = async name => {
@@ -192,6 +229,16 @@
     checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
     // 引导词默认只读文本块，点击进入编辑框；点另一个字段时前一个自动收起
     checks.guideView = { ok: guideDialog.querySelectorAll('.guidance-view').length === 2 && !guideDialog.querySelector('.guidance-input-wrap textarea') };
+    checks.guideFullWidth = { ok: true, widths: [] };
+    for (const field of guideDialog.querySelectorAll('.guidance-field')) {
+      await click(field.querySelector('.guidance-view'));
+      await waitFor(() => !!field.querySelector('textarea'));
+      const inputWidth = field.querySelector('textarea').getBoundingClientRect().width;
+      const available = field.querySelector('.guidance-input-wrap').getBoundingClientRect().width;
+      checks.guideFullWidth.widths.push({ inputWidth, available });
+      checks.guideFullWidth.ok &&= Math.abs(inputWidth - available) < 1 && inputWidth > 400;
+      await click([...field.querySelectorAll('button')].find(el => el.textContent.trim() === '收起'));
+    }
     if (linkedDir) {
       await click(guideDialog.querySelector('.guidance-field .guidance-view'));
       await waitFor(() => !!guideDialog.querySelector('.guidance-field .guidance-input-wrap textarea'));

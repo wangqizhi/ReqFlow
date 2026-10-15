@@ -94,9 +94,9 @@ npm run installer-check # 隔离沙盒中的安装升级/卸载验证
 
 发布版本以 `package.json` 为准，交付时只设定一次；发布和失败重试不会再次升版。目标仓库读取 Git `origin`，发布时会自动提交工作区变更、推送当前分支和同版本标签。
 
-1. 交付时运行 `npm version <版本> --no-git-tag-version`，同步源码及锁文件版本，准备 `docs/release-<版本>.md`。
+1. 交付时运行 `npm version <版本> --no-git-tag-version`，同步源码及锁文件版本，准备 `docs/release-<版本>.md`。文档一级标题须包含当前版本，并在「## 主要更新」（也支持新增、修复、改进、Changes 等标题）中用列表列出实际交付内容。空白、占位、仅安装说明或版本不符会阻止发布。
 2. 登录 GitHub CLI：`gh auth login`。
-3. 运行 `node scripts/publish.mjs`，使用该版本构建、打包、检查内部版本并上传；脚本也会修正锁文件根包的版本。构建前会先查询 GitHub：该版本已发布且附件齐全时立即报错退出，需要替换附件时改用 `npm run release:github -- --version <版本> --clobber`。
+3. 运行 `node scripts/publish.mjs`，使用该版本构建、打包、检查内部版本并上传；脚本也会修正锁文件根包的版本。构建前先校验发布说明，再查询 GitHub：该版本已发布且附件齐全时立即报错退出，需要替换附件时改用 `npm run release:github -- --version <版本> --clobber`。
 
 已有当前版本安装包时，可预览后直接上传，上传失败也可如此重试：
 
@@ -114,7 +114,7 @@ npm run release:github -- --draft
 
 脚本只上传当前版本的 Go Setup、Go Portable 和自动生成的 SHA256 校验文件。上传前核对 Go 构建标记、主程序/安装包版本、完整打包清单和 SHA256，拒绝旧 Electron 产物。缺少任一安装包时会停止。
 
-已有 Release 时只上传附件，保留原说明和发布状态；同名附件默认拒绝覆盖，明确需要替换时使用 `--clobber`。草稿发布状态请在 GitHub 中手动调整。
+已有 Release 时上传附件并同步本版本的更新说明，保留发布状态；同名附件默认拒绝覆盖，明确需要替换时使用 `--clobber`。草稿发布状态请在 GitHub 中手动调整。`--notes <文件>` 可指定遵循相同格式的文档，`--dry-run` 会展示完整说明及校验和。
 
 其他用法：
 

@@ -804,7 +804,28 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .guidance-view { display: block; width: 100%; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 13.5px; font-weight: 400; color: var(--ink-2); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 11px 13px; min-height: 50px; }
 .guidance-view:hover { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
 .guidance-view.empty { color: var(--muted); }
-.guidance-input-wrap { position: relative; }
+.guidance-input-wrap { position: relative; width: 100%; min-width: 0; }
+.guidance-input-wrap > textarea { display: block; width: 100%; box-sizing: border-box; }
+.guidance-field, .guidance-compare { min-width: 0; }
+.side-project-tools { display: flex; align-items: center; gap: 10px; }
+.side-project-hide { display: inline-flex; visibility: hidden; flex: none; align-items: center; justify-content: center; padding: 3px; border-radius: 6px; color: var(--side-muted); }
+.side-project:hover .side-project-hide, .side-project:focus-within .side-project-hide { visibility: visible; }
+.side-project-hide:hover { background: rgba(255, 255, 255, .1); color: var(--side-ink); }
+.side-project:focus-within .side-project-del { display: inline-flex; }
+.project-manager { width: min(760px, calc(100vw - 32px)); display: flex; flex-direction: column; max-height: calc(100vh - 48px); padding: 0; }
+.project-manager-search { padding: 16px 24px; }
+.project-manager-list { padding: 0 24px 20px; overflow-y: auto; min-height: 0; flex: 1; }
+.project-manager-group h4 { margin: 12px 0; font-size: 14px; overflow-wrap: anywhere; }
+.project-manager-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.project-manager-title { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 120px; }
+.project-manager-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.project-manager-title span { white-space: nowrap; font-size: 12px; color: var(--muted); }
+.project-manager-actions { display: flex; align-items: center; gap: 10px; }
+.project-manager-folders { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
+.project-manager-folders .tag-btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.project-manager .dialog-head, .project-manager .dialog-foot { flex-shrink: 0; padding: 20px 24px; }
+.project-manager .dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); font-size: 12px; }
+.rotate-up { transform: rotate(180deg); }
 .guidance-field-hint { margin: -2px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); }
 .mention-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 236px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 12px 32px rgba(28, 25, 23, 0.18); padding: 5px; }
 .mention-menu.empty { padding: 0 5px; }

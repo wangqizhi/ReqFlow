@@ -11,7 +11,7 @@
 // 产物：安装包与便携版输出到 release/；上传仓库读取 Git origin。
 import { prepareReleaseVersion } from './release-version.mjs';
 import { startStep, traceStep } from './release-trace.mjs';
-import { checkReleasePublished } from './release-github.mjs';
+import { checkReleasePublished, releaseNotes } from './release-github.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,13 @@ if (process.argv.length > 2) {
 }
 const version = prepareReleaseVersion(root);
 console.log(`发布版本：${version}（使用当前交付版本，不再次升版）`);
+try {
+  const notes = await releaseNotes(version);
+  console.log(`发布说明已校验：${notes.file}`);
+} catch (error) {
+  console.error(`发布预检失败：${error.message}`);
+  process.exit(1);
+}
 
 // 构建前预检：版本已在 GitHub 发布且附件齐全时直接终止；查询失败（未登录、断网）也提前报错。
 let released;
