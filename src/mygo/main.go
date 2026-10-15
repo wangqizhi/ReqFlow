@@ -296,7 +296,7 @@ func smokeUI(w *mygo.Window, path string) {
 					_ = os.WriteFile(name+".png", png, 0600)
 				}
 			}
-			_, _ = w.Page().EvalContext(ctx, `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click()})()`)
+			_, _ = w.Page().EvalContext(ctx, `(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click();await new Promise(r=>setTimeout(r,100));[...document.querySelectorAll('button')].find(b=>b.textContent==='放弃更改')?.click()})()`)
 			time.Sleep(100 * time.Millisecond)
 		}
 	}

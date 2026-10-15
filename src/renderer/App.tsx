@@ -15,7 +15,7 @@ import {
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
 import { ProjectBrowser } from './browser';
-import { SettingsPage, settingsTabs } from './settings';
+import { SettingsPage, settingsTabs, type SettingsPageHandle } from './settings';
 import { GuidanceField } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
@@ -83,6 +83,7 @@ export default function App() {
   const [publishPath, setPublishPath] = useState('');
   const [settingsTab, setSettingsTab] = useState('ai');
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const settingsPage = useRef<SettingsPageHandle>(null);
   const [modsOpen, setModsOpen] = useState(false);
   const [modsTab, setModsTab] = useState('protocol');
   const [helpOpen, setHelpOpen] = useState(false);
@@ -650,7 +651,7 @@ export default function App() {
         {mode === 'SETTINGS' ? <>
           <div className="side-label">设置</div>
           <nav className="side-projects" aria-label="设置功能菜单">
-            <button className="side-project" disabled={settingsBusy} onClick={() => { setMode('FLOW'); void load({ quiet: true }); }}><FolderOpen size={16} /><span>返回项目菜单</span></button>
+            <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span>返回项目菜单</span></button>
             {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span>{title}</span></button>)}
           </nav>
         </> : mode === 'CONTENT' ? <>
@@ -731,7 +732,7 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'SETTINGS' ? <SettingsPage tab={settingsTab} onBusyChange={setSettingsBusy} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+        {mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
           const result = await bridge.getWorkspace();
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');

@@ -108,6 +108,7 @@ func detectProviderCLIs() map[string]any {
 				return
 			}
 			result["installed"], result["path"], result["version"] = true, path, aiAgentVersion.FindString(output.String())
+			result["models"], result["modelsNote"] = discoverProviderModels(id, path)
 			if id == "codex" {
 				if usage := cachedCodexUsage(); len(usage) > 0 {
 					result["usage"] = usage
@@ -139,6 +140,39 @@ func providerArguments(s AISettings, dir string) ([]string, error) {
 		}
 		args = append(args, "--model", s.Model)
 	}
+	effort := s.ReasoningEffort
+	if effort == "" {
+		effort = "none"
+	}
+	if !validReasoningEffort(effort) {
+		return nil, errors.New("思考等级无效")
+	}
+	switch s.CLI {
+	case "codex":
+		level, err := codexReasoning(s)
+		if err != nil {
+			return nil, err
+		}
+		if level != "" {
+			args = append(args, "-c", "model_reasoning_effort=\""+level+"\"")
+		}
+	case "pi":
+		if effort == "none" {
+			effort = "off"
+		}
+		args = append(args, "--thinking", effort)
+	case "claude":
+		// Claude has no model-list endpoint here. Keep manual models usable,
+		// and explicitly disable thinking until capabilities can be discovered.
+		if effort != "none" {
+			return nil, errors.New("此 CLI 未提供可读取的模型思考能力，请关闭思考设置")
+		}
+		args = append(args, "--settings", filepath.Join(dir, "settings.json"))
+	default:
+		if effort != "none" {
+			return nil, errors.New("此 CLI 暂不支持设置思考等级")
+		}
+	}
 	return args, nil
 }
 
@@ -146,7 +180,7 @@ func requestCLI(s AISettings, system, content string, trace func(AIRequestEvent)
 	started := time.Now()
 	emit := func(phase string) {
 		if trace != nil {
-			trace(AIRequestEvent{Phase: phase, ElapsedMs: time.Since(started).Milliseconds()})
+			trace(AIRequestEvent{Phase: phase, ElapsedMs: time.Since(started).Milliseconds(), ReasoningEffort: s.ReasoningEffort})
 		}
 	}
 	emit("request")
@@ -178,6 +212,11 @@ func requestCLI(s AISettings, system, content string, trace func(AIRequestEvent)
 	defer cancel()
 	cmd := providerCommand(ctx, path, args)
 	cmd.Dir = dir
+	if s.CLI == "claude" {
+		if err = os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"alwaysThinkingEnabled":false}`), 0600); err != nil {
+			return "", err
+		}
+	}
 	if s.CLI == "zcode" {
 		if err = os.WriteFile(filepath.Join(dir, "request.txt"), []byte(prompt), 0600); err != nil {
 			return "", err

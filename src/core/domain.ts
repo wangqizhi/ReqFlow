@@ -122,7 +122,7 @@ export const DEFAULT_BASELINE_TEMPLATE = [
 
 /** 「发布功能需求」默认模板（REQ-070）：生成在 scripts/ 下放置 publish 发布脚本的需求；
  *  脚本就位后主界面「浏览项目」旁出现「发布」按钮，点击即可执行。 */
-export const DEFAULT_PUBLISH_TEMPLATE = [
+const LEGACY_PUBLISH_TEMPLATE = [
   '配置项目发布与部署脚本：',
   '1. 检查项目现有部署脚本及发布配置，优先复用用户已有的部署流程；',
   '2. 如果没有部署脚本，先与用户确认目标位置、部署方式、运行环境、所需凭据与产物、覆盖及回滚策略，再创建可部署到该目标的脚本，不猜测部署细节；',
@@ -130,6 +130,17 @@ export const DEFAULT_PUBLISH_TEMPLATE = [
   '4. 按项目交付引导构建并生成产物，再部署到用户确认的目标位置；脚本失败时返回非零退出码，成功时打印部署目标与结果；',
   '5. 注明脚本运行方式、依赖及配置方法，不将凭据写入代码仓库，并验证发布入口能够触发部署流程。',
   '完成后说明发布入口、实际部署脚本、目标位置、验证结果与未解决的问题。'
+].join('\n');
+
+export const DEFAULT_PUBLISH_TEMPLATE = [
+  "配置项目发布与部署脚本：",
+  "1. 先检查项目类型、现有发布脚本与更新配置，优先复用已跑通的流程。明确使用以下哪种模式；混合项目分别完成两条链路。",
+  "2. 客户端模式：按交付引导构建安装包或可运行程序，上传到指定服务器或用户确认的分发平台（如 GitHub Releases），提供可访问的版本化下载地址；部署版本元数据、更新清单及校验值，接入客户端检查更新、下载校验和安装或替换能力，验证旧版本能发现并获取新版本。参考 ReqFlow 的构建打包、Release 分发与自动更新流程。",
+  "3. 网页服务模式：构建并上传服务程序、网页资源与运行依赖到指定服务器；先识别目标操作系统及可用守护工具，随产物部署匹配的服务定义、环境配置示例和安装/更新脚本（如 systemd 的 .service 与 systemctl、OpenRC、Supervisor 或 Windows 服务），核对用户、目录、权限、端口、启动命令及开机自启；部署后重载服务配置并重启，验证守护程序已启用、服务运行和 HTTP 健康检查均成功，核对线上版本及静态资源。参考 release-watch 的发布入口、部署脚本、服务定义和远端校验流程。",
+  "4. 从已有配置读取目标地址、目录、部署方式及认证；缺少必要信息时再向用户确认，不猜测服务器或凭据。分发平台与服务器均以用户配置为准，禁止把参考项目的主机、账号或路径写成新项目默认值。",
+  "5. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.ps1），供应用的「发布」按钮实际调用部署脚本；明确区分仅构建、仅打包与完成部署。支持发布前预检、重复发布保护、失败重试及必要的备份/回滚，保护服务器业务数据与现有配置。",
+  "6. 校验上传产物完整性；任一步骤失败返回非零退出码，不打印发布成功，记录具体失败阶段。成功时打印模式、版本、部署目标、下载地址或服务地址及验证结果。凭据仅存环境变量或忽略的本地配置，不写入仓库或日志。",
+  "完成后说明发布入口与用法、部署配置、产物及更新或守护脚本、实际部署和验证结果；没有完成远端部署或校验时明确列出未完成项。",
 ].join('\n');
 
 export function requirementSettings(p: Project, i: Item) {
@@ -246,6 +257,7 @@ export function normalizeWorkspace(s: Workspace) {
   if (typeof s.baselineTemplate === 'string' && s.baselineTemplate.trim()) s.baselineTemplate = s.baselineTemplate.trim();
   else s.baselineTemplate = undefined;
   s.publishTemplate = typeof s.publishTemplate === 'string' && s.publishTemplate.trim() ? s.publishTemplate.trim() : undefined;
+  if (s.publishTemplate === LEGACY_PUBLISH_TEMPLATE) s.publishTemplate = DEFAULT_PUBLISH_TEMPLATE;
   for (const p of s.projects) {
     if (!Number.isSafeInteger(p.revision) || p.revision! < 0) p.revision = 0;
     if (!s.folders.some((f) => f.id === p.folderId)) p.folderId = 'default';

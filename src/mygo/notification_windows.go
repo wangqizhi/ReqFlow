@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
 	"github.com/egoist/mygo"
+	"golang.org/x/sys/windows/registry"
 )
 
 // MyGO 0.4.8 leaves hBalloonIcon empty. Windows Vista+ reads that member
@@ -34,10 +37,11 @@ var notificationShell = syscall.NewLazyDLL("shell32.dll").NewProc("Shell_NotifyI
 var notificationComctl = syscall.NewLazyDLL("comctl32.dll")
 
 type desktopNotifications struct {
-	window      uintptr
-	callback    uintptr
-	added       bool
-	lastNoSound bool
+	window          uintptr
+	callback        uintptr
+	added           bool
+	lastNoSound     bool
+	lastSoundPlayed bool
 }
 
 func loadNotificationIcon() (uintptr, error) {
@@ -65,16 +69,10 @@ func notificationText(dst []uint16, text string) {
 }
 
 func notificationData(window, icon uintptr, opts mygo.NotificationOptions) notificationIconData {
-	// Audible notices keep the Shell's own notification sound: it follows the
-	// system notification audio settings and plays reliably. NIIF_NOSOUND is
-	// set only for Silent; MessageBeep is not used because it plays the
-	// "SystemInformation" scheme sound, which is unassigned on common
-	// Windows 11 setups (queued successfully yet silent).
-	d := notificationIconData{Window: window, ID: notificationID, Flags: 0x01 | 0x02 | 0x04 | 0x10, CallbackMessage: notificationMessage, Icon: icon, BalloonIcon: icon, InfoFlags: 0x04 | 0x20}
+	// Shell acceptance does not mean a sound was played. Own audio delivery
+	// explicitly and suppress Shell audio to avoid a double chime.
+	d := notificationIconData{Window: window, ID: notificationID, Flags: 0x01 | 0x02 | 0x04 | 0x10, CallbackMessage: notificationMessage, Icon: icon, BalloonIcon: icon, InfoFlags: 0x04 | 0x20 | 0x10}
 	d.Size = uint32(unsafe.Sizeof(d))
-	if opts.Silent {
-		d.InfoFlags |= 0x10
-	}
 	notificationText(d.Tip[:], "ReqFlow")
 	title := opts.Title
 	if strings.TrimSpace(title) == "" {
@@ -87,6 +85,46 @@ func notificationData(window, icon uintptr, opts mygo.NotificationOptions) notif
 	}
 	notificationText(d.Info[:], body)
 	return d
+}
+
+func notificationSoundPath() string {
+	for _, event := range []string{"Notification.Default", "SystemNotification"} {
+		key, err := registry.OpenKey(registry.CURRENT_USER, `AppEvents\Schemes\Apps\.Default\`+event+`\.Current`, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		file, _, _ := key.GetStringValue("")
+		key.Close()
+		file, _ = registry.ExpandString(file)
+		if info, err := os.Stat(file); err == nil && !info.IsDir() {
+			return file
+		}
+	}
+	for _, name := range []string{"Windows Notify System Generic.wav", "Windows Notify.wav", "notify.wav"} {
+		file := filepath.Join(os.Getenv("SystemRoot"), "Media", name)
+		if info, err := os.Stat(file); err == nil && !info.IsDir() {
+			return file
+		}
+	}
+	return ""
+}
+
+func playNotificationSound() error {
+	file := notificationSoundPath()
+	if file == "" {
+		return fmt.Errorf("未找到 Windows 通知音效文件")
+	}
+	name, err := syscall.UTF16PtrFromString(file)
+	if err != nil {
+		return err
+	}
+	// SND_FILENAME | SND_ASYNC | SND_NODEFAULT | SND_SYSTEM: use the system
+	// notification audio session and respect its volume/mute setting.
+	ok, _, _ := syscall.NewLazyDLL("winmm.dll").NewProc("PlaySoundW").Call(uintptr(unsafe.Pointer(name)), 0, 0x20000|0x1|0x2|0x200000)
+	if ok == 0 {
+		return fmt.Errorf("Windows 通知音效播放失败")
+	}
+	return nil
 }
 
 func (n *desktopNotifications) remove() {
@@ -147,7 +185,12 @@ func (n *desktopNotifications) show(w *mygo.Window, opts mygo.NotificationOption
 			return
 		}
 		n.added = true
-		n.lastNoSound = d.InfoFlags&0x10 != 0
+		n.lastNoSound = opts.Silent
+		n.lastSoundPlayed = false
+		if !opts.Silent {
+			result = playNotificationSound()
+			n.lastSoundPlayed = result == nil
+		}
 	})
 	return result
 }
@@ -175,8 +218,8 @@ func checkNotificationDelivery(w *mygo.Window) map[string]any {
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	// The system plays the toast sound itself; we only verify the flags let it.
-	soundEnabled := !n.lastNoSound
+	// Verify the audio API accepted the file, not merely the Shell sound flag.
+	soundEnabled := !n.lastNoSound && n.lastSoundPlayed
 	mygo.RunOnMain(func() {
 		notificationUser32.NewProc("SendMessageW").Call(w.NativeHandle(), notificationMessage, notificationID, 0x405)
 	})

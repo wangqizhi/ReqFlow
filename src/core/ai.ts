@@ -1,18 +1,21 @@
 // AI 配置仅本机保存；协议字段决定请求与响应格式。
 import type { Item, Project } from './domain';
 export type AIProviderCLI = 'codex' | 'zcode' | 'pi' | 'claude';
-export interface AISettings { id?: string; kind?: 'api' | 'cli'; cli?: AIProviderCLI; activeProfileId?: string; profiles?: AISettings[]; provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; requestLogging?: boolean }
-export interface AICLIStatus { id: AIProviderCLI; installed: boolean; version?: string; path?: string; error?: string; usage?: { label: string; usedPercent: number; updatedAt: string; resetsAt: number }[] }
-export interface AIRequestEvent { phase: 'request' | 'response' | 'complete' | 'error'; elapsedMs: number; status?: number; reasoningEffort?: 'none' }
+export type AIReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+export interface AISettings { id?: string; kind?: 'api' | 'cli'; cli?: AIProviderCLI; activeProfileId?: string; profiles?: AISettings[]; provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; reasoningEffort?: AIReasoningEffort; requestLogging?: boolean }
+export interface AICLIModel { id: string; name: string; reasoningEfforts?: AIReasoningEffort[] }
+export interface AICLIStatus { id: AIProviderCLI; installed: boolean; version?: string; path?: string; error?: string; models?: AICLIModel[]; modelsNote?: string; usage?: { label: string; usedPercent: number; updatedAt: string; resetsAt: number }[] }
+export interface AIRequestEvent { phase: 'request' | 'response' | 'complete' | 'error'; elapsedMs: number; status?: number; reasoningEffort?: AIReasoningEffort }
 export interface AIRequestLog extends AIRequestEvent { time: string; requestId: string; model: string; format: string }
 export function validateAISettings(value: AISettings): AISettings {
   if (!value || ['provider', 'url', 'apiKey'].some((key) => typeof (value as any)[key] !== 'string')) throw Error('AI 设置无效');
   if (value.format !== undefined && !['openai', 'anthropic'].includes(value.format)) throw Error('API 格式无效');
   if (value.model !== undefined && typeof value.model !== 'string') throw Error('模型名称无效');
+  if (value.reasoningEffort !== undefined && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(value.reasoningEffort)) throw Error('思考等级无效');
   if (value.requestLogging !== undefined && typeof value.requestLogging !== 'boolean') throw Error('请求日志设置无效');
   if (value.kind && !['api', 'cli'].includes(value.kind)) throw Error('AI 供应商类型无效');
   if (value.kind === 'cli' && !['codex', 'zcode', 'pi', 'claude'].includes(value.cli || '')) throw Error('CLI 供应商无效');
-  const settings: AISettings = { id: value.id, kind: value.kind || 'api', cli: value.cli, provider: value.provider.trim(), url: value.url.trim(), apiKey: value.apiKey.trim(), format: value.format || 'openai', model: value.model?.trim() || '', requestLogging: value.requestLogging ?? true };
+  const settings: AISettings = { id: value.id, kind: value.kind || 'api', cli: value.cli, provider: value.provider.trim(), url: value.url.trim(), apiKey: value.apiKey.trim(), format: value.format || 'openai', model: value.model?.trim() || '', reasoningEffort: value.reasoningEffort || 'none', requestLogging: value.requestLogging ?? true };
   if (settings.url && !/^https?:\/\//i.test(settings.url)) throw Error('调用 URL 必须使用 HTTP 或 HTTPS');
   if (settings.url) new URL(settings.url);
   if (value.profiles !== undefined) {

@@ -24,6 +24,7 @@ type AISettings struct {
 	APIKey          string       `json:"apiKey"`
 	Format          string       `json:"format"`
 	Model           string       `json:"model"`
+	ReasoningEffort string       `json:"reasoningEffort,omitempty"`
 	RequestLogging  bool         `json:"requestLogging"`
 }
 
@@ -55,6 +56,7 @@ func aiNumber(value any) float64 {
 func ValidateAISettings(value any) (AISettings, error) {
 	v := aiMap(value)
 	s := AISettings{Format: "openai", RequestLogging: true}
+	s.ReasoningEffort = "none"
 	if v == nil {
 		return s, errors.New("AI 设置无效")
 	}
@@ -86,6 +88,12 @@ func ValidateAISettings(value any) (AISettings, error) {
 			return s, errors.New("模型名称无效")
 		}
 		s.Model = strings.TrimSpace(aiString(value))
+	}
+	if value, ok := v["reasoningEffort"]; ok {
+		if !validReasoningEffort(aiString(value)) {
+			return s, errors.New("思考等级无效")
+		}
+		s.ReasoningEffort = aiString(value)
 	}
 	if value, ok := v["requestLogging"]; ok {
 		enabled, ok := value.(bool)
@@ -344,6 +352,6 @@ func (b *Backend) encodeAIProfile(s AISettings) (map[string]any, string, error) 
 		}
 		encoded = base64.StdEncoding.EncodeToString(encrypted)
 	}
-	stored := map[string]any{"id": s.ID, "kind": s.Kind, "cli": s.CLI, "provider": s.Provider, "url": s.URL, "format": s.Format, "model": s.Model, "requestLogging": s.RequestLogging, "encryptedKey": encoded}
+	stored := map[string]any{"id": s.ID, "kind": s.Kind, "cli": s.CLI, "provider": s.Provider, "url": s.URL, "format": s.Format, "model": s.Model, "reasoningEffort": s.ReasoningEffort, "requestLogging": s.RequestLogging, "encryptedKey": encoded}
 	return stored, storage, nil
 }

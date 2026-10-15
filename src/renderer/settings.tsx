@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { bridge } from './api';
-import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI } from '../core/ai';
+import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI, AIReasoningEffort } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
@@ -102,7 +102,11 @@ export function RemoteFields({ value, change, disabled }: { value: RemoteSetting
   </fieldset>;
 }
 
-export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }: { tab: string; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; onBusyChange(busy: boolean): void }) {
+export type SettingsPageHandle = { requestLeave(): void };
+function fingerprint(value: unknown): string {
+  return JSON.stringify(value, (_, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
+}
+export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; onBusyChange(busy: boolean): void; onLeave(): void }>(function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange, onLeave }, ref) {
   const [form, setForm] = useState<AISettings>({ provider: '', url: '', apiKey: '' });
   const [backup, setBackup] = useState<BackupSettings>({ ...emptyBackup });
   const [status, setStatus] = useState<BackupStatus>({ running: false });
@@ -114,12 +118,24 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
   const [cliStatuses, setCLIStatuses] = useState<AICLIStatus[]>([]);
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState('');
+  const [modelPicker, setModelPicker] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
+  const [savedAI, setSavedAI] = useState('');
+  const [savedBackup, setSavedBackup] = useState('');
+  const [savedTemplates, setSavedTemplates] = useState({ baseline: '', publish: '' });
+  const [savedPublishLogging, setSavedPublishLogging] = useState(true);
   const profiles = form.profiles || [];
   function draftProfiles(): AISettings[] {
     const { profiles: _, activeProfileId: __, ...current } = form;
     return profiles.map(profile => profile.id === form.activeProfileId ? current : profile);
   }
   function configuration(): AISettings { return { ...form, profiles: draftProfiles() }; }
+  const selectedCLI = cliStatuses.find(status => status.id === form.cli);
+  const cliModels = selectedCLI?.models || [];
+  const selectedModel = cliModels.find(model => model.id === form.model);
+  const reasoningLabels: Record<AIReasoningEffort, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高', ultra: '超高' };
+  const reasoningLevels = selectedModel?.reasoningEfforts || [];
   function chooseProfile(id: string) {
     const drafts = draftProfiles(); const profile = drafts.find(profile => profile.id === id);
     if (profile) { setForm({ ...profile, profiles: drafts, activeProfileId: id, requestLogging: form.requestLogging }); setVisible(false); setMessage(''); }
@@ -159,6 +175,7 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
       // REQ-071 验证退回：默认模板要直接预填成可编辑的正文，而不是灰色占位文字
       setBaselineTpl(r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE);
       setPublishTpl(r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE);
+      setSavedTemplates({ baseline: r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE, publish: r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE });
       setTemplateVersion(r.version);
     }).catch(() => { /* 读取失败时模板tab仍可查看，保存时报错 */ });
   }, []);
@@ -184,12 +201,15 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
     bridge.getAISettings().then((r) => {
       if (!r.ok) throw Error(r.error);
       const settings = r.settings;
-      if (settings.profiles?.length) setForm(settings);
-      else { const id = settings.id || crypto.randomUUID(); const profile = { ...settings, id }; setForm({ ...profile, profiles: [profile], activeProfileId: id }); }
+      let next = settings;
+      if (!settings.profiles?.length) { const id = settings.id || crypto.randomUUID(); const profile = { ...settings, id }; next = { ...profile, profiles: [profile], activeProfileId: id }; }
+      setForm(next);
+      const { profiles: _, activeProfileId: __, ...current } = next;
+      setSavedAI(fingerprint({ ...next, profiles: next.profiles!.map(profile => profile.id === next.activeProfileId ? current : profile) }));
       setLoaded(true);
     }).catch((e) => notify(e.message, 'err'));
-    bridge.getPublishLogSettings?.().then((r) => { if (!r.ok || !r.settings) throw Error(r.error || '读取发布日志设置失败'); setPublishLogging(r.settings.enabled); setPublishLogLoaded(true); }).catch((e) => notify(e.message, 'err'));
-    bridge.getBackupSettings?.().then((r) => { if (r.ok) { setBackup(r.settings); setStatus(r.status); setBackupLoaded(true); } }).catch((e) => notify(e.message, 'err'));
+    bridge.getPublishLogSettings?.().then((r) => { if (!r.ok || !r.settings) throw Error(r.error || '读取发布日志设置失败'); setPublishLogging(r.settings.enabled); setSavedPublishLogging(r.settings.enabled); setPublishLogLoaded(true); }).catch((e) => notify(e.message, 'err'));
+    bridge.getBackupSettings?.().then((r) => { if (r.ok) { setBackup(r.settings); setSavedBackup(fingerprint(r.settings)); setStatus(r.status); setBackupLoaded(true); } }).catch((e) => notify(e.message, 'err'));
     const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
@@ -207,23 +227,58 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
     : tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
-    if (tab === 'ai') return perform(() => bridge.saveAISettings(configuration()), 'AI 配置已保存，当前供应商已生效');
+    if (tab === 'ai') return perform(async () => { const r = await bridge.saveAISettings(configuration()); if (r.ok) setSavedAI(fingerprint(configuration())); return r; }, 'AI 配置已保存，当前供应商已生效');
     if (tab === 'template') return perform(async () => {
       const r = await bridge.apply({ op: templateKind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text: templateKind === 'publish' ? publishTpl : baselineTpl, expectedVersion: templateVersion === null ? undefined : templateVersion });
       if (!r.ok) throw Error(r.error || '保存失败');
       setTemplateVersion(r.version);
+      setSavedTemplates(previous => ({ ...previous, [templateKind]: templateKind === 'publish' ? publishTpl : baselineTpl }));
       return r;
     }, templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
     if (tab === 'logs') return perform(async () => {
       const aiResult = await bridge.saveAISettings(configuration());
       if (!aiResult.ok) return aiResult;
-      return bridge.savePublishLogSettings ? bridge.savePublishLogSettings({ enabled: publishLogging }) : aiResult;
+      setSavedAI(fingerprint(configuration()));
+      const r = bridge.savePublishLogSettings ? await bridge.savePublishLogSettings({ enabled: publishLogging }) : aiResult;
+      if (r.ok) setSavedPublishLogging(publishLogging);
+      return r;
     }, '日志设置已保存');
     if (tab === 'data') return true;
-    return perform(() => bridge.saveBackupSettings!(backup), '备份设置已保存');
+    return perform(async () => { const r = await bridge.saveBackupSettings!(backup); if (r.ok) setSavedBackup(fingerprint(backup)); return r; }, '备份设置已保存');
   }
   async function saveAndFinish() {
     await saveCurrentTab();
+  }
+  const aiDirty = loaded && fingerprint(configuration()) !== savedAI;
+  const backupDirty = backupLoaded && fingerprint(backup) !== savedBackup;
+  const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish);
+  const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
+  const dirty = aiDirty || backupDirty || templateDirty || logDirty;
+  useImperativeHandle(ref, () => ({ requestLeave() { if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
+  useEffect(() => {
+    if (!leaveConfirm || busy) return;
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setLeaveConfirm(false); } };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, [leaveConfirm, busy]);
+  async function saveAllAndLeave() {
+    if (busy) return;
+    const success = await perform(async () => {
+      if (aiDirty) { const r = await bridge.saveAISettings(configuration()); if (!r.ok) return r; setSavedAI(fingerprint(configuration())); }
+      if (templateDirty) {
+        let version = templateVersion;
+        for (const [kind, text, saved] of [['baseline', baselineTpl, savedTemplates.baseline], ['publish', publishTpl, savedTemplates.publish]]) {
+          if (text === saved) continue;
+          const r = await bridge.apply({ op: kind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text, expectedVersion: version });
+          if (!r.ok) return r;
+          version = r.version; setTemplateVersion(version); setSavedTemplates(previous => ({ ...previous, [kind]: text }));
+        }
+      }
+      if (backupDirty) { const r = await bridge.saveBackupSettings!(backup); if (!r.ok) return r; setSavedBackup(fingerprint(backup)); }
+      if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: publishLogging }); if (!r.ok) return r; setSavedPublishLogging(publishLogging); }
+      return { ok: true };
+    }, '设置已保存');
+    if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置">
       <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、需求模板、同步备份与本机数据</p></div>
@@ -245,9 +300,19 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
             {detectError && <p className="settings-message" role="alert">{detectError}</p>}
             <div className="cli-provider-list" role="group" aria-label="CLI 供应商">{(Object.keys(cliNames) as AIProviderCLI[]).map(id => {
               const status = cliStatuses.find(status => status.id === id);
-              return <button type="button" className={'cli-provider-card' + (form.cli === id ? ' on' : '')} key={id} disabled={busy || !loaded} aria-pressed={form.cli === id} onClick={() => setForm({ ...form, cli: id })}><strong>{cliNames[id]}</strong><span>{status?.installed ? `已安装 ${status.version || ''}` : detecting ? '检测中…' : status?.error || '尚未检测'}</span>{status?.path && <small title={status.path}>{status.path}</small>}{status?.usage?.map(usage => <small key={usage.label}>{usage.label}：{usage.usedPercent.toFixed(1)}% · 本地快照 {new Date(usage.updatedAt).toLocaleString('zh-CN')} · 重置 {new Date(usage.resetsAt * 1000).toLocaleString('zh-CN')}</small>)}</button>;
+              return <button type="button" className={'cli-provider-card' + (form.cli === id ? ' on' : '')} key={id} disabled={busy || !loaded} aria-pressed={form.cli === id} onClick={() => { if (id !== form.cli) { setForm({ ...form, cli: id, model: '', reasoningEffort: 'none' }); setModelPicker(false); } }}><strong>{cliNames[id]}</strong><span>{status?.installed ? `已安装 ${status.version || ''}` : detecting ? '检测中…' : status?.error || '尚未检测'}</span>{status?.path && <small title={status.path}>{status.path}</small>}{status?.usage?.map(usage => <small key={usage.label}>{usage.label}：{usage.usedPercent.toFixed(1)}% · 本地快照 {new Date(usage.updatedAt).toLocaleString('zh-CN')} · 重置 {new Date(usage.resetsAt * 1000).toLocaleString('zh-CN')}</small>)}</button>;
             })}</div>
-            <label className="field">模型名称 · 可选<input aria-label="CLI 模型名称" value={form.model || ''} disabled={busy || !loaded} onChange={e => setForm({ ...form, model: e.target.value })} placeholder="留空使用 CLI 默认模型" /></label>
+            <label className="field">模型名称 · 可选<input aria-label="CLI 模型名称" value={form.model || ''} disabled={busy || !loaded} onChange={e => setForm({ ...form, model: e.target.value, reasoningEffort: 'none' })} placeholder="留空使用 CLI 默认模型" /></label>
+            {!!cliModels.length && <div className="cli-model-picker" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setModelPicker(false); }}>
+              <button className="btn" type="button" disabled={busy || !loaded} aria-expanded={modelPicker} aria-controls="cli-model-list" onClick={() => { setModelSearch(''); setModelPicker(!modelPicker); }}>选择可用模型（{cliModels.length}）</button>
+              {modelPicker && <div className="cli-model-list" id="cli-model-list" role="group" aria-label="可用 CLI 模型" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setModelPicker(false); } }}>
+                <label className="field"><input autoFocus aria-label="筛选 CLI 模型" placeholder="输入模型或供应商名称筛选" value={modelSearch} onChange={e => setModelSearch(e.target.value)} /></label>
+                <button type="button" className="tag-btn" aria-pressed={!form.model} onClick={() => { setForm({ ...form, model: '', reasoningEffort: 'none' }); setModelPicker(false); }}>CLI 默认模型</button>
+                {cliModels.filter(model => !modelSearch || (model.id + ' ' + model.name).toLowerCase().includes(modelSearch.toLowerCase())).map(model => <button type="button" className="tag-btn" key={model.id} aria-pressed={form.model === model.id} title={model.id} onClick={() => { setForm({ ...form, model: model.id, reasoningEffort: 'none' }); setModelPicker(false); }}>{model.name}</button>)}
+              </div>}
+            </div>}
+            <p className="settings-hint">{detecting ? '正在读取可用模型…' : selectedCLI?.modelsNote || '未读取到模型列表，可留空使用 CLI 默认模型或手工填写。'}</p>
+            {!!reasoningLevels.length && <div className="field"><span>思考等级</span><div className="segmented" role="group" aria-label="CLI 思考等级">{(['none', ...reasoningLevels.filter(level => level !== 'none')] as AIReasoningEffort[]).map(level => <button key={level} className={(form.reasoningEffort || 'none') === level ? 'on' : ''} type="button" disabled={busy || !loaded} aria-pressed={(form.reasoningEffort || 'none') === level} onClick={() => setForm({ ...form, reasoningEffort: level })}>{reasoningLabels[level]}</button>)}</div>{!reasoningLevels.includes('none') && <p className="settings-hint">此模型不能完全关闭思考；选择关闭时使用模型支持的最低等级。</p>}</div>}
             <p className="settings-hint">复用本机 CLI 登录与供应商配置。请先在终端完成登录；选择后保存即可用于所有 AI 优化与内容生成。仅显示可读取的周/月额度快照。</p>
           </>}
         </form>}
@@ -257,7 +322,7 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
         }}>
           <div className="segmented" role="group" aria-label="需求模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
           <p className="settings-hint">{templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
-          <label className="field">{templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateKind === 'publish' ? publishTpl : baselineTpl} disabled={busy} onChange={(e) => templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
+          <label className="field">{templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateKind === 'publish' ? publishTpl : baselineTpl} disabled={busy || templateVersion === null} onChange={(e) => templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
           <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存设置」。</p>
         </form>}
         {tab === 'logs' && <>
@@ -274,12 +339,13 @@ export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }
           <RemoteFields value={backup} change={(v) => setBackup({ ...backup, ...v })} disabled={busy || !backupLoaded} />
           <div className="validation-setting"><div><label htmlFor="backup-auto">自动同步 · 每 1 分钟</label><p>默认开启，应用运行期间生效；也可关闭后手动同步。</p></div><label className="switch"><input id="backup-auto" type="checkbox" checked={backup.autoSync} disabled={busy || !backupLoaded} onChange={(e) => setBackup({ ...backup, autoSync: e.target.checked })} /><span className="slider" /><span className="switch-state">{backup.autoSync ? '已开启' : '已关闭'}</span></label></div>
           <p className="settings-hint">AI 配置（含供应商、URL、模型和密钥）与私钥文件不上传。备份文件中的 workspace 可作为完整工作区导入。</p>
-          <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running} onClick={() => perform(async () => { const saved = await bridge.saveBackupSettings!(backup); if (!saved.ok) return saved; const r = await bridge.syncBackup!(); setStatus(r.status); return r; }, '备份同步完成')}>立即同步</button><button className="btn" disabled={busy || !backupLoaded || !backup.url || !bridge.testRemote} onClick={() => perform(() => bridge.testRemote!(backup), '备份仓库连接成功')}>测试连接</button></div>
+          <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running} onClick={() => perform(async () => { const saved = await bridge.saveBackupSettings!(backup); if (!saved.ok) return saved; setSavedBackup(fingerprint(backup)); const r = await bridge.syncBackup!(); setStatus(r.status); return r; }, '备份同步完成')}>立即同步</button><button className="btn" disabled={busy || !backupLoaded || !backup.url || !bridge.testRemote} onClick={() => perform(() => bridge.testRemote!(backup), '备份仓库连接成功')}>测试连接</button></div>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}
       <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
+      {leaveConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title"><div className="dialog-head"><h2 id="unsaved-settings-title">设置尚未保存</h2></div><p>存在未保存的设置，是否保存后返回项目菜单？</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setLeaveConfirm(false)}>继续编辑</button><button className="btn" disabled={busy} onClick={onLeave}>放弃更改</button><button className="btn primary" disabled={busy || (backupDirty && status.running)} onClick={() => void saveAllAndLeave()}>{busy ? '保存中…' : '保存并返回'}</button></div></div></div>}
   </section>;
-}
+});

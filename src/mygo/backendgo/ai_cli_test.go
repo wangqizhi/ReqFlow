@@ -112,6 +112,62 @@ func TestCLIRejectsInvalidCommandsAndModels(t *testing.T) {
 	}
 }
 
+func TestCLIModelDiscoveryAndReasoningArguments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	cache := `{"models":[{"slug":"no-off","display_name":"推理模型","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]},{"slug":"optional","supported_reasoning_levels":[{"effort":"none"},{"effort":"medium"}]},{"slug":"hidden","visibility":"hide"},{"slug":"bad & command"}]}`
+	if err := os.WriteFile(filepath.Join(home, "models_cache.json"), []byte(cache), 0600); err != nil {
+		t.Fatal(err)
+	}
+	models := cachedCodexModels()
+	if len(models) != 2 || models[0].Name != "推理模型" {
+		t.Fatal(models)
+	}
+	for _, tc := range []struct{ model, effort, expected string }{{"no-off", "none", `model_reasoning_effort="low"`}, {"optional", "none", `model_reasoning_effort="none"`}, {"no-off", "high", `model_reasoning_effort="high"`}} {
+		args, err := providerArguments(AISettings{CLI: "codex", Model: tc.model, ReasoningEffort: tc.effort}, t.TempDir())
+		if err != nil || !strings.Contains(strings.Join(args, " "), tc.expected) {
+			t.Fatal(args, err)
+		}
+	}
+	if _, err := providerArguments(AISettings{CLI: "codex", Model: "no-off", ReasoningEffort: "medium"}, t.TempDir()); err == nil {
+		t.Fatal("unsupported effort accepted")
+	}
+	pi := parsePiModels("provider model context max-out thinking images\nopenai gpt-5 400K 128K yes yes\nopenai gpt-4 8K 8K no no\nopenai gpt-5 400K 128K yes yes\nmalformed\n")
+	if len(pi) != 2 || pi[0].ID != "openai/gpt-5" || len(pi[0].ReasoningEfforts) == 0 || len(pi[1].ReasoningEfforts) != 0 {
+		t.Fatal(pi)
+	}
+	for _, effort := range []string{"none", "high"} {
+		args, err := providerArguments(AISettings{CLI: "pi", Model: pi[0].ID, ReasoningEffort: effort}, t.TempDir())
+		expected := effort
+		if effort == "none" {
+			expected = "off"
+		}
+		if err != nil || !strings.Contains(strings.Join(args, " "), "--thinking "+expected) {
+			t.Fatal(args, err)
+		}
+	}
+	os.Remove(filepath.Join(home, "models_cache.json"))
+	if len(cachedCodexModels()) != 0 {
+		t.Fatal("missing cache should use manual/default fallback")
+	}
+	if args, err := providerArguments(AISettings{CLI: "codex", Model: "manual-model"}, t.TempDir()); err != nil || !strings.Contains(strings.Join(args, " "), "--model manual-model") {
+		t.Fatal(args, err)
+	}
+}
+
+func TestPublishTemplateMigrationPreservesCustomText(t *testing.T) {
+	for _, text := range []string{legacyPublishTemplate, "我的自定义发布步骤"} {
+		state := NormalizeWorkspace(map[string]any{"projects": []any{}, "publishTemplate": text})
+		want := text
+		if text == legacyPublishTemplate {
+			want = DefaultPublishTemplate
+		}
+		if state["publishTemplate"] != want {
+			t.Fatal("publish template migration changed custom text or retained old default")
+		}
+	}
+}
+
 func TestAIProfilesMigrateEncryptSwitchAndPreserveOnFailure(t *testing.T) {
 	b := aiTestBackend(t)
 	legacy := aiTestSettings("https://example.invalid/v1")
@@ -123,7 +179,7 @@ func TestAIProfilesMigrateEncryptSwitchAndPreserveOnFailure(t *testing.T) {
 		t.Fatal(read, err)
 	}
 	legacy["id"] = "api"
-	cli := map[string]any{"id": "cli", "provider": "个人 CLI", "kind": "cli", "cli": "pi", "url": "", "apiKey": "", "model": ""}
+	cli := map[string]any{"id": "cli", "provider": "个人 CLI", "kind": "cli", "cli": "pi", "url": "", "apiKey": "", "model": "openai/gpt-5", "reasoningEffort": "medium"}
 	config := aiCloneMap(legacy)
 	config["profiles"] = []any{legacy, cli}
 	config["activeProfileId"] = "cli"
@@ -132,7 +188,7 @@ func TestAIProfilesMigrateEncryptSwitchAndPreserveOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	read, err = b.readAISettings()
-	if err != nil || read.Kind != "cli" || read.CLI != "pi" || len(read.Profiles) != 2 || read.RequestLogging {
+	if err != nil || read.Kind != "cli" || read.CLI != "pi" || read.ReasoningEffort != "medium" || len(read.Profiles) != 2 || read.RequestLogging {
 		t.Fatal(read, err)
 	}
 	path := filepath.Join(b.DataDir, "ai-settings.json")

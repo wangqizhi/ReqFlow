@@ -219,7 +219,7 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		if len(runes) > 180 {
 			body = string(runes[:180])
 		}
-		_, e := desktopNative(b, "notification", map[string]any{"title": title, "body": body, "silent": desktopBool(notice["ok"])})
+		_, e := desktopNative(b, "notification", map[string]any{"title": title, "body": body, "silent": false})
 		return desktopOK(nil), e
 	case "publish:detect":
 		root := desktopText(args, 0)

@@ -284,6 +284,10 @@ func TestAIGuidanceOptimizeUsesRecentChanges(t *testing.T) {
 		if context["kind"] != "delivery" || aiString(context["text"]) != "说明改动与未解决的问题" || aiMap(context["project"])["name"] == nil {
 			t.Error("AI guidance kind/text/project differ")
 		}
+		system := aiString(aiMap(messages[0])["content"])
+		if !strings.Contains(system, "精炼、条目化") || !strings.Contains(system, "不增加上下文占用") || strings.Contains(system, "无列表符号") {
+			t.Error("guidance optimization lacks concise, itemized context limits")
+		}
 		if !strings.Contains(aiString(context["recentDiffStat"]), "change.txt") || !strings.Contains(aiString(context["recentLog"]), "新增测试行为") {
 			t.Error("AI guidance omitted recent diff facts")
 		}

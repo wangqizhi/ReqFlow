@@ -26,6 +26,24 @@ func desktopTestCall(t *testing.T, b *Backend, channel string, args ...any) map[
 	}
 	return m
 }
+func TestPublishResultRequestsAudibleNotification(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	for _, success := range []bool{true, false} {
+		called := false
+		b.Native = func(method string, args []any) (any, error) {
+			called = true
+			if method != "notification" || desktopMap(args[0])["silent"] != false {
+				t.Fatal(method, args)
+			}
+			return nil, nil
+		}
+		desktopTestCall(t, b, "publish:notice", map[string]any{"ok": success, "project": "通知测试"})
+		if !called {
+			t.Fatal("notification missing")
+		}
+	}
+}
+
 func TestDesktopFilesNativeAndBounds(t *testing.T) {
 	b := NewBackend(t.TempDir(), t.TempDir(), "2.0.0")
 	root, outside := t.TempDir(), t.TempDir()
