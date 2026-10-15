@@ -269,6 +269,35 @@ func smokeUI(w *mygo.Window, path string) {
 					_ = os.WriteFile(name+".png", png, 0600)
 				}
 			}
+			for _, surface := range []string{"settings-api", "settings-cli", "settings-data"} {
+				code := `(async()=>{
+                  const pause=()=>new Promise(r=>setTimeout(r,100));
+                  const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  document.querySelector('.overlay')?.click();await pause();
+                  if(!document.querySelector('.settings-page')) { button('设置').click();await pause(); }
+                  const nav=document.querySelector('[aria-label="设置功能菜单"]');
+                  const data=SURFACE==='settings-data';
+                  [...nav.querySelectorAll('button')].find(b=>b.textContent===(data?'数据':'AI 供应商')).click();await pause();
+                  if(!data){button(SURFACE==='settings-cli'?'本地 CLI':'API 服务').click();await pause();}
+                  const page=document.querySelector('.settings-page');const rect=page.getBoundingClientRect();
+                  const footer=page.querySelector('.settings-footer').getBoundingClientRect();
+                  const body=page.querySelector('.settings-body');
+                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===6&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
+                  return {ok,height:innerHeight,scrollable:body.scrollHeight>body.clientHeight};
+                })()`
+				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
+				report, err := w.Page().EvalContext(ctx, code)
+				if err != nil {
+					report = map[string]any{"ok": false, "error": err.Error()}
+				}
+				name := fmt.Sprintf("%s.%s-%d", path, surface, height)
+				_ = writeReport(name+".json", report)
+				if png, err := w.CapturePage(); err == nil {
+					_ = os.WriteFile(name+".png", png, 0600)
+				}
+			}
+			_, _ = w.Page().EvalContext(ctx, `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click()})()`)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	mygo.App.Quit()

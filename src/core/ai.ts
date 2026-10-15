@@ -1,6 +1,8 @@
 // AI 配置仅本机保存；协议字段决定请求与响应格式。
 import type { Item, Project } from './domain';
-export interface AISettings { provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; requestLogging?: boolean }
+export type AIProviderCLI = 'codex' | 'zcode' | 'pi' | 'claude';
+export interface AISettings { id?: string; kind?: 'api' | 'cli'; cli?: AIProviderCLI; activeProfileId?: string; profiles?: AISettings[]; provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; requestLogging?: boolean }
+export interface AICLIStatus { id: AIProviderCLI; installed: boolean; version?: string; path?: string; error?: string; usage?: { label: string; usedPercent: number; updatedAt: string; resetsAt: number }[] }
 export interface AIRequestEvent { phase: 'request' | 'response' | 'complete' | 'error'; elapsedMs: number; status?: number; reasoningEffort?: 'none' }
 export interface AIRequestLog extends AIRequestEvent { time: string; requestId: string; model: string; format: string }
 export function validateAISettings(value: AISettings): AISettings {
@@ -8,9 +10,24 @@ export function validateAISettings(value: AISettings): AISettings {
   if (value.format !== undefined && !['openai', 'anthropic'].includes(value.format)) throw Error('API 格式无效');
   if (value.model !== undefined && typeof value.model !== 'string') throw Error('模型名称无效');
   if (value.requestLogging !== undefined && typeof value.requestLogging !== 'boolean') throw Error('请求日志设置无效');
-  const settings: AISettings = { provider: value.provider.trim(), url: value.url.trim(), apiKey: value.apiKey.trim(), format: value.format || 'openai', model: value.model?.trim() || '', requestLogging: value.requestLogging ?? true };
+  if (value.kind && !['api', 'cli'].includes(value.kind)) throw Error('AI 供应商类型无效');
+  if (value.kind === 'cli' && !['codex', 'zcode', 'pi', 'claude'].includes(value.cli || '')) throw Error('CLI 供应商无效');
+  const settings: AISettings = { id: value.id, kind: value.kind || 'api', cli: value.cli, provider: value.provider.trim(), url: value.url.trim(), apiKey: value.apiKey.trim(), format: value.format || 'openai', model: value.model?.trim() || '', requestLogging: value.requestLogging ?? true };
   if (settings.url && !/^https?:\/\//i.test(settings.url)) throw Error('调用 URL 必须使用 HTTP 或 HTTPS');
   if (settings.url) new URL(settings.url);
+  if (value.profiles !== undefined) {
+    if (!Array.isArray(value.profiles) || !value.profiles.length || value.profiles.length > 50) throw Error('请保留 1–50 套 AI 配置');
+    const ids = new Set<string>();
+    const profiles = value.profiles.map(profile => {
+      if (!profile.id || ids.has(profile.id)) throw Error('AI 配置标识为空或重复');
+      ids.add(profile.id);
+      const { profiles: _, activeProfileId: __, ...single } = profile;
+      return validateAISettings(single);
+    });
+    const active = profiles.find(profile => profile.id === value.activeProfileId);
+    if (!active) throw Error('当前 AI 配置不存在');
+    return { ...active, requestLogging: settings.requestLogging, profiles, activeProfileId: active.id };
+  }
   return settings;
 }
 
@@ -33,6 +50,7 @@ export async function optimizeCommitMessage(value: AISettings, items: Pick<Item,
 
 export async function requestAI(value: AISettings, system: string, content: string, trace?: (event: AIRequestEvent) => void): Promise<string> {
   const settings = validateAISettings(value);
+  if (settings.kind === 'cli') throw Error('本地 CLI 调用仅桌面版可用');
   if (!settings.url || !settings.apiKey || !settings.model) throw Error('请在设置中填写并保存调用 URL、API Key 和模型名称');
   const anthropic = settings.format === 'anthropic';
   const fastDeepSeek = !anthropic && /^deepseek-/i.test(settings.model!);

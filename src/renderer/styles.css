@@ -685,6 +685,31 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .secondary-actions span { font-size: 12px; color: var(--muted); }
 .settings-footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
 .settings-footer .open-config-dir { margin-right: auto; }
+
+/* 设置工作台：功能导航位于应用侧栏，正文独立滚动，操作区始终可见。 */
+.settings-page { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; padding: 24px 28px; }
+.settings-page-head { flex-shrink: 0; margin-bottom: 20px; }
+.settings-page-head h1 { font-size: 18px; margin: 6px 0 8px; }
+.settings-page-head p { color: var(--muted); font-size: 13px; margin: 0; }
+.settings-page > .settings-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 12px; }
+.settings-page .settings-footer, .settings-page > .settings-message { flex-shrink: 0; }
+.settings-page h3 { font-size: 17px; margin: 0; }
+.ai-profile-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.ai-profile-list { display: flex; flex-wrap: wrap; gap: 10px; flex: 1; min-width: 200px; }
+.ai-profile-list .tag-btn { max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
+.cli-detection-head, .data-export-section { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin: 20px 0; }
+.data-export-section { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.cli-provider-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0 20px; }
+.cli-provider-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; text-align: left; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); padding: 16px; }
+.cli-provider-card.on { background: var(--accent-soft); border-color: var(--accent); }
+.cli-provider-card strong { font-size: 14px; }
+.cli-provider-card span, .cli-provider-card small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.cli-provider-card small[title] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cli-provider-card:focus-visible, .side-project:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .settings-page { padding: 20px; }
+  .cli-provider-list { grid-template-columns: 1fr; }
+}
 .ai-log-terminal { margin-top: 16px; background: #211f1d; color: #eee9e1; border: 1px solid var(--line); border-radius: 8px; padding: 14px; height: 270px; overflow: auto; }
 .ai-log-terminal pre { margin: 0; white-space: pre; font: 12px/1.8 Consolas, 'Courier New', monospace; }
 .request-log-kind { margin-top: 14px; }

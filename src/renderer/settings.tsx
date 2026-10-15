@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { bridge } from './api';
-import type { AISettings, AIRequestLog } from '../core/ai';
+import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
-import { Eye, X, FolderOpen } from './icons';
+import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
+
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
 
@@ -17,7 +20,7 @@ function formatSize(bytes: number | undefined): string {
 }
 
 /** 数据用量与归档（REQ-112）：大小每 2 秒刷新，归档后立即能看到清理效果。 */
-function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void }) {
+function DataSettings({ notify, onArchived, onExport }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void> }) {
   const [usage, setUsage] = useState<DataUsage | null>(null);
   const [usageError, setUsageError] = useState('');
   const [date, setDate] = useState('');
@@ -25,6 +28,7 @@ function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok'
   const [confirming, setConfirming] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [message, setMessage] = useState('');
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     if (!bridge.getDataUsage) { setUsageError('数据大小统计仅桌面版可用'); return; }
     const refresh = () => bridge.getDataUsage!().then((r) => {
@@ -67,6 +71,7 @@ function DataSettings({ notify, onArchived }: { notify(text: string, kind?: 'ok'
     finally { setArchiving(false); }
   }
   return <>
+    <div className="data-export-section"><div><h3>完整数据备份</h3><p className="settings-hint">导出全部项目、需求、上下文与历史记录为 JSON 文件，便于备份或迁移。</p></div><button className="btn primary" disabled={exporting} onClick={async () => { setExporting(true); try { await onExport(); } catch (e: any) { notify(e.message, 'err'); } finally { setExporting(false); } }}><Download size={16} />{exporting ? '正在导出…' : '导出全部数据'}</button></div>
     <p className="settings-hint" title={usage?.dataDir}>{usage?.dataDir || usageError || '读取中…'}</p>
     <div className="validation-setting"><div><label>数据目录总大小</label><p>目录内全部文件（含图片附件、日志与备份配置）</p></div><span>{usage ? formatSize(usage.dirSize) : '—'}</span></div>
     <div className="validation-setting"><div><label>{usage?.backend === 'sqlite' ? 'SQLite 数据库大小' : '工作区文件大小'}</label><p title={usage?.databasePath}>{usage?.backend === 'sqlite' ? 'requirements.sqlite 实时大小，清理后立即变小' : 'workspace.json 当前大小'}</p></div><span>{usage ? formatSize(usage.databaseSize) : '—'}</span></div>
@@ -97,8 +102,7 @@ export function RemoteFields({ value, change, disabled }: { value: RemoteSetting
   </fieldset>;
 }
 
-export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): void; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void }) {
-  const [tab, setTab] = useState('ai');
+export function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange }: { tab: string; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; onBusyChange(busy: boolean): void }) {
   const [form, setForm] = useState<AISettings>({ provider: '', url: '', apiKey: '' });
   const [backup, setBackup] = useState<BackupSettings>({ ...emptyBackup });
   const [status, setStatus] = useState<BackupStatus>({ running: false });
@@ -107,6 +111,37 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
   const [backupLoaded, setBackupLoaded] = useState(false);
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
+  const [cliStatuses, setCLIStatuses] = useState<AICLIStatus[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState('');
+  const profiles = form.profiles || [];
+  function draftProfiles(): AISettings[] {
+    const { profiles: _, activeProfileId: __, ...current } = form;
+    return profiles.map(profile => profile.id === form.activeProfileId ? current : profile);
+  }
+  function configuration(): AISettings { return { ...form, profiles: draftProfiles() }; }
+  function chooseProfile(id: string) {
+    const drafts = draftProfiles(); const profile = drafts.find(profile => profile.id === id);
+    if (profile) { setForm({ ...profile, profiles: drafts, activeProfileId: id, requestLogging: form.requestLogging }); setVisible(false); setMessage(''); }
+  }
+  function addProfile() {
+    const profile: AISettings = { id: crypto.randomUUID(), provider: '新配置', kind: 'api', url: '', apiKey: '', format: 'openai', model: '' };
+    setForm({ ...profile, profiles: [...draftProfiles(), profile], activeProfileId: profile.id, requestLogging: form.requestLogging }); setVisible(false);
+  }
+  function removeProfile() {
+    const remaining = draftProfiles().filter(profile => profile.id !== form.activeProfileId);
+    if (remaining.length) { setForm({ ...remaining[0], profiles: remaining, activeProfileId: remaining[0].id, requestLogging: form.requestLogging }); setVisible(false); }
+  }
+  async function detectCLIs() {
+    if (!bridge.detectAIProviderCLIs || detecting) return;
+    setDetecting(true); setDetectError('');
+    try { const r = await bridge.detectAIProviderCLIs(); if (!r.ok) throw Error(r.error || 'CLI 检测失败'); setCLIStatuses(r.agents || []); }
+    catch (e: any) { setDetectError(e.message); }
+    finally { setDetecting(false); }
+  }
+  useEffect(() => { void detectCLIs(); }, []);
+  useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
+  useEffect(() => { setMessage(''); }, [tab]);
   const [logs, setLogs] = useState<AIRequestLog[]>([]);
   const [logError, setLogError] = useState('');
   const [logKind, setLogKind] = useState('ai');
@@ -146,25 +181,25 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
     return () => { cancelled = true; clearInterval(timer); };
   }, [tab]);
   useEffect(() => {
-    bridge.getAISettings().then((r) => { if (!r.ok) throw Error(r.error); setForm(r.settings); setLoaded(true); }).catch((e) => notify(e.message, 'err'));
+    bridge.getAISettings().then((r) => {
+      if (!r.ok) throw Error(r.error);
+      const settings = r.settings;
+      if (settings.profiles?.length) setForm(settings);
+      else { const id = settings.id || crypto.randomUUID(); const profile = { ...settings, id }; setForm({ ...profile, profiles: [profile], activeProfileId: id }); }
+      setLoaded(true);
+    }).catch((e) => notify(e.message, 'err'));
     bridge.getPublishLogSettings?.().then((r) => { if (!r.ok || !r.settings) throw Error(r.error || '读取发布日志设置失败'); setPublishLogging(r.settings.enabled); setPublishLogLoaded(true); }).catch((e) => notify(e.message, 'err'));
     bridge.getBackupSettings?.().then((r) => { if (r.ok) { setBackup(r.settings); setStatus(r.status); setBackupLoaded(true); } }).catch((e) => notify(e.message, 'err'));
     const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
-  // REQ-062：Esc 关闭设置弹窗（保存中不打断，与关闭按钮一致）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
   async function perform(action: () => Promise<any>, success: string): Promise<boolean> {
     setBusy(true); setMessage('');
     try { const r = await action(); if (!r?.ok) throw Error(r?.error || '操作失败'); setMessage(success); notify(success); return true; }
     catch (e: any) { setMessage(e.message); notify(e.message, 'err'); return false; }
     finally { setBusy(false); }
   }
-  // REQ-091：各 tab 的保存统一为底部一个「保存并完成」按钮，保存当前 tab 后关闭浮层；
+  // 各分类共用固定底部保存按钮，保存后继续停留在设置工作台。
   // 数据 tab（REQ-112）无保存项，操作即时生效
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
@@ -172,7 +207,7 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
     : tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
-    if (tab === 'ai') return perform(() => bridge.saveAISettings(form), 'AI 设置已保存');
+    if (tab === 'ai') return perform(() => bridge.saveAISettings(configuration()), 'AI 配置已保存，当前供应商已生效');
     if (tab === 'template') return perform(async () => {
       const r = await bridge.apply({ op: templateKind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text: templateKind === 'publish' ? publishTpl : baselineTpl, expectedVersion: templateVersion === null ? undefined : templateVersion });
       if (!r.ok) throw Error(r.error || '保存失败');
@@ -180,7 +215,7 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
       return r;
     }, templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
     if (tab === 'logs') return perform(async () => {
-      const aiResult = await bridge.saveAISettings(form);
+      const aiResult = await bridge.saveAISettings(configuration());
       if (!aiResult.ok) return aiResult;
       return bridge.savePublishLogSettings ? bridge.savePublishLogSettings({ enabled: publishLogging }) : aiResult;
     }, '日志设置已保存');
@@ -188,21 +223,33 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
     return perform(() => bridge.saveBackupSettings!(backup), '备份设置已保存');
   }
   async function saveAndFinish() {
-    if (await saveCurrentTab()) onClose();
+    await saveCurrentTab();
   }
-  return <div className="overlay" onClick={(e) => { if (!busy && e.target === e.currentTarget) onClose(); }}>
-    <div className="dialog settings-dialog" role="dialog" aria-label="设置">
-      <div className="dialog-head"><div><h3>设置</h3><p>配置 AI、需求模板、数据备份与数据归档；项目仓库请从浏览目录中设置</p></div><button className="icon-btn" disabled={busy} aria-label="关闭设置" onClick={onClose}><X /></button></div>
-      <div className="settings-tabs" role="tablist">{[['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']].map(([id, title]) => <button key={id} role="tab" aria-selected={tab === id} disabled={busy} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(''); }}>{title}</button>)}</div>
+  return <section className="settings-page" aria-label="设置">
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、需求模板、同步备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
+          <div className="ai-profile-toolbar"><div className="ai-profile-list" role="group" aria-label="AI 配置">{profiles.map(profile => <button className={'tag-btn' + (form.activeProfileId === profile.id ? ' on' : '')} type="button" key={profile.id} disabled={busy || !loaded} aria-pressed={form.activeProfileId === profile.id} onClick={() => chooseProfile(profile.id!)}>{form.activeProfileId === profile.id ? form.provider || '未命名配置' : profile.provider || '未命名配置'}</button>)}</div><button type="button" className="btn" disabled={busy || !loaded || profiles.length >= 50} onClick={addProfile}><Plus size={16} />新增配置</button><button type="button" className="btn" disabled={busy || !loaded || profiles.length < 2} onClick={removeProfile}><Trash size={16} />删除配置</button></div>
+          <p className="settings-hint">选择配置后点击「保存设置」切换供应商；切换前的编辑会保留在本页，返回项目菜单前请保存。</p>
+          <label className="field">配置名称<input value={form.provider} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="如工作 API、个人 Codex" /></label>
+          <div className="field"><span>调用方式</span><div className="segmented" role="group" aria-label="AI 调用方式">{(['api', 'cli'] as const).map(kind => <button key={kind} type="button" disabled={busy || !loaded} aria-pressed={(form.kind || 'api') === kind} className={(form.kind || 'api') === kind ? 'on' : ''} onClick={() => setForm({ ...form, kind, model: kind !== form.kind ? '' : form.model, cli: form.cli || 'codex' })}>{kind === 'api' ? 'API 服务' : '本地 CLI'}</button>)}</div></div>
+          {form.kind !== 'cli' ? <>
           <div className="field"><span>API 格式</span><div className="segmented" role="group" aria-label="API 格式" data-api-format="true">{(['openai', 'anthropic'] as const).map((format) => <button key={format} type="button" disabled={busy || !loaded} aria-pressed={(form.format || 'openai') === format} className={(form.format || 'openai') === format ? 'on' : ''} onClick={() => setForm({ ...form, format })}>{format === 'openai' ? 'OpenAI' : 'Anthropic'}</button>)}</div></div>
-          <label className="field">供应商名字<input value={form.provider} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="如 OpenAI 或兼容服务" /></label>
           <label className="field">调用 URL<input type="url" value={form.url} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://api.example.com/v1" /></label>
           <label className="field">模型名称 · 可填写或修改<input aria-label="模型名称" value={form.model || ''} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="例如 deepseek-flash" /></label>
           <label className="field">API Key<div className="input-action"><input autoComplete="off" type={visible ? 'text' : 'password'} value={form.apiKey} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /><button type="button" className="icon-btn" aria-label={visible ? '隐藏 API Key' : '显示 API Key'} aria-pressed={visible} onClick={() => setVisible(!visible)}><Eye />{visible && <span className="eye-slash" />}</button></div></label>
-          <p className="settings-hint">修改完成后，点击右下角「保存并完成」保存并关闭设置。</p>
+          </> : <>
+            <div className="cli-detection-head"><h3>本地 CLI</h3><button className="btn" type="button" disabled={detecting || !bridge.detectAIProviderCLIs} onClick={() => void detectCLIs()}>{detecting ? '检测中…' : '重新检测'}</button></div>
+            {!bridge.detectAIProviderCLIs && <p className="settings-hint">本地 CLI 检测与生成仅桌面版可用。</p>}
+            {detectError && <p className="settings-message" role="alert">{detectError}</p>}
+            <div className="cli-provider-list" role="group" aria-label="CLI 供应商">{(Object.keys(cliNames) as AIProviderCLI[]).map(id => {
+              const status = cliStatuses.find(status => status.id === id);
+              return <button type="button" className={'cli-provider-card' + (form.cli === id ? ' on' : '')} key={id} disabled={busy || !loaded} aria-pressed={form.cli === id} onClick={() => setForm({ ...form, cli: id })}><strong>{cliNames[id]}</strong><span>{status?.installed ? `已安装 ${status.version || ''}` : detecting ? '检测中…' : status?.error || '尚未检测'}</span>{status?.path && <small title={status.path}>{status.path}</small>}{status?.usage?.map(usage => <small key={usage.label}>{usage.label}：{usage.usedPercent.toFixed(1)}% · 本地快照 {new Date(usage.updatedAt).toLocaleString('zh-CN')} · 重置 {new Date(usage.resetsAt * 1000).toLocaleString('zh-CN')}</small>)}</button>;
+            })}</div>
+            <label className="field">模型名称 · 可选<input aria-label="CLI 模型名称" value={form.model || ''} disabled={busy || !loaded} onChange={e => setForm({ ...form, model: e.target.value })} placeholder="留空使用 CLI 默认模型" /></label>
+            <p className="settings-hint">复用本机 CLI 登录与供应商配置。请先在终端完成登录；选择后保存即可用于所有 AI 优化与内容生成。仅显示可读取的周/月额度快照。</p>
+          </>}
         </form>}
         {tab === 'template' && <form onSubmit={(e) => {
           e.preventDefault();
@@ -211,12 +258,12 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
           <div className="segmented" role="group" aria-label="需求模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
           <p className="settings-hint">{templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
           <label className="field">{templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateKind === 'publish' ? publishTpl : baselineTpl} disabled={busy} onChange={(e) => templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
-          <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存并完成」。</p>
+          <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存设置」。</p>
         </form>}
         {tab === 'logs' && <>
           <div className="validation-setting"><div><label htmlFor="ai-request-logging">记录 AI 请求日志</label><p>默认开启，记录请求时间、模型、响应状态和耗时；关闭后停止新增记录。</p></div><label className="switch"><input id="ai-request-logging" type="checkbox" checked={form.requestLogging ?? true} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, requestLogging: e.target.checked })} /><span className="slider" /><span className="switch-state">{form.requestLogging === false ? '已关闭' : '已开启'}</span></label></div>
           <div className="validation-setting"><div><label htmlFor="publish-request-logging">记录发布请求日志</label><p>默认开启，实时记录构建、打包、Git 推送与附件上传阶段、脚本输出和耗时。</p></div><label className="switch"><input id="publish-request-logging" type="checkbox" checked={publishLogging} disabled={busy || !publishLogLoaded} onChange={(e) => setPublishLogging(e.target.checked)} /><span className="slider" /><span className="switch-state">{publishLogging ? '已开启' : '已关闭'}</span></label></div>
-          <p className="settings-hint">开关修改完成后，点击右下角「保存并完成」统一保存。</p>
+          <p className="settings-hint">开关修改完成后，点击右下角「保存设置」统一保存。</p>
           <div className="segmented request-log-kind" role="group" aria-label="请求日志类型">{[['ai', 'AI 请求'], ['publish', '发布请求']].map(([id, label]) => <button key={id} type="button" aria-pressed={logKind === id} className={logKind === id ? 'on' : ''} onClick={() => setLogKind(id)}>{label}</button>)}</div>
           <p className="settings-hint">{logKind === 'ai' ? 'AI 日志仅保存请求元数据，保留最近 500 条；不记录密钥、URL、需求正文和响应文案。' : '发布日志仅保存在本机，保留最近 2000 条（最多约 512 KB）；记录阶段、累计/阶段耗时、脚本输出及结果，隐藏常见密钥字段。关闭后停止新增，已有记录保留。'}每 2 秒刷新。</p>
           {logKind === 'ai' ? <div className="ai-log-terminal" role="region" aria-label="AI 请求日志" tabIndex={0}><pre>{logError || (logs.length ? logs.slice().reverse().map((entry) => '[' + new Date(entry.time).toLocaleString('zh-CN', { hour12: false }) + '] ' + entry.requestId + ' ' + ({ request: 'SEND', response: 'RESPONSE', complete: 'DONE', error: 'ERROR' }[entry.phase]) + ' ' + entry.format + ' model=' + entry.model + (entry.reasoningEffort ? ' reasoning=' + entry.reasoningEffort : '') + (entry.status ? ' HTTP ' + entry.status : '') + ' +' + entry.elapsedMs + 'ms').join('\n') : '$ 暂无请求日志，生成提交文案后将显示请求与耗时。')}</pre></div>
@@ -230,10 +277,9 @@ export function SettingsOverlay({ onClose, notify, onArchived }: { onClose(): vo
           <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running} onClick={() => perform(async () => { const saved = await bridge.saveBackupSettings!(backup); if (!saved.ok) return saved; const r = await bridge.syncBackup!(); setStatus(r.status); return r; }, '备份同步完成')}>立即同步</button><button className="btn" disabled={busy || !backupLoaded || !backup.url || !bridge.testRemote} onClick={() => perform(() => bridge.testRemote!(backup), '备份仓库连接成功')}>测试连接</button></div>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
-        {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} />}
+        {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}
-      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()} title="保存当前标签页的设置并关闭">保存并完成</button>}</div>
-    </div>
-  </div>;
+      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
+  </section>;
 }

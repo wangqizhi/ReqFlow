@@ -4,7 +4,7 @@
 //   领域规则直接复用 src/core/domain.ts，与主进程行为一致。
 
 import { apply, makeProject, normalizeWorkspace, mutationProjectIds, projectConcurrencyToken, type Workspace } from '../core/domain';
-import { validateAISettings, type AISettings, type AIRequestLog } from '../core/ai';
+import { validateAISettings, type AISettings, type AIRequestLog, type AICLIStatus } from '../core/ai';
 import pkg from '../../package.json';
 import type { AIDraft } from '../core/ai';
 import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remote';
@@ -69,6 +69,7 @@ export interface ReqFlowBridge {
   exportArchivedData?(date: string): Promise<{ ok: boolean; canceled?: boolean; items?: number; batches?: number; file?: string; error?: string }>;
   clearArchivedData?(date: string): Promise<{ ok: boolean; items?: number; batches?: number; error?: string }>;
   getAISettings(): Promise<{ ok: true; settings: AISettings } | { ok: false; error: string }>;
+  detectAIProviderCLIs?(): Promise<{ ok: boolean; agents?: AICLIStatus[]; error?: string }>;
   getAIRequestLogs?(): Promise<{ ok: boolean; entries?: AIRequestLog[]; error?: string }>;
   getPublishRequestLogs?(): Promise<{ ok: boolean; entries?: PublishRequestLog[]; error?: string }>;
   getPublishLogSettings?(): Promise<{ ok: boolean; settings?: PublishLogSettings; error?: string }>;

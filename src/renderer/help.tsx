@@ -127,7 +127,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
                 {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? '已复制' : '复制可执行文件名'}
               </button>
             </div>
-            <p className="help-desc">备份：直接复制该文件；迁移：菜单「导出全部数据」后在其他机器用 <code>--cli workspace import</code> 导入。</p>
+            <p className="help-desc">备份：直接复制该文件；迁移：在「设置 → 数据」导出全部数据后，在其他机器用 <code>--cli workspace import</code> 导入。</p>
           </section>
         </div>
       </div>

@@ -31,6 +31,7 @@ const channels = {
   exportArchivedData: 'data:archiveExport',
   clearArchivedData: 'data:archiveClear',
   getAISettings: 'ai:settings:get',
+  detectAIProviderCLIs: 'ai:cli:detect',
   getAIRequestLogs: 'ai:logs:get',
   getPublishRequestLogs: 'publish:logs:get',
   getPublishLogSettings: 'publish:logs:settings:get',

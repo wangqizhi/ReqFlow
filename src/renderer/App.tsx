@@ -15,7 +15,7 @@ import {
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
 import { ProjectBrowser } from './browser';
-import { SettingsOverlay } from './settings';
+import { SettingsPage, settingsTabs } from './settings';
 import { GuidanceField } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
@@ -81,12 +81,13 @@ export default function App() {
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('ai');
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const [modsTab, setModsTab] = useState('protocol');
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [mode, setMode] = useState<'FLOW' | 'CONTENT'>('FLOW');
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -646,7 +647,13 @@ export default function App() {
 
       <aside className="side">
         <div className="brand"><img className="mark" src="./app-icon.png" alt="ReqFlow" /><div>ReqFlow<small>需求流{appVersion ? ` v${appVersion}` : ''}</small></div></div>
-        {mode === 'CONTENT' ? <>
+        {mode === 'SETTINGS' ? <>
+          <div className="side-label">设置</div>
+          <nav className="side-projects" aria-label="设置功能菜单">
+            <button className="side-project" disabled={settingsBusy} onClick={() => { setMode('FLOW'); void load({ quiet: true }); }}><FolderOpen size={16} /><span>返回项目菜单</span></button>
+            {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span>{title}</span></button>)}
+          </nav>
+        </> : mode === 'CONTENT' ? <>
           <div className="side-label">上下文管理</div>
           <nav className="side-projects" aria-label="上下文管理功能菜单">
             <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
@@ -700,10 +707,7 @@ export default function App() {
         </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
-          <button className="btn plain" onClick={() => setSettingsOpen(true)}><Settings />设置</button>
-          <button className="btn plain" onClick={() => download(JSON.stringify(data, null, 2), 'reqflow-backup.json')}>
-            <Download size={15} />导出全部数据
-          </button>
+          <button className="btn plain" aria-current={mode === 'SETTINGS' ? 'page' : undefined} onClick={() => { setMode('SETTINGS'); setNewMenu(false); }}><Settings />设置</button>
           <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
             <HelpCircle size={15} />帮助 · CLI 参考
           </button><UpdateButton /></div>
@@ -727,7 +731,12 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
+        {mode === 'SETTINGS' ? <SettingsPage tab={settingsTab} onBusyChange={setSettingsBusy} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+          const result = await bridge.getWorkspace();
+          if (!result.ok) throw Error(result.error || '读取工作区失败');
+          download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
+          notify('全部数据已导出');
+        }} /> : mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -1007,7 +1016,6 @@ export default function App() {
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} workspace={data} onClose={() => setModsOpen(false)} />}
-      {settingsOpen && <SettingsOverlay onClose={() => { setSettingsOpen(false); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
@@ -1421,7 +1429,7 @@ export default function App() {
                   即将删除项目「<strong>{deleting.name}</strong>」，包含 {deleting.items.length} 条需求（含已归档与验证历史）
                   和 {deleting.batches.length} 个 Prompt 批次。
                 </p>
-                <p className="delete-warning">删除后无法恢复。如需保留备份，请先在左下角「导出全部数据」。</p>
+                <p className="delete-warning">删除后无法恢复。如需保留备份，请先在「设置 → 数据」导出全部数据。</p>
                 <p className="muted">这里只删除 ReqFlow 中的项目记录，不会删除项目的源文件或目录。</p>
                 <div className="editor-footer">
                   <button className="btn" disabled={busy} onClick={() => { setDeleting(null); setModal(''); }}>取消</button>

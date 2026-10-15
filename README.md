@@ -32,7 +32,7 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 ## 项目工作台
 
-- **AI 需求助手**：根据项目上下文整理想法、讨论建议，确认候选后加入需求池。支持 OpenAI 与 Anthropic API 格式，可配置服务 URL、模型和 API Key。
+- **AI 需求助手**：根据项目上下文整理想法、讨论建议，确认候选后加入需求池。在「设置 → AI 供应商」保存并切换多套配置，支持 OpenAI / Anthropic API，以及 Codex、ZCode、Pi、Claude Code 本地 CLI。CLI 复用本机登录，可检测安装与版本；有可靠来源时显示近期周/月额度快照。
 - **项目文件浏览**：查看 Markdown、图片和文本，编辑文本并使用 `Ctrl+S` 保存；支持语法高亮及文件右键操作。
 - **Git 面板**：初始化仓库、查看变动、暂存、提交、管理分支，以及 Pull/Push。AI 可根据实际暂存 diff 生成提交文案。Git 功能需要本机安装 Git。
 - **远程仓库与备份**：支持配置仓库地址、分支及 SSH Key 路径，测试连接，以及将工作区数据备份到远程仓库。
@@ -46,7 +46,9 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 旧工作区继续读取 `workspace.json`，可在「插件/MOD/AGENT → 实验室 → 迁移到 SQLite」进行迁移。迁移会校验完整数据、保留原文件及带时间戳的备份，成功后 GUI、CLI 和远程备份统一读取数据库。迁移后原 JSON 不再更新，导出最新数据请使用应用或 `workspace export`。便携版迁移时仍需一起移动整个 `data/` 目录。
 
-AI Key 使用 Go 调用 Windows DPAPI 加密，兼容读取原 Electron `safeStorage` 的 v10/v11 密文，单独保存在 `ai-settings.json`，不进入远程工作区备份。原 `Local State` 加密密钥文件保留。AI 请求日志记录时间和请求元数据，不保存 Key、URL、需求正文或响应文案。使用 AI 功能时，相关项目上下文会发送到所配置的服务。
+多套 AI 配置单独保存在 `ai-settings.json`，其中每套 API Key 使用 Go 调用 Windows DPAPI 加密，兼容读取原 Electron `safeStorage` 的 v10/v11 密文，不进入工作区导出或远程备份。原 `Local State` 加密密钥文件保留。AI 请求日志记录时间和请求元数据，不保存 Key、URL、需求正文或响应文案。使用 AI 功能时，相关项目上下文会发送到所配置的服务；本地 CLI 使用该 CLI 的账户与供应商。
+
+设置入口位于侧栏底部，进入后通过左侧功能菜单切换分类。完整 JSON 备份在「设置 → 数据 → 导出全部数据」；导出读取当前完整工作区。
 
 远程工作区备份可能包含需求、图片和本地路径，请选择适合存放这些数据的仓库。发布源码前应检查文件；`.gitignore` 已排除常见本地数据、密钥、缓存和构建产物，但不能自动识别所有私密内容。
 

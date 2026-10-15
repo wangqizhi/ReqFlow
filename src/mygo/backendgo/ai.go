@@ -25,6 +25,9 @@ type AIRequestEvent struct {
 }
 
 func RequestAI(s AISettings, system, content string, trace func(AIRequestEvent)) (text string, err error) {
+	if s.Kind == "cli" {
+		return requestCLI(s, system, content, trace)
+	}
 	if s.URL == "" || s.APIKey == "" || s.Model == "" {
 		return "", errors.New("请在设置中填写并保存调用 URL、API Key 和模型名称")
 	}
@@ -220,6 +223,9 @@ func (b *Backend) aiTrace(s AISettings) func(AIRequestEvent) {
 	requestID := hex.EncodeToString(nonce)
 	return func(event AIRequestEvent) {
 		entry := map[string]any{"time": time.Now().UTC().Format(time.RFC3339Nano), "requestId": requestID, "model": s.Model, "format": s.Format, "phase": event.Phase, "elapsedMs": event.ElapsedMs}
+		if s.Kind == "cli" {
+			entry["format"] = "cli:" + s.CLI
+		}
 		if event.Status != 0 {
 			entry["status"] = event.Status
 		}
@@ -463,6 +469,8 @@ func (b *Backend) optimizeGuidance(args []any) (any, error) {
 
 func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 	switch channel {
+	case "ai:cli:detect":
+		return detectProviderCLIs(), true, nil
 	case "ai:settings:get":
 		s, err := b.readAISettings()
 		if err != nil {

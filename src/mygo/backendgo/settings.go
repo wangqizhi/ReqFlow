@@ -14,12 +14,17 @@ import (
 )
 
 type AISettings struct {
-	Provider       string `json:"provider"`
-	URL            string `json:"url"`
-	APIKey         string `json:"apiKey"`
-	Format         string `json:"format"`
-	Model          string `json:"model"`
-	RequestLogging bool   `json:"requestLogging"`
+	ID              string       `json:"id,omitempty"`
+	Kind            string       `json:"kind,omitempty"`
+	CLI             string       `json:"cli,omitempty"`
+	ActiveProfileID string       `json:"activeProfileId,omitempty"`
+	Profiles        []AISettings `json:"profiles,omitempty"`
+	Provider        string       `json:"provider"`
+	URL             string       `json:"url"`
+	APIKey          string       `json:"apiKey"`
+	Format          string       `json:"format"`
+	Model           string       `json:"model"`
+	RequestLogging  bool         `json:"requestLogging"`
 }
 
 func aiMap(value any) map[string]any { v, _ := value.(map[string]any); return v }
@@ -59,6 +64,17 @@ func ValidateAISettings(value any) (AISettings, error) {
 		}
 	}
 	s.Provider, s.URL, s.APIKey = strings.TrimSpace(aiString(v["provider"])), strings.TrimSpace(aiString(v["url"])), strings.TrimSpace(aiString(v["apiKey"]))
+	s.ID = strings.TrimSpace(aiString(v["id"]))
+	s.Kind, s.CLI = aiString(v["kind"]), aiString(v["cli"])
+	if s.Kind == "" {
+		s.Kind = "api"
+	}
+	if s.Kind != "api" && s.Kind != "cli" {
+		return s, errors.New("AI 供应商类型无效")
+	}
+	if s.Kind == "cli" && !aiValidProviderCLI(s.CLI) {
+		return s, errors.New("CLI 供应商无效")
+	}
 	if value, ok := v["format"]; ok {
 		if value != "openai" && value != "anthropic" {
 			return s, errors.New("API 格式无效")
@@ -225,16 +241,93 @@ func (b *Backend) readAISettings() (AISettings, error) {
 			stored[name] = ""
 		}
 	}
-	return ValidateAISettings(stored)
+	for _, value := range aiArray(stored["profiles"]) {
+		profile := aiMap(value)
+		if profile == nil {
+			return AISettings{}, errors.New("AI 配置无效")
+		}
+		plain, decryptErr := b.decryptAIKey(aiString(profile["encryptedKey"]))
+		if decryptErr != nil {
+			return AISettings{}, decryptErr
+		}
+		profile["apiKey"] = plain
+	}
+	return validateAIConfiguration(stored)
 }
 
 func (b *Backend) saveAISettings(value any) (map[string]any, error) {
-	s, err := ValidateAISettings(value)
+	s, err := validateAIConfiguration(value)
 	if err != nil {
 		return nil, err
 	}
+	stored, storage, err := b.encodeAIProfile(s)
+	if err != nil {
+		return nil, err
+	}
+	profiles := []any{}
+	for _, profile := range s.Profiles {
+		encoded, _, encodeErr := b.encodeAIProfile(profile)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		profiles = append(profiles, encoded)
+	}
+	if len(profiles) > 0 {
+		stored["profiles"], stored["activeProfileId"] = profiles, s.ActiveProfileID
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err = aiWriteJSON(filepath.Join(b.DataDir, "ai-settings.json"), stored); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "keyStorage": storage}, nil
+}
+
+func validateAIConfiguration(value any) (AISettings, error) {
+	s, err := ValidateAISettings(value)
+	if err != nil {
+		return s, err
+	}
+	v := aiMap(value)
+	if _, exists := v["profiles"]; !exists {
+		return s, nil
+	}
+	values, ok := v["profiles"].([]any)
+	if !ok || len(values) == 0 || len(values) > 50 {
+		return s, errors.New("请保留 1–50 套 AI 配置")
+	}
+	active := aiString(v["activeProfileId"])
+	seen := map[string]bool{}
+	profiles := []AISettings{}
+	found := false
+	for _, value := range values {
+		profile, profileErr := ValidateAISettings(value)
+		if profileErr != nil {
+			return s, profileErr
+		}
+		if profile.ID == "" || seen[profile.ID] {
+			return s, errors.New("AI 配置标识为空或重复")
+		}
+		seen[profile.ID] = true
+		profiles = append(profiles, profile)
+		if profile.ID == active {
+			logging := s.RequestLogging
+			s = profile
+			s.RequestLogging = logging
+			found = true
+		}
+	}
+	if !found {
+		return s, errors.New("当前 AI 配置不存在")
+	}
+	s.Profiles, s.ActiveProfileID = profiles, active
+	return s, nil
+}
+
+func (b *Backend) encodeAIProfile(s AISettings) (map[string]any, string, error) {
 	encoded := ""
 	storage := "electron-v10"
+	var err error
 	if s.APIKey != "" {
 		var encrypted []byte
 		if key, keyErr := b.electronKey(); keyErr == nil {
@@ -247,15 +340,10 @@ func (b *Backend) saveAISettings(value any) (map[string]any, error) {
 			encrypted = append([]byte("reqflow-dpapi-v1:"), encrypted...)
 		}
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		encoded = base64.StdEncoding.EncodeToString(encrypted)
 	}
-	stored := map[string]any{"provider": s.Provider, "url": s.URL, "format": s.Format, "model": s.Model, "requestLogging": s.RequestLogging, "encryptedKey": encoded}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if err = aiWriteJSON(filepath.Join(b.DataDir, "ai-settings.json"), stored); err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "keyStorage": storage}, nil
+	stored := map[string]any{"id": s.ID, "kind": s.Kind, "cli": s.CLI, "provider": s.Provider, "url": s.URL, "format": s.Format, "model": s.Model, "requestLogging": s.RequestLogging, "encryptedKey": encoded}
+	return stored, storage, nil
 }
