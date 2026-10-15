@@ -243,6 +243,37 @@ func smokeUI(w *mygo.Window, path string) {
 		for _, height := range []int{900, 720} {
 			w.SetSize(1440, height)
 			time.Sleep(150 * time.Millisecond)
+			for _, surface := range []string{"stats", "directory"} {
+				code := `(async()=>{
+                  const pause=()=>new Promise(r=>setTimeout(r,100));
+                  const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  button('数据看板').click();await pause();
+                  if(SURFACE==='stats') {
+                    const page=document.querySelector('.stats-page'),calendar=page.querySelector('.activity-calendar');
+                    const rect=page.getBoundingClientRect();
+                    return {ok:rect.bottom<=innerHeight+1&&page.scrollWidth===page.clientWidth&&calendar.querySelectorAll('button.activity-day').length===365,height:innerHeight};
+                  }
+                  button('返回项目').click();await pause();button('浏览项目').click();await pause();button('关联目录设置').click();await pause();
+                  const dialog=document.querySelector('.directory-settings');
+                  const path=dialog.querySelector('.directory-current-path');
+                  path.textContent+='\\很长的中文目录名称'.repeat(10);path.title=path.textContent;
+                  const rect=dialog.getBoundingClientRect();
+                  return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&Math.abs(rect.width-580)<1&&dialog.scrollWidth===dialog.clientWidth&&[...dialog.querySelectorAll('button')].every(b=>b.getBoundingClientRect().bottom<=innerHeight),height:innerHeight};
+                })()`
+				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
+				report, err := w.Page().EvalContext(ctx, code)
+				if err != nil {
+					report = map[string]any{"ok": false, "error": err.Error()}
+				}
+				name := fmt.Sprintf("%s.%s-%d", path, surface, height)
+				_ = writeReport(name+".json", report)
+				if png, err := w.CapturePage(); err == nil {
+					_ = os.WriteFile(name+".png", png, 0600)
+				}
+				if surface == "directory" {
+					_, _ = w.Page().EvalContext(ctx, `document.querySelector('[aria-label="关闭关联目录设置"]').click();document.querySelector('[aria-label="关闭浏览项目"]').click()`)
+				}
+			}
 			for _, surface := range []string{"projects", "guide", "ssh"} {
 				code := `(async()=>{
                   document.querySelector('.overlay')?.click();

@@ -70,7 +70,8 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .side-project:hover { background: rgba(255, 255, 255, 0.07); }
 .side-project.active { background: rgba(255, 255, 255, 0.13); }
 .side-project .project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.small-count { background: rgba(255, 255, 255, 0.14); border-radius: 99px; font-size: 11px; padding: 1px 8px; color: var(--side-muted); }
+.small-count { background: rgba(255, 255, 255, 0.14); border-radius: 99px; font-size: 11px; padding: 1px 8px; color: var(--side-muted); flex-shrink: 0; }
+.small-count.has-pending { background: var(--danger); color: #fff; }
 .side-project-del { display: none; flex: none; align-items: center; justify-content: center; padding: 3px; margin-left: -2px; border-radius: 6px; color: var(--side-muted); }
 .side-project:hover .side-project-del, .side-project-del:focus-visible { display: inline-flex; }
 .side-project-del:hover { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
@@ -904,6 +905,53 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* REQ-148：实验室 · 数据面板 —— 单系列单色折线与单色条形，hairline 网格 */
 .stats-panel { margin-bottom: 4px; }
+.side-foot .btn.active { background: rgba(255, 255, 255, 0.13); }
+.stats-page { flex: 1; min-height: 0; overflow-y: auto; padding: 24px; }
+.stats-page > .stats-panel, .stats-page-heading { max-width: 1120px; margin-left: auto; margin-right: auto; }
+.stats-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.stats-page-heading h1 { display: flex; align-items: center; gap: 10px; font-size: 22px; margin: 0; }
+.stats-page-heading p { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.stats-page .stats-chart-block { padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.stats-page .stats-chart { max-width: 100%; }
+.stats-page .stats-plot { max-width: 100%; }
+.stats-page .stats-plot svg { max-width: 100%; height: 100%; }
+.activity-calendar { --activity-0: #ebedf0; --activity-1: #9be9a8; --activity-2: #40c463; --activity-3: #30a14e; --activity-4: #216e39; margin: 16px 0 24px; }
+.activity-calendar-header, .activity-calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+.activity-calendar-header h4 { margin: 0; font-size: 13px; color: var(--ink-2); font-weight: 500; }
+.activity-calendar-scroll { overflow-x: auto; padding: 12px 3px 8px; }
+.activity-calendar-grid { display: grid; grid-template-rows: 18px repeat(7, 12px); gap: 3px; width: max-content; padding-right: 20px; }
+.activity-month, .activity-weekday { color: var(--muted); font-size: 10px; white-space: nowrap; line-height: 12px; }
+.activity-day { display: block; width: 12px; height: 12px; padding: 0; border-radius: 3px; border: 1px solid rgba(27, 31, 35, .06); background: var(--activity-0); }
+.activity-day.level-1 { background: var(--activity-1); }
+.activity-day.level-2 { background: var(--activity-2); }
+.activity-day.level-3 { background: var(--activity-3); }
+.activity-day.level-4 { background: var(--activity-4); }
+button.activity-day:hover { outline: 1px solid var(--ink-2); outline-offset: 1px; }
+button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.activity-legend { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.activity-calendar-footer { flex-wrap: wrap; margin-top: 6px; }
+.directory-settings { width: min(580px, calc(100vw - 48px)); padding: 24px; border-radius: 12px; }
+.directory-settings .dialog-head { margin-bottom: 24px; }
+.directory-settings-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.directory-settings-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; color: var(--ink-2); }
+.directory-settings .dialog-head h3 { font-size: 18px; margin-bottom: 6px; }
+.directory-settings .dialog-head p { line-height: 1.6; }
+.directory-current { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.directory-current-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+.directory-current strong { display: block; color: var(--ink); font-size: 15px; overflow-wrap: anywhere; }
+.directory-current-path { margin-top: 8px; color: var(--ink-2); font: 12px/1.7 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.directory-current p { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.directory-settings-actions { flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.directory-settings-actions .btn { min-height: 38px; justify-content: center; }
+.directory-settings .directory-settings-note { font-size: 12px; line-height: 1.7; margin: 16px 0 0; }
+@media (max-width: 1000px) {
+  .stats-kpis { grid-template-columns: repeat(3, 1fr); }
+  .stats-grid-2 { grid-template-columns: 1fr; }
+}
+@media (prefers-color-scheme: dark) {
+  .directory-settings { --panel: #242424; --bg: #2e2e2e; --ink: #f5f4f1; --ink-2: #d6d3d1; --muted: #a8a29e; --line: #44403c; --line-2: #57534e; color: var(--ink); color-scheme: dark; }
+  .directory-settings .btn:not(.primary):hover:not(:disabled), .directory-settings .icon-btn:hover:not(:disabled) { background: #3a3836; }
+}
 .stats-chart { margin: 0; }
 .stats-filters { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .stats-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }

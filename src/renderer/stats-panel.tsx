@@ -1,10 +1,11 @@
-// REQ-148：实验室 · 数据面板 —— 从工作区数据派生需求与 AI 执行统计，全部前端计算。
+// 数据看板：从工作区数据派生需求与 AI 执行统计，全部前端计算。
 // 图表遵循 docs/ui-guidelines.md 与数据可视化规范：每图单轴、单系列单色（槽 1 蓝）、
 // hairline 实线网格、2px 线宽 + 白环端点、crosshair 悬浮提示与明细表兜底；
 // 次数与时长分图呈现，不做双坐标轴。文案与轴刻度用文字色，不借用系列色。
 import { useMemo, useState } from 'react';
 import { activeAIExecution, type Item, type Workspace } from '../core/domain';
 import { localDate } from '../core/dates';
+import { ActivityCalendar } from './stats-calendar';
 
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
@@ -61,11 +62,11 @@ function LineChart({ title, points, unit = '', width, height = 176 }: { title: s
     <div className="stats-plot" style={{ width, height }} role="img" aria-label={`${title}，共 ${points.length} 天，最大值 ${max}${unit}`}
       onPointerMove={e => {
         const rect = e.currentTarget.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left - padL) / plotW;
+        const ratio = ((e.clientX - rect.left) * width / rect.width - padL) / plotW;
         setHover(Math.round((points.length - 1) * Math.min(1, Math.max(0, ratio))));
       }}
       onPointerLeave={() => setHover(-1)}>
-      <svg width={width} height={height}>
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
         {ticks.map(t => <g key={t}>
           <line x1={padL} x2={width - padR} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
           <text x={padL - 6} y={y(t) + 3.5} textAnchor="end" className="stats-axis">{compact(t)}</text>
@@ -204,6 +205,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
           {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} title={p.name} onClick={() => setProjectId(projectId === p.id ? '' : p.id)}>{p.name}</button>)}
         </div>
       </div>
+      <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
       <LineChart key={`created-${range}-${projectId}`} title="新建需求" points={series.created} width={740} />
     </div>
     <div className="stats-grid-2">

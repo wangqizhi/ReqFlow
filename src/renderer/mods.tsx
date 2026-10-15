@@ -4,15 +4,13 @@ import { useEffect, useState } from 'react';
 import { renderMarkdown } from './markdown';
 import { X, Layers, ExternalLink, Copy } from './icons';
 import { AGENT_MENTION } from './assignment';
-import { StatsPanel } from './stats-panel';
-import type { Workspace } from '../core/domain';
 
 // 实验室：通过深链调起 Codex 窗口
 const LAB_AGENTS = [
   { id: 'codex', name: 'Codex', mention: AGENT_MENTION }
 ] as const;
 
-export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir, workspace }: { onClose(): void; initialTab?: string; projectDir?: string; workspace?: Workspace | null }) {
+export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { onClose(): void; initialTab?: string; projectDir?: string }) {
   const [tab, setTab] = useState(initialTab), [enabled, setEnabled] = useState<string[]>([]), [agents, setAgents] = useState<LocalAgent[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
   const [labBusyId, setLabBusyId] = useState(''), [labStatus, setLabStatus] = useState(''), [labError, setLabError] = useState('');
   const [backend, setBackend] = useState(''), [migrating, setMigrating] = useState(false);
@@ -54,10 +52,6 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir, work
       <header className="help-header"><div><h2><Layers /> 插件 / MOD / AGENT</h2><p>对接规范草案 · 尚未开放插件安装与运行功能</p></div><button className="icon-btn" aria-label="关闭插件/MOD/AGENT" onClick={onClose}><X /></button></header>
       <div className="settings-tabs" role="tablist">{[['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']].map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
       {tab === 'agents' ? <div className="local-agent-body"><p className="settings-hint">配置后可以在排期表中指派。当前只保存配置、检测安装与版本，执行接口预留。</p><div className="settings-actions"><button className="btn" disabled={busy || !bridge.detectLocalAgents} onClick={detect}>{busy ? '处理中…' : '检测安装 / 检查更新'}</button></div>{error && <p role="alert">{error}</p>}{[['opencode', 'OpenCode', 'opencode-ai'], ['pi', 'pi', '@earendil-works/pi-coding-agent']].map(([id, name, pkg]) => { const agent = agents.find(a => a.id === id); return <section className="local-agent-card" key={id}><div className="validation-setting"><h3>{name}</h3><label className="switch"><input type="checkbox" aria-label={'配置 ' + name} disabled={busy || !loaded} checked={enabled.includes(id)} onChange={e => configure(id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(id) ? '已配置' : '未配置'}</span></label></div><p>{agent ? (agent.installed ? '已安装 · ' + (agent.version || '版本未知') : '未检测到可用安装') : '尚未检测'}</p>{agent && <p className="settings-hint">{agent.latest ? '最新版本 ' + agent.latest + ' · ' + (agent.update === undefined ? '版本比较未知' : agent.update ? '有可用更新' : '无需更新') : agent.registryError}{agent.error && ' · ' + agent.error}</p>}<p className="settings-hint">安装 / 更新命令：<code>npm install -g {pkg}</code></p><p className="settings-hint">执行器标识：agent:{id} · 通过本机 PATH 检测 {id} --version</p></section>; })}<p className="settings-hint">接口约定：输入项目目录、需求 ID / 版本、批次 Prompt；输出执行状态、摘要与验证结果。OpenCode 预留 CLI / SDK 适配，pi 预留 RPC 适配；任务启动、结果回写与取消均尚未开放。</p><p className="settings-hint">插件可沿用说明页的协议；这里暂只支持 OpenCode、pi 本机配置。</p></div> : tab === 'lab' ? <div className="local-agent-body lab-body">
-        {/* REQ-148：数据面板 —— 按时间维度统计各项目需求量、AI 客户端使用与每日执行情况 */}
-        <div className="validation-setting"><h3>数据面板</h3><span className="settings-hint">需求与 AI 执行统计</span></div>
-        <StatsPanel workspace={workspace} />
-        <hr />
         <div className="lab-target"><span>项目目录</span><code title={projectDir}>{projectDir || '当前项目未关联本地目录，请先在首页「浏览项目 / 关联目录」绑定'}</code></div>
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
           <div className="validation-setting"><h3>{agent.name}</h3><label className="switch"><input type="checkbox" aria-label={'启用 ' + agent.name} checked={enabled.includes(agent.id)} disabled={busy || !loaded} onChange={e => void configure(agent.id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(agent.id) ? '已开启' : '已关闭'}</span></label></div>

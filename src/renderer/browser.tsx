@@ -435,13 +435,18 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
       {dirSettings && <div className="overlay" role="dialog" aria-modal="true" aria-label="关联目录设置"
         onClick={e => { e.stopPropagation(); if (e.target === e.currentTarget) setDirSettings(false); }}
         onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setDirSettings(false); } }}>
-        <div className="dialog">
-          <div className="dialog-head"><div><h3>关联目录设置</h3><p title={root || undefined}>{root ? '当前关联' + (remoteDirectory ? '远程目录：' : '本地目录：') + root : '尚未关联目录，选择本地文件夹或连接远程服务器。'}</p></div><button type="button" className="icon-btn" aria-label="关闭关联目录设置" disabled={picking} onClick={() => setDirSettings(false)}><X /></button></div>
-          <div className="settings-actions">
+        <div className="dialog directory-settings">
+          <div className="dialog-head"><div className="directory-settings-heading"><span className="directory-settings-icon"><FolderOpen size={20} /></span><div><h3>关联目录设置</h3><p>选择项目使用的本地文件夹或远程目录。</p></div></div><button type="button" className="icon-btn" aria-label="关闭关联目录设置" disabled={picking} onClick={() => setDirSettings(false)}><X /></button></div>
+          <div className="directory-current">
+            <div className="directory-current-label"><span>{root ? (remoteDirectory ? '当前远程目录' : '当前本地目录') : '当前关联'}</span>{root && <button type="button" className="icon-btn" aria-label="复制关联目录路径" title="复制完整路径" onClick={() => void copyText(root, '目录路径')}><Copy size={16} /></button>}</div>
+            <strong title={root || undefined}>{root ? root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || root : '尚未关联目录'}</strong>
+            {root ? <div className="directory-current-path" title={root}>{root}</div> : <p>关联目录后，可在这里浏览项目文件。</p>}
+          </div>
+          <div className="settings-actions directory-settings-actions">
             <button type="button" className="btn" disabled={picking} onClick={async () => { if (await pickDir()) setDirSettings(false); }}>
               <FolderOpen size={14} />{remoteDirectory ? '改绑本地文件夹' : '选择本地文件夹'}
             </button>
-            <button type="button" className="btn primary" onClick={() => { setDirSettings(false); setSSHPicker(true); }}>
+            <button type="button" className="btn primary" disabled={picking} onClick={() => { setDirSettings(false); setSSHPicker(true); }}>
               <Server size={14} />{remoteDirectory ? '更换远程目录' : '连接远程服务器'}
             </button>
             {root && (
@@ -451,7 +456,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
               </button>
             )}
           </div>
-          <p className="settings-hint">本地目录与远程目录只能绑定其一，绑定新目录会替换当前关联；远程目录内文件为只读预览。</p>
+          <p className="settings-hint directory-settings-note">新目录会替换当前关联。远程文件仅支持只读预览。</p>
         </div>
       </div>}
       {remoteOpen && <ProjectRemoteOverlay project={project} save={saveRemote} syncDisabled={gitBusy || aiBusy || dirty} onSynced={async () => { await refreshGit(); setTree({}); await loadDir(''); if (file && !dirty) await openFile(file); }} onClose={() => setRemoteOpen(false)} notify={notify} />}

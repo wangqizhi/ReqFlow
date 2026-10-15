@@ -239,11 +239,16 @@
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
-    // REQ-148：实验室 · 数据面板 —— KPI、单系列折线、单色条形与明细表、项目切换
+    // REQ-169：统计移到侧栏，实验室不再显示；检查日历筛选和键盘导航。
     await click(button('插件/MOD/AGENT'));
     await waitFor(() => !!document.querySelector('[aria-label="插件/MOD/AGENT"]'));
     await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
-    await waitFor(() => !!document.querySelector('.stats-panel'));
+    checks.statsMoved = { ok: !document.querySelector('.stats-panel') };
+    await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
+    const dashboardEntry = button('数据看板');
+    checks.statsMoved.ok &&= dashboardEntry.previousElementSibling.textContent.includes('插件/MOD/AGENT') && !!dashboardEntry.querySelector('svg');
+    await click(dashboardEntry);
+    await waitFor(() => !!document.querySelector('.stats-page .stats-panel'));
     const statsPanel = document.querySelector('.stats-panel');
     const kpis = statsPanel.querySelectorAll('.stats-kpi').length;
     const lines = statsPanel.querySelectorAll('.stats-plot svg path').length;
@@ -253,11 +258,41 @@
     const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
     const projectTag = [...statsPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent !== '全部');
     if (projectTag) await click(projectTag);
+    const calendar = statsPanel.querySelector('.activity-calendar');
+    const calendarCells = [...calendar.querySelectorAll('button.activity-day')];
+    const calendarProject = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state.projects.find(p => p.name === projectTag?.textContent);
+    const created = new Map();
+    for (const item of calendarProject?.items || []) {
+      const time = item.history.find(e => e.event === '创建')?.time || item.flowEvents?.[0]?.time;
+      if (!time) continue;
+      const date = new Date(time), day = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+      created.set(day, (created.get(day) || 0) + 1);
+    }
+    const todayCell = calendarCells.at(-1);
+    todayCell.focus();
+    todayCell.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    const navigated = document.activeElement === calendarCells.at(-8);
+    await click(calendarCells[0]);
+    checks.activityCalendar = { ok: calendarCells.length === 365 && new Set(calendarCells.map(cell => cell.dataset.date)).size === 365 && navigated && calendarCells[0].getAttribute('aria-pressed') === 'true' && calendarCells.every(cell => cell.getAttribute('aria-label').includes(`新建 ${created.get(cell.dataset.date) || 0} 条需求`)) };
     const rangeButton = [...statsPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
     if (rangeButton) await click(rangeButton);
     checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && statsPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await click(button('返回项目'));
     await waitFor(() => !document.querySelector('.stats-panel'));
+    await click(button('浏览项目'));
+    await waitFor(() => !!button('关联目录设置'));
+    await click(button('关联目录设置'));
+    const directoryDialog = document.querySelector('.directory-settings');
+    const currentRoot = directoryDialog.querySelector('.directory-current-path').textContent;
+    const clipboardWrite = navigator.clipboard.writeText;
+    let copiedPath = '';
+    navigator.clipboard.writeText = async value => { copiedPath = value; };
+    try { await click(directoryDialog.querySelector('[aria-label="复制关联目录路径"]')); }
+    finally { navigator.clipboard.writeText = clipboardWrite; }
+    const rect = directoryDialog.getBoundingClientRect();
+    checks.directorySettings = { ok: Math.abs(rect.width - 580) < 1 && rect.bottom <= innerHeight && !!directoryDialog.querySelector('.directory-settings-heading svg') && copiedPath === currentRoot && directoryDialog.querySelectorAll('.directory-settings-actions .primary').length === 1 };
+    await click(document.querySelector('[aria-label="关闭关联目录设置"]'));
+    await click(document.querySelector('[aria-label="关闭浏览项目"]'));
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
     const toolbar = document.querySelector('.workspace-toolbar');
     const actionsBottom = toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom;

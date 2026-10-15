@@ -30,7 +30,13 @@ try {
     assert.equal(r.status, 0, r.error?.message || r.stderr || r.stdout.slice(0, 500));
     return JSON.parse(r.stdout);
   };
-  const project = cli(['workspace', 'get']).state.projects[0].id;
+  const workspace = cli(['workspace', 'get']).state;
+  // Existing runs belong to the copied data, not to the four execution fixtures below.
+  // Release them only in this script's isolated copy so UI checks stay deterministic.
+  for (const project of workspace.projects) for (const item of project.items) {
+    if (item.aiExecution?.runId && !item.aiExecution.endedAt) cli(['execution', 'release', '--project', project.id, '--id', item.id, '--run', item.aiExecution.runId]);
+  }
+  const project = workspace.projects[0].id;
   const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
   cli(['generate', '--project', project, '--items', item]);
   cli(['complete', '--project', project, '--id', item, '--summary', '已补齐完成说明，CLI检查通过']);
@@ -62,7 +68,7 @@ try {
   const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
   assert.equal(schedule.ok, true, JSON.stringify(schedule));
   await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
-  for (const height of [900, 720]) for (const surface of ['projects', 'guide', 'ssh', 'settings-api', 'settings-cli', 'settings-data']) {
+  for (const height of [900, 720]) for (const surface of ['stats', 'directory', 'projects', 'guide', 'ssh', 'settings-api', 'settings-cli', 'settings-data']) {
     const suffix = `.${surface}-${height}`;
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
     assert.equal(layout.ok, true, JSON.stringify(layout));

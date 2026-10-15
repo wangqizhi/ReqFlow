@@ -10,7 +10,7 @@ import { bridge } from './api';
 import { publishProject } from './publish';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff
+  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff, BarChart
 } from './icons';
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
@@ -25,6 +25,7 @@ import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projec
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
+import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
 
 const labels: Record<string, string> = {
@@ -90,7 +91,7 @@ export default function App() {
   const [modsTab, setModsTab] = useState('protocol');
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS'>('FLOW');
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -187,6 +188,7 @@ export default function App() {
   }
 
   function switchProject(id: string) {
+    setMode('FLOW');
     setNewMenu(false);
     setBackgroundEditing(false);
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
@@ -664,6 +666,9 @@ export default function App() {
   }
 
   function renderSidebarProject(pr: Project) {
+    const activeItems = pr.items.filter((i) => !i.archived);
+    const pendingCount = activeItems.filter((i) => i.status === 'pending_verification').length;
+    const countLabel = `${activeItems.length} 条未归档需求，${pendingCount} 条待验证`;
     return (<div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragEnd={projectDragEnd} onDragStart={(e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
               onDragOver={busy ? undefined : projectDragOver} onDragLeave={projectDragLeave} onDrop={e => { if (!busy) projectDrop(e, pr.id, act); }}
@@ -680,7 +685,7 @@ export default function App() {
                   aria-label={sshConnections[pr.dir!]?.ok ? '远程连接正常' : '远程连接已断开'}
                   title={sshConnections[pr.dir!]?.ok ? '远程连接正常' : (sshConnections[pr.dir!]?.error || '远程连接已断开')} />
               )}
-              <span className="small-count">{pr.items.filter((i) => !i.archived).length}</span>
+              <span className={'small-count' + (pendingCount > 0 ? ' has-pending' : '')} title={countLabel} aria-label={countLabel}>{activeItems.length}</span>
               <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
                 e.stopPropagation();
                 const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });
@@ -741,6 +746,7 @@ export default function App() {
         </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
+          <button className={'btn plain' + (mode === 'STATS' ? ' active' : '')} aria-current={mode === 'STATS' ? 'page' : undefined} onClick={() => { setMode('STATS'); setNewMenu(false); }}><BarChart />数据看板</button>
           <button className="btn plain" aria-current={mode === 'SETTINGS' ? 'page' : undefined} onClick={() => { setMode('SETTINGS'); setNewMenu(false); }}><Settings />设置</button>
           <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
             <HelpCircle size={15} />帮助 · CLI 参考
@@ -770,7 +776,7 @@ export default function App() {
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
+        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -1051,7 +1057,7 @@ export default function App() {
       {directoryPicker && <div className="overlay" role="dialog" aria-modal="true" aria-label="选择项目目录"><div className="dialog"><h3>选择项目目录</h3><p>绑定本地文件夹，或连接远程服务器选择目录。</p><div className="settings-actions"><button className="btn" onClick={async () => { const r = await bridge.pickDir?.(); if (r?.ok && r.dir && await act({ op: 'projectDir', dir: r.dir }, true)) { setDirectoryPicker(false); setBrowserOpen(true); } }}>本地文件夹</button><button className="btn primary" onClick={() => { setDirectoryPicker(false); setSSHPicker(true); }}>远程服务器</button><button className="btn" onClick={() => setDirectoryPicker(false)}>取消</button></div></div></div>}
       {sshPicker && <SSHDirectory initial={p?.dir} onClose={() => setSSHPicker(false)} onSelect={async dir => { if (await act({ op: 'projectDir', dir }, true)) { setSSHPicker(false); setBrowserOpen(true); } else { throw Error('项目目录未保存，请查看主界面提示'); } }} />}
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
-      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} workspace={data} onClose={() => setModsOpen(false)} />}
+      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
