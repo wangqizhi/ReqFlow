@@ -10,7 +10,7 @@ import { bridge } from './api';
 import { publishProject } from './publish';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Trash, X, ImageIcon, Settings, EyeOff
+  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff
 } from './icons';
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
@@ -672,9 +672,14 @@ export default function App() {
               onClick={() => switchProject(pr.id)}
               onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); switchProject(pr.id); } }}
               title={pr.name}>
-              <Layers size={16} />
+              {isSSH(pr.dir) ? <Server size={16} /> : <Layers size={16} />}
               <span className="project-name">{pr.name}</span>
-              {isSSH(pr.dir) && sshConnections[pr.dir!]?.ok === false && <span className="ssh-disconnected" role="img" aria-label="远程连接已断开" title={sshConnections[pr.dir!]?.error || '远程连接已断开'}><X size={16} /></span>}
+              {isSSH(pr.dir) && sshConnections[pr.dir!] && (
+                <span className={'ssh-status-dot' + (sshConnections[pr.dir!]?.ok ? ' on' : ' off')}
+                  role="img"
+                  aria-label={sshConnections[pr.dir!]?.ok ? '远程连接正常' : '远程连接已断开'}
+                  title={sshConnections[pr.dir!]?.ok ? '远程连接正常' : (sshConnections[pr.dir!]?.error || '远程连接已断开')} />
+              )}
               <span className="small-count">{pr.items.filter((i) => !i.archived).length}</span>
               <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
                 e.stopPropagation();
@@ -723,7 +728,7 @@ export default function App() {
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
               <Trash size={12} />
             </button>
-          )}</summary>{data.projects.filter((pr) => !pr.hidden && !isSSH(pr.dir) && (pr.folderId || 'default') === folder.id).map((pr) => (
+          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id).map((pr) => (
             renderSidebarProject(pr)
           ))}</details>)}
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
@@ -733,10 +738,6 @@ export default function App() {
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
-        <div className="side-label">远程项目</div>
-        <nav className="side-projects remote-projects" aria-label="远程项目">{data.projects.filter(pr => !pr.hidden && isSSH(pr.dir)).map(renderSidebarProject)}
-          {!data.projects.some(pr => !pr.hidden && isSSH(pr.dir)) && <p className="flow-note">新建项目或浏览目录时连接服务器</p>}
-        </nav>
         </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>

@@ -466,7 +466,8 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
   if (a.op === 'projectReorder') {
-    const peers = s.projects.filter(pr => (!!p.dir?.startsWith('ssh://') || pr.folderId === p.folderId) && !!pr.dir?.startsWith('ssh://') === !!p.dir?.startsWith('ssh://'));
+    // REQ-167：远程项目并入各文件夹后，排序分组只看文件夹，不再按本地/远程拆分
+    const peers = s.projects.filter(pr => pr.folderId === p.folderId);
     const target = a.position === 'top' ? peers[0] : peers.find(pr => pr.id === a.target);
     if (!['top', 'before', 'after'].includes(a.position) || !target) throw Error('排序目标无效');
     if (target === p) return;

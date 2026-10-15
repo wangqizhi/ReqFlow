@@ -23,6 +23,9 @@ export const Plus = ({ size = 16, className }: P) => (
 export const Layers = ({ size = 16, className }: P) => (
   <svg {...svgProps(size)} className={className}><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m3 13 9 5 9-5" /></svg>
 );
+export const Server = ({ size = 16, className }: P) => (
+  <svg {...svgProps(size)} className={className}><rect x="3" y="4" width="18" height="7" rx="1.5" /><rect x="3" y="13" width="18" height="7" rx="1.5" /><path d="M7 7.5h.01M7 16.5h.01" /></svg>
+);
 export const FileText = ({ size = 16, className }: P) => (
   <svg {...svgProps(size)} className={className}><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7l-4-4Z" /><path d="M14 3v4h4" /><path d="M9 13h6M9 17h4" /></svg>
 );

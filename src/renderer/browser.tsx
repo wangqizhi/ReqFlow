@@ -12,7 +12,7 @@ import type { RemoteSettings } from '../core/remote';
 import { highlightCode } from './highlight';
 import {
   ChevronRight, Copy, Eye, ExternalLink, FileText, Folder, FolderOpen, GitBranch,
-  ImageIcon, ListNumbers, Minus, Pencil, Plus, RefreshCw, Save, X, Wand, Settings
+  ImageIcon, ListNumbers, Minus, Pencil, Plus, RefreshCw, Save, Server, X, Wand, Settings
 } from './icons';
 
 const MD_EXTS = new Set(['md', 'markdown', 'mdx']);
@@ -94,6 +94,8 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   const root = project.dir || '';
   const remoteDirectory = isSSH(root);
   const [sshPicker, setSSHPicker] = useState(false);
+  // REQ-168：本地目录与远程服务器合并为一个「关联目录设置」入口，弹出后二选一
+  const [dirSettings, setDirSettings] = useState(false);
 
   const [tree, setTree] = useState<Record<string, FileEntry[] | 'loading' | 'error'>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
@@ -256,12 +258,13 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     ...(git?.changes || []).filter((c) => c.index === '?')
   ];
 
-  // Esc 关闭（右键菜单 → 提交信息编辑 → 整个浮层，逐层退）
+  // Esc 关闭（右键菜单 → 提交信息编辑 → 整个浮层，逐层退）；设置浮层内自身处理 Esc 并阻断冒泡，
+  // 焦点不在浮层内时由这里兜底关闭设置浮层
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (remoteOpen) return; if (fileMenu) setFileMenu(null); else if (commitEditor) setCommitEditor(false); else onClose(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (remoteOpen) return; if (dirSettings) { setDirSettings(false); return; } if (fileMenu) setFileMenu(null); else if (commitEditor) setCommitEditor(false); else onClose(); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, commitEditor, fileMenu, remoteOpen]);
+  }, [onClose, commitEditor, fileMenu, remoteOpen, dirSettings]);
 
   // 右键菜单：点击任意位置或窗口尺寸变化时关闭（菜单项自身的点击先于 window 监听触发）
   useEffect(() => {
@@ -325,12 +328,14 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     }
   }
 
-  async function pickDir() {
-    if (picking) return;
+  /** 选择本地目录并替换当前关联（本地/远程互斥）；返回是否绑定成功。 */
+  async function pickDir(): Promise<boolean> {
+    if (picking) return false;
     setPicking(true);
     try {
       const r = await bridge.pickDir?.();
-      if (r?.ok && r.dir) await onDirChange(r.dir);
+      if (r?.ok && r.dir) { await onDirChange(r.dir); return true; }
+      return false;
     } finally {
       setPicking(false);
     }
@@ -427,6 +432,28 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     <div className="fb-overlay" role="dialog" aria-label="浏览项目文件"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       {sshPicker && <SSHDirectory initial={root} onClose={() => setSSHPicker(false)} onSelect={async dir => { await onDirChange(dir); setSSHPicker(false); }} />}
+      {dirSettings && <div className="overlay" role="dialog" aria-modal="true" aria-label="关联目录设置"
+        onClick={e => { e.stopPropagation(); if (e.target === e.currentTarget) setDirSettings(false); }}
+        onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setDirSettings(false); } }}>
+        <div className="dialog">
+          <div className="dialog-head"><div><h3>关联目录设置</h3><p title={root || undefined}>{root ? '当前关联' + (remoteDirectory ? '远程目录：' : '本地目录：') + root : '尚未关联目录，选择本地文件夹或连接远程服务器。'}</p></div><button type="button" className="icon-btn" aria-label="关闭关联目录设置" disabled={picking} onClick={() => setDirSettings(false)}><X /></button></div>
+          <div className="settings-actions">
+            <button type="button" className="btn" disabled={picking} onClick={async () => { if (await pickDir()) setDirSettings(false); }}>
+              <FolderOpen size={14} />{remoteDirectory ? '改绑本地文件夹' : '选择本地文件夹'}
+            </button>
+            <button type="button" className="btn primary" onClick={() => { setDirSettings(false); setSSHPicker(true); }}>
+              <Server size={14} />{remoteDirectory ? '更换远程目录' : '连接远程服务器'}
+            </button>
+            {root && (
+              <button type="button" className="btn" disabled={picking}
+                onClick={async () => { await onDirChange(''); notify('已取消关联目录'); setDirSettings(false); }}>
+                <X size={13} />取消关联
+              </button>
+            )}
+          </div>
+          <p className="settings-hint">本地目录与远程目录只能绑定其一，绑定新目录会替换当前关联；远程目录内文件为只读预览。</p>
+        </div>
+      </div>}
       {remoteOpen && <ProjectRemoteOverlay project={project} save={saveRemote} syncDisabled={gitBusy || aiBusy || dirty} onSynced={async () => { await refreshGit(); setTree({}); await loadDir(''); if (file && !dirty) await openFile(file); }} onClose={() => setRemoteOpen(false)} notify={notify} />}
       {commitEditor && <div className="overlay commit-editor" onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) setCommitEditor(false); }}>
         <div className="dialog" role="dialog" aria-label="编辑完整提交信息"><h3>编辑完整提交信息</h3><label className="field"><span>提交文案</span><textarea autoFocus rows={12} value={commitMsg} disabled={gitBusy || aiBusy} onChange={(e) => setCommitMsg(e.target.value)} /></label>{!stagedChanges.length && <p className="commit-status">请先 Add 暂存变动，再生成提交文案</p>}
@@ -474,16 +501,9 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
               <span className="fb-root-path">未关联目录</span>
             )}
             <div className="fb-tree-actions">
-              <button className="btn plain" disabled={picking} onClick={pickDir}>
-                <FolderOpen size={14} />{root ? '更换本地目录' : '选择项目目录'}
+              <button className="btn plain" disabled={picking} onClick={() => setDirSettings(true)}>
+                <FolderOpen size={14} />关联目录设置
               </button>
-              <button className="btn plain" onClick={() => setSSHPicker(true)}><FolderOpen size={14} />{remoteDirectory ? "更换远程目录" : "连接远程服务器"}</button>
-              {root && (
-                <button className="btn plain" disabled={picking}
-                  onClick={async () => { await onDirChange(''); notify('已取消关联目录'); }}>
-                  <X size={13} />取消关联
-                </button>
-              )}
               <button className="btn plain" disabled={remoteDirectory} title="GitHub / GitLab 配置与连接测试" onClick={() => setRemoteOpen(true)}>
                 <Settings size={13} />远程仓库设置
               </button>
@@ -493,8 +513,8 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             {!root ? (
               <div className="fb-picker">
                 <Folder size={30} />
-                <p>关联本地项目目录后，可直接查看与编辑项目文件。</p>
-                <button className="btn primary" disabled={picking} onClick={pickDir}>
+                <p>关联本地或远程目录后，可直接查看项目文件。</p>
+                <button className="btn primary" disabled={picking} onClick={() => setDirSettings(true)}>
                   <FolderOpen size={15} />选择项目目录
                 </button>
               </div>
@@ -668,7 +688,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                 <h3>{root ? '从左侧选择文件' : '先关联项目目录'}</h3>
                 <p>{root
                   ? '支持 Markdown 预览/编辑、多格式图片预览；文本文件可直接查看编辑（未知格式自动按文本尝试，二进制自动识别）。'
-                  : '点击左侧「选择项目目录」，把本地项目关联进来。'}</p>
+                  : '点击左侧「选择项目目录」，绑定本地文件夹或远程服务器目录。'}</p>
               </div>
             )}
             {file && loadingFile && <div className="fb-empty"><h3>加载中…</h3></div>}

@@ -886,10 +886,11 @@ func coreApplyOperation(s, a map[string]any) error {
 		p["hidden"] = hidden
 		return nil
 	case "projectReorder":
+		// REQ-167：远程项目并入各文件夹后，排序分组只看文件夹，不再按本地/远程拆分
 		peers := []any{}
 		for _, v := range projects {
 			pr := coreMap(v)
-			if (strings.HasPrefix(coreString(p["dir"]), "ssh://") || pr["folderId"] == p["folderId"]) && strings.HasPrefix(coreString(pr["dir"]), "ssh://") == strings.HasPrefix(coreString(p["dir"]), "ssh://") {
+			if pr["folderId"] == p["folderId"] {
 				peers = append(peers, v)
 			}
 		}

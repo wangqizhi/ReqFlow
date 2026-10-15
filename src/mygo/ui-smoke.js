@@ -217,8 +217,9 @@
     const contextButton = button('上下文管理');
     const newProject = button('新建项目');
     const collaboration = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '协作项目');
+    // REQ-167：远程项目并入「我的项目」文件夹，「远程项目」独立分组不再存在
     const remoteHeading = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '远程项目');
-    checks.remoteProjectSection = { ok: remoteHeading.getBoundingClientRect().top > collaboration.getBoundingClientRect().top };
+    checks.remoteProjectSection = { ok: !remoteHeading && !!collaboration };
     await click(newProject);
     await waitFor(() => !!document.querySelector('.project-create'));
     await click(button('连接远程服务器'));

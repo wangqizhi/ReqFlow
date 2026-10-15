@@ -99,8 +99,14 @@ func TestProjectDragOrderAndPinPersist(t *testing.T) {
 		}
 	}
 	mutate(map[string]any{"op": "projectDir", "project": b, "dir": "ssh://fixture/home/project"})
+	// REQ-167：远程项目并入文件夹后，同文件夹的本地与远程项目可以互相排序
+	mutate(map[string]any{"op": "projectReorder", "project": a, "target": b, "position": "after"})
+	check(c, b, a)
+	mutate(map[string]any{"op": "folder", "name": "grouping"})
+	folders := coreList(coreMap(coreTestGet(t, svc)["state"])["folders"])
+	mutate(map[string]any{"op": "projectFolder", "project": b, "folderId": coreMap(folders[len(folders)-1])["id"]})
 	if _, e := svc.Mutate(map[string]any{"op": "projectReorder", "project": a, "target": b, "position": "after"}, nil); e == nil {
-		t.Fatal("local project sorted into remote projects")
+		t.Fatal("cross-folder reorder accepted")
 	}
 	ps := coreList(coreMap(coreTestGet(t, svc)["state"])["projects"])
 	i := coreMap(coreList(coreFind(ps, a)["items"])[0])
