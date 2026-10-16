@@ -165,7 +165,7 @@ func run() (int, error) {
 		})
 		var once sync.Once
 		if reportPath != "" {
-			w.Page().OnDOMReady(func() { once.Do(func() { go smokeUI(w, reportPath) }) })
+			w.Page().OnDOMReady(func() { once.Do(func() { go smokeUI(w, reportPath, native) }) })
 			go func() {
 				time.Sleep(45 * time.Second)
 				once.Do(func() {
@@ -185,8 +185,8 @@ func writeReport(path string, value any) error {
 	}
 	return os.WriteFile(path, raw, 0600)
 }
-func smokeUI(w *mygo.Window, path string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+func smokeUI(w *mygo.Window, path string, native *nativeHost) {
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
 	versionJSON, _ := json.Marshal(appVersion)
 	script := strings.ReplaceAll(uiSmokeScript, "__REQFLOW_VERSION__", string(versionJSON))
@@ -260,8 +260,9 @@ func smokeUI(w *mygo.Window, path string) {
                     for(let i=0;i<35;i++){const row=document.createElement('button');row.className='side-project sidebar-fixture';row.textContent='滚动检查项目 '+(i+1);nav.appendChild(row);}
                     const section=document.querySelector('.side-project-section').getBoundingClientRect();
                     const side=document.querySelector('.side').getBoundingClientRect();
-                    nav.scrollTop=nav.scrollHeight;const reachable=nav.scrollTop>0;nav.scrollTop=0;
-                    return {ok:section.height<=side.height/2+1&&nav.scrollHeight>nav.clientHeight&&reachable&&document.querySelector('.side-foot').getBoundingClientRect().bottom<=innerHeight,height:innerHeight};
+                    const add=document.querySelector('.side-project-section > .side-project.add');const before=add.getBoundingClientRect();
+                    nav.scrollTop=nav.scrollHeight;const reachable=nav.scrollTop>0;const after=add.getBoundingClientRect();nav.scrollTop=0;
+                    return {ok:section.height<=side.height/2+1&&nav.scrollHeight>nav.clientHeight&&reachable&&before.top===after.top&&after.bottom<=section.bottom&&after.top>=nav.getBoundingClientRect().bottom&&document.querySelector('.side-foot').getBoundingClientRect().bottom<=innerHeight,height:innerHeight};
                   }
                   button('数据看板').click();await pause();
                   if(SURFACE==='stats') {
@@ -285,6 +286,31 @@ func smokeUI(w *mygo.Window, path string) {
 				_ = writeReport(name+".json", report)
 				if png, err := w.CapturePage(); err == nil {
 					_ = os.WriteFile(name+".png", png, 0600)
+				}
+				if surface == "terminal" {
+					value, err := w.Page().EvalContext(ctx, `(async()=>{const dock=document.querySelector('.publish-terminal');const id=dock.dataset.runId;dock.querySelector('[aria-label="在独立窗口打开终端"]').click();const end=Date.now()+5000;while(document.querySelector('.publish-terminal')){if(Date.now()>end)throw Error('Terminal did not detach');await new Promise(r=>setTimeout(r,30));}return id;})()`)
+					id, _ := value.(string)
+					var child *mygo.Window
+					var ready chan struct{}
+					mygo.RunOnMain(func() { child = native.terminals[id]; ready = native.terminalReady[id] })
+					detached := any(map[string]any{"ok": false, "error": fmt.Sprint(err)})
+					if child != nil {
+						select {
+						case <-ready:
+						case <-ctx.Done():
+						}
+						child.SetSize(1000, 400)
+						detached, err = child.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+5000;while(!document.querySelector('.xterm')?.textContent.includes('stream-last')){if(Date.now()>end)throw Error('Detached terminal output timeout');await new Promise(r=>setTimeout(r,30));}const dock=document.querySelector('.publish-terminal'),rect=dock.getBoundingClientRect();return {ok:!document.querySelector('.side')&&!document.querySelector('.terminal-spinner')&&!!document.querySelector('.terminal-elapsed')&&dock.querySelector('[role="status"]').textContent==='发布完成'&&Math.abs(rect.height-innerHeight)<1&&Math.abs(rect.width-innerWidth)<1};})()`)
+						if err != nil {
+							detached = map[string]any{"ok": false, "error": err.Error()}
+						}
+						if png, err := child.CapturePage(); err == nil {
+							_ = os.WriteFile(fmt.Sprintf("%s.detached-%d.png", path, height), png, 0600)
+						}
+						child.Close()
+					}
+					_ = writeReport(fmt.Sprintf("%s.detached-%d.json", path, height), detached)
+					_, _ = w.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+3000;while(!document.querySelector('.publish-terminal')){if(Date.now()>end)throw Error('Terminal did not reattach');await new Promise(r=>setTimeout(r,30));}})()`)
 				}
 				if surface == "directory" {
 					_, _ = w.Page().EvalContext(ctx, `document.querySelector('[aria-label="关闭关联目录设置"]').click();document.querySelector('[aria-label="关闭浏览项目"]').click()`)

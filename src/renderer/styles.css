@@ -70,6 +70,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .side-projects { display: flex; flex-direction: column; gap: 2px; }
 .side-project-section { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: 50%; }
 .side-project-section > .side-label { flex-shrink: 0; }
+.side-project-section > .side-project.add { flex-shrink: 0; margin-top: 2px; }
 .side-project-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .side-project-scroll > * { flex-shrink: 0; }
 .side-project-scroll::-webkit-scrollbar { width: 8px; }
@@ -592,7 +593,19 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .publish-terminal { display: flex; flex-direction: column; flex: 0 0 clamp(160px, 28vh, 260px); max-height: 45%; min-height: 0; background: var(--side-bg); color: var(--side-ink); border-top: 1px solid #57534e; }
 .publish-terminal > header { display: flex; align-items: center; gap: 12px; padding: 4px 14px; flex-shrink: 0; font-size: 12px; }
 .publish-terminal > header strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.publish-terminal > header span { flex: 1; min-width: 0; color: var(--side-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-terminal > header .terminal-status { flex: 1; min-width: 0; color: var(--side-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-indicator { display: flex; flex-shrink: 0; }
+.terminal-indicator.running { color: #fb923c; }
+.terminal-indicator.success { color: #86efac; }
+.terminal-indicator.failure { color: #fca5a5; }
+.terminal-spinner { animation: terminal-spin 1s linear infinite; }
+@keyframes terminal-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .terminal-spinner { animation-duration: 3s; } }
+.terminal-elapsed { color: var(--side-muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
+.publish-terminal > header strong { max-width: 35%; }
+.publish-terminal-window { height: 100vh; display: flex; flex-direction: column; background: var(--side-bg); color: var(--side-ink); }
+.publish-terminal-window > .publish-terminal { flex: 1; max-height: none; border-top: 0; }
+.terminal-window-error { color: #fca5a5; margin: 0; padding: 10px 14px; }
 .publish-terminal .icon-btn { color: var(--side-muted); flex-shrink: 0; }
 .publish-terminal .icon-btn:hover { background: var(--side-hover); color: var(--side-ink); }
 .publish-terminal-content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 0 14px 10px; }

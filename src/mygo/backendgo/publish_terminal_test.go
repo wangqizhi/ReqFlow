@@ -102,3 +102,55 @@ func TestPublishTerminalBytesAndBoundedReplay(t *testing.T) {
 		t.Fatal("replay is unbounded or truncation unreported")
 	}
 }
+
+func TestPublishTerminalWindowSessionLifecycle(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	detached := false
+	b.Native = func(method string, args []any) (any, error) {
+		if desktopString(args[0]) != "window-session" {
+			t.Fatal("wrong window session")
+		}
+		switch method {
+		case "terminal.open":
+			if desktopString(args[1]) != "项目" {
+				t.Fatal("wrong terminal title")
+			}
+			detached = true
+		case "terminal.close":
+			detached = false
+		case "terminal.status":
+			return detached, nil
+		default:
+			t.Fatal("unexpected native operation", method)
+		}
+		return nil, nil
+	}
+	state := map[string]any{"project": "项目", "running": true, "step": "AI 优化提交文案", "startedAt": 1000, "revision": 1}
+	desktopTestCall(t, b, "publish:terminal:sync", "window-session", state)
+	desktopTestCall(t, b, "publish:terminal:open", "window-session")
+	current := desktopTestCall(t, b, "publish:terminal:get", "window-session")
+	if !desktopBool(current["detached"]) {
+		t.Fatal("terminal was not detached")
+	}
+	// Finished state retains exact timestamps and cannot be overwritten by a late request.
+	state["running"], state["endedAt"], state["revision"] = false, 5432, 3
+	state["result"] = map[string]any{"ok": false, "error": "AI 失败"}
+	desktopTestCall(t, b, "publish:terminal:sync", "window-session", state)
+	state["running"], state["revision"] = true, 2
+	desktopTestCall(t, b, "publish:terminal:sync", "window-session", state)
+	current = desktopTestCall(t, b, "publish:terminal:get", "window-session")
+	session := current["session"].(publishTerminalSession)
+	if session.Running || session.EndedAt != 5432 || session.StartedAt != 1000 || session.Result == nil || session.Result.Error != "AI 失败" {
+		t.Fatal("completed session lost", session)
+	}
+	desktopTestCall(t, b, "publish:terminal:close", "window-session")
+	if desktopBool(desktopTestCall(t, b, "publish:terminal:get", "window-session")["detached"]) {
+		t.Fatal("terminal stayed detached after close")
+	}
+	for _, id := range []string{"../unsafe", "unknown-session"} {
+		result, _ := b.Invoke(context.Background(), "publish:terminal:open", []any{id})
+		if desktopMap(result)["ok"] != false {
+			t.Fatal("invalid session opened", id)
+		}
+	}
+}

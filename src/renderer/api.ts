@@ -34,6 +34,8 @@ export type GitStatusInfo = {
 export type GitOpResult = { ok: true; summary?: string; warning?: string } | { ok: false; error: string };
 
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
+export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
+export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; result: { ok: boolean; error?: string } | null };
 export interface ReqFlowBridge {
   listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;
   sshStatus?(root: string): Promise<{ ok: boolean; error?: string }>;
@@ -63,6 +65,10 @@ export interface ReqFlowBridge {
   detectPublish?(root: string): Promise<{ ok: boolean; script?: string; error?: string }>;
   runPublish?(root: string, rel: string, terminalRunId?: string): Promise<{ ok: boolean; output?: string; error?: string }>;
   getPublishOutput?(runId: string, offset: number): Promise<{ ok: boolean; data: string; offset: number; done: boolean; started: boolean; truncated?: boolean; error?: string }>;
+  syncPublishTerminal?(runId: string, session: TerminalSession): Promise<{ ok: boolean; error?: string }>;
+  getPublishTerminal?(runId: string): Promise<{ ok: boolean; session: TerminalSession | null; detached: boolean; error?: string }>;
+  openPublishTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
+  closePublishTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
   /** 发布完成系统通知（REQ-110）：整个发布流程结束时上报结果，窗口不在最前端时由主进程弹系统通知。 */
   publishNotice?(notice: { ok: boolean; project: string; detail?: string }): Promise<{ ok: boolean }>;
   /** 数据用量与归档（REQ-112）：目录/数据库大小统计，按日期导出并清理。仅桌面版提供。 */

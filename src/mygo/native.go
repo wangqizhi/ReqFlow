@@ -13,6 +13,8 @@ import (
 type nativeHost struct {
 	window        atomic.Pointer[mygo.Window]
 	notifications desktopNotifications
+	terminals     map[string]*mygo.Window // Access only on the MyGO main thread.
+	terminalReady map[string]chan struct{}
 }
 
 type dialogOptions struct {
@@ -76,6 +78,56 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		return nil, fmt.Errorf("native window is unavailable")
 	}
 	switch method {
+	case "terminal.open", "terminal.close", "terminal.status":
+		id := firstString(args)
+		var detached bool
+		mygo.RunOnMain(func() {
+			if n.terminals == nil {
+				n.terminals = make(map[string]*mygo.Window)
+				n.terminalReady = make(map[string]chan struct{})
+			}
+			target := n.terminals[id]
+			if method == "terminal.close" {
+				if target != nil && !target.IsDestroyed() {
+					target.Close()
+				}
+				return
+			}
+			if method == "terminal.open" {
+				if target == nil || target.IsDestroyed() {
+					project := ""
+					if len(args) > 1 {
+						project, _ = args[1].(string)
+					}
+					area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
+					target = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal · " + project, Width: 1000, Height: 500, MinWidth: 480, MinHeight: 240,
+						X: area.X + (area.Width-1000)/2, Y: area.Y + (area.Height-500)/2,
+						URL: "/?terminal=" + url.QueryEscape(id), BackgroundColor: "#1c1917", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+					n.terminals[id] = target
+					ready := make(chan struct{})
+					n.terminalReady[id] = ready
+					target.Page().OnDOMReady(func() {
+						select {
+						case <-ready:
+						default:
+							close(ready)
+						}
+					})
+					target.OnClosed(func() { delete(n.terminals, id); delete(n.terminalReady, id) })
+					target.Page().OnWillNavigate(func(e *mygo.NavigateEvent) {
+						if !localNavigation(e.URL) {
+							e.PreventDefault()
+						}
+					})
+					target.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
+				}
+				target.Restore()
+				target.Show()
+				target.Focus()
+			}
+			detached = target != nil && !target.IsDestroyed()
+		})
+		return detached, nil
 	case "dialog.open", "openDialog":
 		var opts dialogOptions
 		if err := options(args, &opts); err != nil {

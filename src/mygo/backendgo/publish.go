@@ -19,6 +19,7 @@ import (
 )
 
 var desktopPublishExtensions = []string{"mjs", "js", "cjs", "bat", "cmd", "ps1", "sh", "py"}
+var desktopTerminalID = regexp.MustCompile(`^[a-zA-Z0-9-]{8,80}$`)
 var desktopANSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 var desktopBearer = regexp.MustCompile(`(?i)(Bearer\s+)\S+`)
 var desktopSecrets = regexp.MustCompile(`(?i)((?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s'"&]+`)
@@ -193,6 +194,9 @@ func desktopPublishCommand(ctx context.Context, file string) (*exec.Cmd, error) 
 }
 
 func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any) (any, error) {
+	if strings.HasPrefix(channel, "publish:terminal:") {
+		return b.desktopPublishTerminal(channel, args)
+	}
 	switch channel {
 	case "publish:output":
 		b.desktopPublishMu.Lock()
@@ -264,7 +268,7 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		root, rel := desktopText(args, 0), desktopText(args, 1)
 		r := &desktopPublishRun{b: b, start: time.Now(), requestID: desktopRequestID(), project: filepath.Base(root), script: rel, stage: "执行发布脚本"}
 		if id := desktopText(args, 2); id != "" {
-			if !regexp.MustCompile(`^[a-zA-Z0-9-]{8,80}$`).MatchString(id) {
+			if !desktopTerminalID.MatchString(id) {
 				return nil, errors.New("发布终端标识无效")
 			}
 			b.desktopPublishMu.Lock()

@@ -47,7 +47,7 @@ try {
     '--claims', JSON.stringify([{ id: entry.id, version: 1, batchId: executionBatch.id, hash: executionBatch.hash }])]);
   const publishFixture = path.join(temporary, 'publish-fixture');
   await mkdir(publishFixture);
-  await writeFile(path.join(publishFixture, 'publish.ps1'), "Write-Output 'stream-first'; Start-Sleep -Milliseconds 1800; [Console]::Error.WriteLine('stream-stderr'); Write-Output 'stream-last'", 'utf8');
+  await writeFile(path.join(publishFixture, 'publish.ps1'), "Write-Output 'stream-first'; Start-Sleep -Milliseconds 4000; [Console]::Error.WriteLine('stream-stderr'); Write-Output 'stream-last'", 'utf8');
   const fixture = spawnSync(path.join(portable, 'ReqFlow.exe'), ['--test-invoke'], {
     windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: { ...process.env, REQFLOW_DATA_DIR: data },
     input: JSON.stringify({ channel: 'workspace:apply', args: [{ op: 'project', name: '发布终端UI检查', dir: publishFixture }] }) + '\n',
@@ -62,7 +62,7 @@ try {
   });
   child.stderr.on('data', value => { stderr += value; });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 60_000);
+    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 90_000);
     child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`MyGO exited ${code}: ${stderr}`)); });
   });
@@ -82,6 +82,11 @@ try {
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
     assert.equal(layout.ok, true, JSON.stringify(layout));
     await copyFile(reportPath + suffix + '.png', path.join(root, `tmp/mygo-${surface}-${height}.png`));
+  }
+  for (const height of [900, 720]) {
+    const detached = JSON.parse(await readFile(`${reportPath}.detached-${height}.json`, 'utf8'));
+    assert.equal(detached.ok, true, JSON.stringify(detached));
+    await copyFile(`${reportPath}.detached-${height}.png`, path.join(root, `tmp/mygo-terminal-detached-${height}.png`));
   }
   if (env.REQFLOW_UI_NOTIFICATION === '1') assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));
   assert.equal(report.ok, true, JSON.stringify(report));

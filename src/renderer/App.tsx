@@ -6,7 +6,7 @@ import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
   scheduledBatch, activeAIExecution, type Item, type Project, type Workspace
 } from '../core/domain';
-import { bridge } from './api';
+import { bridge, type PublishSession } from './api';
 import { publishProject } from './publish';
 import { PublishTerminal, useTerminalSetting } from './publish-terminal';
 import {
@@ -136,13 +136,43 @@ export default function App() {
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
   const [terminalEnabled] = useTerminalSetting();
-  const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean }>>({});
+  const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
+  const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
   const publishResult = publishStates[p?.id || '']?.resultDismissed ? null : publishStates[p?.id || '']?.result || null;
   const terminalSession = publishStates[p?.id || ''];
+  const terminalRunId = terminalSession?.terminalRunId;
+  const terminalDetached = !!terminalRunId && !!detachedTerminals[terminalRunId];
+  useEffect(() => {
+    for (const session of Object.values(publishStates)) {
+      if (session.terminalRunId && session.terminalProject) {
+        void bridge.syncPublishTerminal?.(session.terminalRunId, { ...session, project: session.terminalProject, result: session.result ? { ok: session.result.ok, error: session.result.error } : null }).catch(() => {});
+      }
+    }
+  }, [publishStates]);
+  useEffect(() => {
+    if (!terminalRunId || !bridge.getPublishTerminal) return;
+    let cancelled = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const result = await bridge.getPublishTerminal!(terminalRunId);
+        if (!cancelled && result.ok) setDetachedTerminals(previous => previous[terminalRunId] === result.detached ? previous : { ...previous, [terminalRunId]: result.detached });
+      } finally { if (!cancelled) timer = setTimeout(() => void poll().catch(() => {}), 500); }
+    };
+    void poll().catch(() => {});
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [terminalRunId]);
+  async function detachTerminal() {
+    if (!terminalSession?.terminalRunId || !p || !bridge.openPublishTerminal || !bridge.syncPublishTerminal) throw Error('独立终端仅桌面版支持');
+    const synced = await bridge.syncPublishTerminal(terminalSession.terminalRunId, { ...terminalSession, project: p.name, result: terminalSession.result ? { ok: terminalSession.result.ok, error: terminalSession.result.error } : null });
+    if (!synced.ok) throw Error(synced.error || '无法同步终端状态');
+    const opened = await bridge.openPublishTerminal(terminalSession.terminalRunId);
+    if (!opened.ok) throw Error(opened.error || '无法打开独立终端');
+    setDetachedTerminals(previous => ({ ...previous, [terminalSession.terminalRunId!]: true }));
+  }
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
   const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
   useEffect(() => {
@@ -430,9 +460,9 @@ export default function App() {
     setPublishConfirm(false);
     const project = p, script = publishScript;
     publishingIds.current.add(project.id);
-    const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null }), ...patch } }));
+    const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    update({ running: true, step: '', result: null, resultDismissed: false, terminalRunId, terminalOpen: !!terminalRunId });
+    update({ running: true, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
@@ -443,7 +473,7 @@ export default function App() {
       void bridge.publishNotice?.({ ok: false, project: project.name, detail: e?.message || '发布流程执行失败' });
     } finally {
       publishingIds.current.delete(project.id);
-      update({ running: false, step: '' });
+      update({ running: false, step: '', endedAt: Date.now() });
       void load({ quiet: true });
     }
   }
@@ -741,10 +771,10 @@ export default function App() {
           )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id).map((pr) => (
             renderSidebarProject(pr)
           ))}</details>)}
+        </nav>
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span>新建项目</span>
           </button>
-        </nav>
         </section>
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
@@ -804,6 +834,7 @@ export default function App() {
                 <Rocket size={16} />{publishing ? publishStep || '发布中…' : '发布'}
               </button>
             )}
+            {terminalDetached && <button className="btn" onClick={() => void detachTerminal().catch(e => notify(e.message, 'err'))}>发布终端</button>}
             {!!p?.verifySource && (
               <button className="btn run" onClick={runVerifySource} title={'运行验证源：' + p.verifySource.value}>
                 <Play size={16} />运行
@@ -1054,8 +1085,8 @@ export default function App() {
 
         </>}
       </main>
-      {terminalEnabled && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onClose={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: false } }))} />}
-      {terminalEnabled && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: true } }))}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
+      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: false } }))} />}
+      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: true } }))}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
