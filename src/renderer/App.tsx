@@ -8,6 +8,7 @@ import {
 } from '../core/domain';
 import { bridge } from './api';
 import { publishProject } from './publish';
+import { PublishTerminal, useTerminalSetting } from './publish-terminal';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
   Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff, BarChart
@@ -134,12 +135,14 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false);
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
-  const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null }>>({});
+  const [terminalEnabled] = useTerminalSetting();
+  const [publishStates, setPublishStates] = useState<Record<string, { running: boolean; step: string; result: { ok: boolean; output: string; error?: string } | null; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean }>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
-  const publishResult = publishStates[p?.id || '']?.result || null;
+  const publishResult = publishStates[p?.id || '']?.resultDismissed ? null : publishStates[p?.id || '']?.result || null;
+  const terminalSession = publishStates[p?.id || ''];
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
   const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
   useEffect(() => {
@@ -179,7 +182,7 @@ export default function App() {
   formRef.current = form;
 
   function setPublishResult(result: { ok: boolean; output: string; error?: string } | null) {
-    if (p) setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], running: !!states[p.id]?.running, step: states[p.id]?.step || '', result } }));
+    if (p) setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], running: !!states[p.id]?.running, step: states[p.id]?.step || '', result: result || states[p.id]?.result || null, resultDismissed: !result } }));
   }
 
   function notify(text: string, kind: 'ok' | 'err' = 'ok') {
@@ -309,11 +312,11 @@ export default function App() {
 
   // REQ-070：Esc 关闭发布输出弹窗
   useEffect(() => {
-    if (!publishResult) return;
+    if (!publishResult || (terminalEnabled && terminalSession?.terminalRunId)) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPublishResult(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [publishResult]);
+  }, [publishResult, terminalEnabled, terminalSession?.terminalRunId]);
 
   // REQ-146：Esc 关闭目录打开确认浮层
   useEffect(() => {
@@ -428,9 +431,10 @@ export default function App() {
     const project = p, script = publishScript;
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null }), ...patch } }));
-    update({ running: true, step: '', result: null });
+    const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
+    update({ running: true, step: '', result: null, resultDismissed: false, terminalRunId, terminalOpen: !!terminalRunId });
     try {
-      const r = await publishProject(project, script, bridge, step => update({ step }));
+      const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
       // REQ-110：整个发布流程结束时上报，窗口不在最前端时由主进程弹系统通知
       void bridge.publishNotice?.({ ok: !!r.ok, project: project.name, detail: r.ok ? '发布脚本已执行完毕，产物位置见应用内发布输出。' : r.error || '发布脚本执行失败' });
@@ -720,12 +724,13 @@ export default function App() {
             <div className="side-project active" aria-current="page"><FileText size={16} /><span>上下文 · 提示词</span></div>
           </nav>
         </> : <>
+        <section className="side-project-section" aria-label="我的项目">
         <div className="side-label side-label-row">我的项目
           <div className="side-project-tools"><button className="icon-btn side-add-folder" aria-label="管理项目" title="排序、隐藏与分组" onClick={() => setProjectManagerOpen(true)}><Settings size={15} /></button>
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
           </div>
         </div>
-        <nav className="side-projects">
+        <nav className="side-projects side-project-scroll" aria-label="项目列表">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
           {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
             // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
@@ -740,6 +745,7 @@ export default function App() {
             <Plus size={16} /><span>新建项目</span>
           </button>
         </nav>
+        </section>
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
@@ -755,6 +761,7 @@ export default function App() {
         </div>
       </aside>
 
+      <div className="main-column">
       <main className={"main" + (mode === 'FLOW' ? ' flow-main' : '')}>
         <header className="top">
           <div className="save">
@@ -1047,6 +1054,9 @@ export default function App() {
 
         </>}
       </main>
+      {terminalEnabled && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onClose={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: false } }))} />}
+      {terminalEnabled && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: true } }))}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
+      </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
         <div className="dialog"><div className="dialog-head"><h3>释放 AI 任务</h3><button className="icon-btn" disabled={busy} aria-label="关闭释放确认" onClick={() => setReleaseItem(null)}><X /></button></div>
@@ -1131,7 +1141,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {publishResult && (
+      {publishResult && !(terminalEnabled && terminalSession?.terminalRunId) && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) setPublishResult(null); }}>
           <div className="dialog publish-dialog">
             <div className="dialog-head">

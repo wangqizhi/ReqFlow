@@ -47,6 +47,8 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 /* ---------- 布局 ---------- */
 .app { display: grid; grid-template-columns: 248px 1fr; height: 100vh; overflow: hidden; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.main-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main-column > .main { flex: 1; }
 
 /* ---------- 启动页 ---------- */
 .boot { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
@@ -66,6 +68,13 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .side-add-folder { width: 20px; height: 20px; border-radius: 6px; color: var(--side-muted); margin-right: -2px; }
 .side-add-folder:hover { background: rgba(255, 255, 255, 0.07); color: var(--side-ink); box-shadow: none; }
 .side-projects { display: flex; flex-direction: column; gap: 2px; }
+.side-project-section { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: 50%; }
+.side-project-section > .side-label { flex-shrink: 0; }
+.side-project-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.side-project-scroll > * { flex-shrink: 0; }
+.side-project-scroll::-webkit-scrollbar { width: 8px; }
+.side-project-scroll::-webkit-scrollbar-thumb { background-color: #57534e; border-radius: 6px; }
+.side-project-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--side-muted); }
 .side-project { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); font-size: 14px; font-weight: 400; letter-spacing: normal; text-align: left; width: 100%; min-width: 0; cursor: pointer; }
 .side-project:hover { background: rgba(255, 255, 255, 0.07); }
 .side-project.active { background: rgba(255, 255, 255, 0.13); }
@@ -79,6 +88,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .flow-note { margin: 4px 8px; font-size: 12.5px; line-height: 2; color: var(--side-muted); }
 .flow-note span { color: var(--accent); font-weight: 700; margin-right: 6px; font-family: Consolas, monospace; font-size: 11px; }
 .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+.side-foot { flex-shrink: 0; }
 .side-hint { font-size: 11px; color: var(--side-muted); margin: 8px 8px 0; }
 .side .btn.plain { color: var(--side-ink); justify-content: flex-start; }
 .side .btn.plain:hover { background: rgba(255, 255, 255, 0.08); }
@@ -579,6 +589,16 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .new-requirement-menu button:hover { background: var(--accent-soft); color: var(--accent-dark); }
 /* 发布输出（REQ-070）：等宽字体展示脚本输出，超长在自身区域滚动 */
 .publish-output { margin: 0; padding: 14px 16px; max-height: 300px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); white-space: pre-wrap; word-break: break-all; }
+.publish-terminal { display: flex; flex-direction: column; flex: 0 0 clamp(160px, 28vh, 260px); max-height: 45%; min-height: 0; background: var(--side-bg); color: var(--side-ink); border-top: 1px solid #57534e; }
+.publish-terminal > header { display: flex; align-items: center; gap: 12px; padding: 4px 14px; flex-shrink: 0; font-size: 12px; }
+.publish-terminal > header strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-terminal > header span { flex: 1; min-width: 0; color: var(--side-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-terminal .icon-btn { color: var(--side-muted); flex-shrink: 0; }
+.publish-terminal .icon-btn:hover { background: var(--side-hover); color: var(--side-ink); }
+.publish-terminal-content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 0 14px 10px; }
+.publish-terminal-content .xterm { height: 100%; }
+.publish-terminal-reopen { flex-shrink: 0; padding: 7px 14px; text-align: left; background: var(--side-bg); color: var(--side-ink); font-size: 12px; }
+.publish-terminal-reopen:hover { color: var(--side-muted); }
 /* 需求说明放大编辑（REQ-074）：按钮与「展开更多设置」同行，大输入框在独立弹窗中。
    验证退回修复：放大弹窗在 DOM 中先于记录新需求浮层渲染，同为 z-index:50 会被盖住，提到 70 层 */
 .body-expand-overlay { z-index: 70; }
@@ -764,7 +784,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
    侧栏顶部品牌行无交互元素，兼作左上角窗口拖动区。 */
 .desktop-app { grid-template-rows: minmax(0, 1fr); }
 .desktop-app > .side { grid-column: 1; grid-row: 1; }
-.desktop-app > .main { grid-column: 2; grid-row: 1; }
+.desktop-app > .main-column { grid-column: 2; grid-row: 1; }
 .desktop-app .top { -webkit-app-region: drag; padding-right: 8px; }
 .desktop-app .top .switcher, .desktop-app .top .save { -webkit-app-region: no-drag; }
 .top .window-bar { height: auto; align-self: stretch; padding: 0; border: 0; background: transparent; flex-shrink: 0; }

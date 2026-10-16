@@ -1,7 +1,7 @@
 {
   "name": "reqflow-desktop",
   "productName": "ReqFlow",
-  "version": "2.8.3",
+  "version": "2.8.5",
   "description": "ReqFlow · 需求流 — Go/MyGO 个人需求管理与 Prompt 工作台",
   "private": true,
   "author": "ReqFlow Local",
@@ -34,9 +34,13 @@
     "@vitejs/plugin-react": "^6.0.2",
     "esbuild": "^0.27.0",
     "png-to-ico": "^2.1.8",
-    "typescript": "^5.9.3",
-    "vite": "^8.0.13",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.13"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0"
   }
 }

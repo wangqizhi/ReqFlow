@@ -45,8 +45,17 @@ try {
   const executionBatch = cli(['generate', '--project', project, '--items', executionItems.map(i => i.id).join(',')]).batch;
   for (const entry of executionItems) cli(['execution', 'claim', '--project', project, '--run', randomUUID(), '--client', entry.client,
     '--claims', JSON.stringify([{ id: entry.id, version: 1, batchId: executionBatch.id, hash: executionBatch.hash }])]);
+  const publishFixture = path.join(temporary, 'publish-fixture');
+  await mkdir(publishFixture);
+  await writeFile(path.join(publishFixture, 'publish.ps1'), "Write-Output 'stream-first'; Start-Sleep -Milliseconds 1800; [Console]::Error.WriteLine('stream-stderr'); Write-Output 'stream-last'", 'utf8');
+  const fixture = spawnSync(path.join(portable, 'ReqFlow.exe'), ['--test-invoke'], {
+    windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: { ...process.env, REQFLOW_DATA_DIR: data },
+    input: JSON.stringify({ channel: 'workspace:apply', args: [{ op: 'project', name: '发布终端UI检查', dir: publishFixture }] }) + '\n',
+  });
+  assert.equal(fixture.status, 0, fixture.error?.message || fixture.stderr);
+  assert.equal(JSON.parse(fixture.stdout).ok, true, fixture.stdout);
   const reportPath = path.join(temporary, 'report.json');
-  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1', REQFLOW_UI_NOTIFICATION: '1' };
+  const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1', REQFLOW_UI_NOTIFICATION: process.env.REQFLOW_UI_NOTIFICATION || '1' };
   let stderr = '';
   child = spawn(path.join(portable, 'ReqFlow.exe'), ['--smoke-ui', reportPath], {
     cwd: portable, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
@@ -68,13 +77,13 @@ try {
   const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
   assert.equal(schedule.ok, true, JSON.stringify(schedule));
   await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
-  for (const height of [900, 720]) for (const surface of ['stats', 'directory', 'projects', 'guide', 'ssh', 'settings-api', 'settings-cli', 'settings-data']) {
+  for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'directory', 'projects', 'guide', 'ssh', 'settings-api', 'settings-cli', 'settings-data']) {
     const suffix = `.${surface}-${height}`;
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
     assert.equal(layout.ok, true, JSON.stringify(layout));
     await copyFile(reportPath + suffix + '.png', path.join(root, `tmp/mygo-${surface}-${height}.png`));
   }
-  assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));
+  if (env.REQFLOW_UI_NOTIFICATION === '1') assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));
   assert.equal(report.ok, true, JSON.stringify(report));
   assert.match(report.title, /ReqFlow/);
   assert.equal(report.checks['app:info'].backend, 'go');

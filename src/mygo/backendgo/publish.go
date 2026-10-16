@@ -3,6 +3,7 @@ package backendgo
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,6 +93,8 @@ type desktopPublishRun struct {
 	mu                                        sync.Mutex
 	start                                     time.Time
 	requestID, project, script, stage, output string
+	outputBytes                               int64
+	done                                      bool
 }
 
 func (r *desktopPublishRun) entry(phase, text string, duration any) {
@@ -138,8 +141,9 @@ func (w *desktopPublishWriter) Write(raw []byte) (int, error) {
 	text := string(raw)
 	w.r.mu.Lock()
 	w.r.output += text
+	w.r.outputBytes += int64(len(raw))
 	if len(w.r.output) > 200*1024 {
-		w.r.output = "…（前文已截断）…\n" + w.r.output[len(w.r.output)-200*1024:]
+		w.r.output = w.r.output[len(w.r.output)-200*1024:]
 	}
 	w.r.mu.Unlock()
 	w.pending += text
@@ -181,7 +185,7 @@ func desktopPublishCommand(ctx context.Context, file string) (*exec.Cmd, error) 
 		args = []string{file}
 	case ".py":
 		program = "python"
-		args = []string{file}
+		args = []string{"-u", file}
 	default:
 		return nil, errors.New("不支持的发布脚本类型：" + ext)
 	}
@@ -190,6 +194,24 @@ func desktopPublishCommand(ctx context.Context, file string) (*exec.Cmd, error) 
 
 func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any) (any, error) {
 	switch channel {
+	case "publish:output":
+		b.desktopPublishMu.Lock()
+		r := b.desktopPublishRuns[desktopText(args, 0)]
+		b.desktopPublishMu.Unlock()
+		if r == nil {
+			return desktopOK(map[string]any{"data": "", "offset": 0, "done": false, "started": false}), nil
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		base := r.outputBytes - int64(len(r.output))
+		offset := desktopInt(desktopArg(args, 1))
+		truncated := offset < base
+		if offset < base || offset > r.outputBytes {
+			offset = base
+		}
+		// Send bytes so UTF-8 characters split across pipe writes decode correctly in xterm.
+		data := base64.StdEncoding.EncodeToString([]byte(r.output[offset-base:]))
+		return desktopOK(map[string]any{"data": data, "offset": r.outputBytes, "truncated": truncated, "done": r.done, "started": true}), nil
 	case "publish:logs:get":
 		entries, e := b.desktopFlushLogs()
 		return desktopOK(map[string]any{"entries": entries}), e
@@ -241,11 +263,43 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 	case "publish:run":
 		root, rel := desktopText(args, 0), desktopText(args, 1)
 		r := &desktopPublishRun{b: b, start: time.Now(), requestID: desktopRequestID(), project: filepath.Base(root), script: rel, stage: "执行发布脚本"}
+		if id := desktopText(args, 2); id != "" {
+			if !regexp.MustCompile(`^[a-zA-Z0-9-]{8,80}$`).MatchString(id) {
+				return nil, errors.New("发布终端标识无效")
+			}
+			b.desktopPublishMu.Lock()
+			if b.desktopPublishRuns == nil {
+				b.desktopPublishRuns = make(map[string]*desktopPublishRun)
+			}
+			if b.desktopPublishRuns[id] != nil {
+				b.desktopPublishMu.Unlock()
+				return nil, errors.New("发布终端标识已使用")
+			}
+			// Keep recent completed sessions for switching projects and reopening the dock.
+			for key, previous := range b.desktopPublishRuns {
+				previous.mu.Lock()
+				remove := previous.done && (time.Since(previous.start) > 30*time.Minute || len(b.desktopPublishRuns) >= 20)
+				previous.mu.Unlock()
+				if remove {
+					delete(b.desktopPublishRuns, key)
+				}
+			}
+			if len(b.desktopPublishRuns) >= 20 {
+				b.desktopPublishMu.Unlock()
+				return nil, errors.New("同时执行的发布任务过多")
+			}
+			b.desktopPublishRuns[id] = r
+			b.desktopPublishMu.Unlock()
+			defer func() { r.mu.Lock(); r.done = true; r.mu.Unlock() }()
+		}
 		r.entry("request", "开始发布", nil)
 		defer func() { _, _ = b.desktopFlushLogs() }()
 		result := func(e error) (any, error) {
 			r.mu.Lock()
 			out := r.output
+			if r.outputBytes > int64(len(out)) {
+				out = "…（前文已截断）…\n" + out
+			}
 			r.mu.Unlock()
 			if e != nil {
 				r.entry("error", e.Error(), nil)

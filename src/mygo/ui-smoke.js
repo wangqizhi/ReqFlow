@@ -234,7 +234,7 @@
 
     const labelStyle = getComputedStyle(collaboration);
     const contextStyle = getComputedStyle(contextButton);
-    checks.contextEntry = { ok: contextButton.getBoundingClientRect().top > newProject.getBoundingClientRect().top && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
+    checks.contextEntry = { ok: contextButton.getBoundingClientRect().top >= document.querySelector('.side-project-section').getBoundingClientRect().bottom && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
     await click(contextButton);
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
@@ -245,6 +245,50 @@
     await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
     checks.statsMoved = { ok: !document.querySelector('.stats-panel') };
     await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
+    const terminalSetting = async enabled => {
+      await click(button('插件/MOD/AGENT'));
+      await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
+      const toggle = document.querySelector('[aria-label="启用 Terminal"]');
+      if (toggle.checked !== enabled) await click(toggle);
+      checks.terminalSetting = { ok: toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled) };
+      await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
+    };
+    await terminalSetting(true);
+    await switchProject('发布终端UI检查');
+    await waitFor(() => button('发布') && !button('发布').disabled);
+    await click(button('发布'));
+    const terminalText = () => document.querySelector('.publish-terminal .xterm')?.textContent || '';
+    await waitFor(() => terminalText().includes('stream-first'));
+    checks.terminalLive = { ok: document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成' && !terminalText().includes('stream-last') };
+    await click(document.querySelector('[aria-label="收起发布终端"]'));
+    checks.terminalCollapse = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
+    await click(document.querySelector('.publish-terminal-reopen'));
+    await waitFor(() => terminalText().includes('stream-last') && terminalText().includes('stream-stderr'));
+    await waitFor(() => document.querySelector('.publish-terminal [role="status"]').textContent === '发布完成');
+    checks.terminalComplete = { ok: !document.querySelector('.publish-dialog') && terminalText().includes('stream-first') };
+    await switchProject(originalProject);
+    checks.terminalIsolation = { ok: !document.querySelector('.publish-terminal') };
+    await switchProject('发布终端UI检查');
+    await waitFor(() => terminalText().includes('stream-last'));
+    checks.terminalIsolation.ok &&= terminalText().includes('stream-first');
+    await terminalSetting(false);
+    checks.terminalOff = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-dialog') };
+    await click(document.querySelector('.publish-dialog [aria-label="关闭"]'));
+    await switchProject(originalProject);
+    window.__reqflowShowTerminal = async () => {
+      document.querySelector('.overlay')?.click();
+      if (button('返回项目菜单')) await click(button('返回项目菜单'));
+      if (button('返回项目')) await click(button('返回项目'));
+      await terminalSetting(true);
+      await switchProject('发布终端UI检查');
+      if (document.querySelector('.publish-terminal-reopen')) await click(document.querySelector('.publish-terminal-reopen'));
+      await waitFor(() => terminalText().includes('stream-last'));
+      if (document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成') throw Error('Terminal lost completed result');
+    };
+    window.__reqflowHideTerminal = async () => {
+      await terminalSetting(false);
+      await switchProject(originalProject);
+    };
     const dashboardEntry = button('数据看板');
     checks.statsMoved.ok &&= dashboardEntry.previousElementSibling.textContent.includes('插件/MOD/AGENT') && !!dashboardEntry.querySelector('svg');
     await click(dashboardEntry);

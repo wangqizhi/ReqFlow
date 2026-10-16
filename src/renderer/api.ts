@@ -61,7 +61,8 @@ export interface ReqFlowBridge {
   openVerifySource?(source: { kind: 'exe' | 'url'; value: string }): Promise<{ ok: boolean; error?: string }>;
   /** 发布脚本（REQ-070）：检测项目目录内的 publish 脚本（返回相对路径，空串表示没有）；执行发布并返回输出。仅桌面版提供。 */
   detectPublish?(root: string): Promise<{ ok: boolean; script?: string; error?: string }>;
-  runPublish?(root: string, rel: string): Promise<{ ok: boolean; output?: string; error?: string }>;
+  runPublish?(root: string, rel: string, terminalRunId?: string): Promise<{ ok: boolean; output?: string; error?: string }>;
+  getPublishOutput?(runId: string, offset: number): Promise<{ ok: boolean; data: string; offset: number; done: boolean; started: boolean; truncated?: boolean; error?: string }>;
   /** 发布完成系统通知（REQ-110）：整个发布流程结束时上报结果，窗口不在最前端时由主进程弹系统通知。 */
   publishNotice?(notice: { ok: boolean; project: string; detail?: string }): Promise<{ ok: boolean }>;
   /** 数据用量与归档（REQ-112）：目录/数据库大小统计，按日期导出并清理。仅桌面版提供。 */

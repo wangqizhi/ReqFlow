@@ -22,6 +22,8 @@ type Backend struct {
 	mu                                                     sync.Mutex
 	desktopLogMu                                           sync.Mutex
 	desktopLogPending                                      []any
+	desktopPublishMu                                       sync.Mutex
+	desktopPublishRuns                                     map[string]*desktopPublishRun
 	desktopUpdateMu                                        sync.Mutex
 	desktopUpdate                                          map[string]any
 	desktopAsset                                           map[string]any

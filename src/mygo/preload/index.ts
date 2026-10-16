@@ -26,6 +26,7 @@ const channels = {
   openVerifySource: 'verify:open',
   detectPublish: 'publish:detect',
   runPublish: 'publish:run',
+  getPublishOutput: 'publish:output',
   publishNotice: 'publish:notice',
   getDataUsage: 'data:usage',
   previewDataArchive: 'data:archivePreview',

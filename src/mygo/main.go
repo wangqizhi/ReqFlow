@@ -243,10 +243,26 @@ func smokeUI(w *mygo.Window, path string) {
 		for _, height := range []int{900, 720} {
 			w.SetSize(1440, height)
 			time.Sleep(150 * time.Millisecond)
-			for _, surface := range []string{"stats", "directory"} {
+			for _, surface := range []string{"terminal", "sidebar", "stats", "directory"} {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));
                   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  document.querySelectorAll('.sidebar-fixture').forEach(el=>el.remove());
+                  if(SURFACE==='terminal') {
+                    await window.__reqflowShowTerminal();await pause();
+                    const dock=document.querySelector('.publish-terminal'),rect=dock.getBoundingClientRect();
+                    const main=document.querySelector('.main').getBoundingClientRect();
+                    return {ok:Math.abs(rect.bottom-innerHeight)<1&&main.bottom<=rect.top+1&&rect.height>=160&&!!dock.querySelector('.xterm')&&dock.scrollWidth===dock.clientWidth,height:innerHeight};
+                  }
+                  if(SURFACE==='sidebar') {
+                    await window.__reqflowHideTerminal();
+                    const nav=document.querySelector('.side-project-scroll');
+                    for(let i=0;i<35;i++){const row=document.createElement('button');row.className='side-project sidebar-fixture';row.textContent='滚动检查项目 '+(i+1);nav.appendChild(row);}
+                    const section=document.querySelector('.side-project-section').getBoundingClientRect();
+                    const side=document.querySelector('.side').getBoundingClientRect();
+                    nav.scrollTop=nav.scrollHeight;const reachable=nav.scrollTop>0;nav.scrollTop=0;
+                    return {ok:section.height<=side.height/2+1&&nav.scrollHeight>nav.clientHeight&&reachable&&document.querySelector('.side-foot').getBoundingClientRect().bottom<=innerHeight,height:innerHeight};
+                  }
                   button('数据看板').click();await pause();
                   if(SURFACE==='stats') {
                     const page=document.querySelector('.stats-page'),calendar=page.querySelector('.activity-calendar');
