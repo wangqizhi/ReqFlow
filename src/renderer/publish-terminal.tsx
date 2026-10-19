@@ -28,6 +28,9 @@ function elapsedTime(start: number, end: number) {
 }
 export function PublishTerminal({ runId, project, session, onClose, onDetach }: { runId: string; project: string; session: PublishSession; onClose(): void; onDetach?(): Promise<void> }) {
   const container = useRef<HTMLDivElement>(null);
+  const veil = useRef<HTMLDivElement>(null);
+  const veilApi = useRef<{ show(): void; hide(): void } | null>(null);
+  const detachingRef = useRef(false);
   const current = useRef(session);
   current.current = session;
   const [readError, setReadError] = useState('');
@@ -42,12 +45,40 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
   }, [session.running, session.startedAt]);
   async function detach() {
     if (!onDetach || detaching) return;
+    detachingRef.current = true;
+    veilApi.current?.show();
     setDetaching(true); setDetachError('');
     try { await onDetach(); } catch (error: any) { setDetachError(error.message || '无法打开独立终端'); }
-    finally { setDetaching(false); }
+    finally {
+      detachingRef.current = false;
+      setDetaching(false);
+      veilApi.current?.hide();
+    }
   }
   useEffect(() => {
-    setLoading(true);
+    const content = container.current!, overlay = veil.current!;
+    let veilHideTimer: ReturnType<typeof setTimeout> | undefined;
+    // Keep the opaque veil on top for the whole gesture. The terminal stays
+    // hidden until xterm has reflowed and painted at the settled size, so a
+    // maximize (or a continuous drag-resize) never exposes an intermediate
+    // frame or an old canvas stretched to the new box.
+    const showVeil = () => {
+      clearTimeout(veilHideTimer);
+      content.style.visibility = 'hidden';
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+    };
+    const hideVeil = () => {
+      if (detachingRef.current) return;
+      content.style.visibility = '';
+      overlay.style.opacity = '0';
+      clearTimeout(veilHideTimer);
+      veilHideTimer = setTimeout(() => {
+        if (!detachingRef.current && overlay.isConnected && overlay.style.opacity === '0') overlay.style.visibility = 'hidden';
+      }, 180);
+    };
+    veilApi.current = { show: showVeil, hide: hideVeil };
+    showVeil();
     const terminal = new Terminal({
       convertEol: true, disableStdin: true, cursorBlink: false, scrollback: 5000, screenReaderMode: true,
       fontFamily: '"Cascadia Code", Consolas, "Microsoft YaHei", monospace', fontSize: 12,
@@ -55,31 +86,78 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    terminal.open(container.current!);
+    terminal.open(content);
     let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
-    let renderTimer: ReturnType<typeof setTimeout>, frame = 0, generation = 0, replayReady = false;
-    // Fit once after the native window settles, then reveal only after xterm has
-    // drained its write queue and painted at the final size.
-    const reveal = () => {
-      const ticket = ++generation;
-      if (container.current) container.current.style.visibility = 'hidden';
-      setLoading(true); clearTimeout(renderTimer); cancelAnimationFrame(frame);
-      renderTimer = setTimeout(() => {
-        if (disposed || !replayReady || !container.current?.clientHeight || !container.current.clientWidth) return;
-        fit.fit(); terminal.refresh(0, terminal.rows - 1);
-        terminal.write('', () => {
+    let cycleTimer: ReturnType<typeof setTimeout> | undefined, drainTimer: ReturnType<typeof setTimeout> | undefined, frame = 0;
+    let renderSub: { dispose(): void } | undefined, renderFallback: ReturnType<typeof setTimeout> | undefined;
+    let generation = 0, replayReady = false;
+    let stableWidth = 0, stableHeight = 0, stableSince = 0, cycleStarted = 0;
+    const paintAt = (ticket: number) => {
+      if (disposed || ticket !== generation || !replayReady) return;
+      if (!content.clientWidth || !content.clientHeight) return;
+      renderSub?.dispose(); renderSub = undefined;
+      clearTimeout(renderFallback); clearTimeout(drainTimer);
+      let done = false, painted = false;
+      const finish = () => {
+        if (done || disposed || ticket !== generation) return;
+        done = true;
+        renderSub?.dispose(); renderSub = undefined;
+        clearTimeout(renderFallback);
+        // Two frames after xterm's own paint: the canvas is complete before
+        // the veil is faded out, so the reveal is a clean transition.
+        frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
           if (disposed || ticket !== generation) return;
-          frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
-            if (!disposed && ticket === generation) {
-              if (container.current) container.current.style.visibility = '';
-              setLoading(false);
-            }
-          }); });
-        });
-      }, 120);
+          setLoading(false);
+          hideVeil();
+        }); });
+      };
+      const paint = () => {
+        if (disposed || ticket !== generation || done || painted) return;
+        painted = true;
+        renderSub?.dispose();
+        clearTimeout(renderFallback);
+        renderSub = terminal.onRender(finish);
+        fit.fit();
+        terminal.refresh(0, terminal.rows - 1);
+        renderFallback = setTimeout(finish, 250);
+      };
+      // Let every queued write (replay or live output) finish parsing before
+      // reflowing, so the reveal always shows the complete log.
+      drainTimer = setTimeout(paint, 400);
+      terminal.write('', () => { clearTimeout(drainTimer); paint(); });
     };
-    const resize = new ResizeObserver(reveal);
-    resize.observe(container.current!);
+    // Wait for the container to keep its size for a full beat. This also
+    // absorbs the successive WM_SIZE reports a Windows maximize emits.
+    const waitForSettledSize = () => {
+      const ticket = ++generation;
+      showVeil();
+      setLoading(true);
+      clearTimeout(cycleTimer); clearTimeout(drainTimer); clearTimeout(renderFallback); cancelAnimationFrame(frame);
+      renderSub?.dispose(); renderSub = undefined;
+      cycleStarted = performance.now();
+      stableWidth = 0; stableHeight = 0; stableSince = cycleStarted;
+      const tick = () => {
+        if (disposed || ticket !== generation) return;
+        const at = performance.now(), width = content.clientWidth, height = content.clientHeight;
+        if (!width || !height) { clearTimeout(cycleTimer); cycleTimer = setTimeout(tick, 50); return; }
+        if (width !== stableWidth || height !== stableHeight) {
+          stableWidth = width; stableHeight = height; stableSince = at;
+        }
+        const stableFor = at - stableSince, aliveFor = at - cycleStarted;
+        // Keep the veil up for at least one Windows maximize animation, so a
+        // trailing WM_SIZE cannot make the content flash back for a few frames.
+        if (stableFor < 160 || aliveFor < 360) {
+          clearTimeout(cycleTimer);
+          cycleTimer = setTimeout(tick, Math.max(20, Math.min(50, 360 - aliveFor, 160 - stableFor)));
+          return;
+        }
+        paintAt(ticket);
+      };
+      clearTimeout(cycleTimer);
+      cycleTimer = setTimeout(tick, 50);
+    };
+    const resize = new ResizeObserver(waitForSettledSize);
+    resize.observe(content);
     fit.fit();
     terminal.writeln(current.current.idle ? '终端已就绪，启动项目发布后将在这里显示输出。' : '发布 · ' + project);
     const poll = async () => {
@@ -98,7 +176,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
         setReadError(error.message || '无法读取发布输出');
       }
       if (disposed) return;
-      if (!replayReady) { replayReady = true; reveal(); }
+      if (!replayReady) { replayReady = true; waitForSettledSize(); }
       if (!current.current.running && !streamRunning) {
         const result = current.current.result;
         if (offset === 0 && result?.output) terminal.write(result.output);
@@ -107,8 +185,13 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
       }
       timer = setTimeout(poll, 250);
     };
-    if (current.current.idle) { replayReady = true; reveal(); } else void poll();
-    return () => { disposed = true; clearTimeout(timer); clearTimeout(renderTimer); cancelAnimationFrame(frame); resize.disconnect(); terminal.dispose(); };
+    if (current.current.idle) { replayReady = true; waitForSettledSize(); } else void poll();
+    return () => {
+      disposed = true; generation++;
+      clearTimeout(timer); clearTimeout(cycleTimer); clearTimeout(drainTimer); clearTimeout(renderFallback); clearTimeout(veilHideTimer);
+      cancelAnimationFrame(frame); renderSub?.dispose(); resize.disconnect(); terminal.dispose();
+      veilApi.current = null;
+    };
   }, [runId, project]);
   return <section className="publish-terminal" aria-label="发布终端" aria-busy={session.running || loading || detaching} data-run-id={runId}>
     <header><strong>Terminal · {project}</strong>
@@ -117,9 +200,11 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
       <button className="icon-btn" aria-label={onDetach ? '收起发布终端' : '关闭发布终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>
-    <div className={'publish-terminal-body' + (loading || detaching ? ' is-loading' : '')}>
+    <div className="publish-terminal-body">
       <div className="publish-terminal-content" ref={container} />
-      {(loading || detaching) && <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : '正在加载终端…'}</span></div>}
+      <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
+        <RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : loading ? '正在加载终端…' : ''}</span>
+      </div>
     </div>
   </section>;
 }

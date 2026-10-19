@@ -185,6 +185,40 @@ func writeReport(path string, value any) error {
 	}
 	return os.WriteFile(path, raw, 0600)
 }
+// maximizeTerminalCheck samples the terminal veil from inside the detached
+// window while the native window is maximized, and reports a failed check when
+// the page cannot be evaluated.
+func maximizeTerminalCheck(ctx context.Context, child *mygo.Window) any {
+	result := make(chan any, 1)
+	go func() {
+		value, err := child.Page().EvalContext(ctx, `(async()=>{
+          const veilEl=()=>document.querySelector('.publish-terminal-body > .terminal-loading');
+          const veilVisible=()=>{const el=veilEl();return !!el&&getComputedStyle(el).visibility==='visible'&&getComputedStyle(el).opacity!=='0';};
+          const contentHidden=()=>getComputedStyle(document.querySelector('.publish-terminal-content')).visibility==='hidden';
+          let sawVeil=false,covered=true;
+          const end=Date.now()+2500;
+          while(Date.now()<end){
+            const el=veilEl();
+            if(veilVisible())sawVeil=true;
+            // When the veil is explicitly held opaque (inline opacity 1) the old
+            // canvas must stay hidden; the short fade-out only follows the final paint.
+            if(el&&el.style.opacity==='1'&&getComputedStyle(el).visibility==='visible'&&!contentHidden())covered=false;
+            await new Promise(r=>setTimeout(r,16));
+          }
+          const settled=!veilVisible()&&!contentHidden();
+          return {ok:sawVeil&&covered&&settled,sawVeil,covered,settled};
+        })()`)
+		if err != nil {
+			result <- map[string]any{"ok": false, "error": err.Error()}
+			return
+		}
+		result <- value
+	}()
+	time.Sleep(250 * time.Millisecond)
+	child.Maximize()
+	return <-result
+}
+
 func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
@@ -303,6 +337,16 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 						detached, err = child.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+5000;while(!document.querySelector('.xterm')?.textContent.includes('stream-last')){if(Date.now()>end)throw Error('Detached terminal output timeout');await new Promise(r=>setTimeout(r,30));}const dock=document.querySelector('.publish-terminal'),rect=dock.getBoundingClientRect();return {ok:!document.querySelector('.side')&&!document.querySelector('.terminal-spinner')&&!!document.querySelector('.terminal-elapsed')&&dock.querySelector('[role="status"]').textContent==='发布完成'&&Math.abs(rect.height-innerHeight)<1&&Math.abs(rect.width-innerWidth)<1};})()`)
 						if err != nil {
 							detached = map[string]any{"ok": false, "error": err.Error()}
+						} else if report, ok := detached.(map[string]any); ok {
+							// Exercise the native maximize path: the veil must cover the
+							// terminal for the whole resize and content may only return
+							// after xterm has painted at the settled size.
+							if check := maximizeTerminalCheck(ctx, child); check != nil {
+								report["maximize"] = check
+								if value, ok := check.(map[string]any); !ok || value["ok"] != true {
+									report["ok"] = false
+								}
+							}
 						}
 						if png, err := child.CapturePage(); err == nil {
 							_ = os.WriteFile(fmt.Sprintf("%s.detached-%d.png", path, height), png, 0600)

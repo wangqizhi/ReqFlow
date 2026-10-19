@@ -86,6 +86,9 @@ try {
   for (const height of [900, 720]) {
     const detached = JSON.parse(await readFile(`${reportPath}.detached-${height}.json`, 'utf8'));
     assert.equal(detached.ok, true, JSON.stringify(detached));
+    // Native maximize must keep the terminal veil covered and reveal content only after the final paint.
+    assert.equal(detached.maximize?.ok, true, JSON.stringify(detached.maximize));
+    await writeFile(path.join(root, `tmp/mygo-terminal-detached-${height}.json`), JSON.stringify(detached, null, 2));
     await copyFile(`${reportPath}.detached-${height}.png`, path.join(root, `tmp/mygo-terminal-detached-${height}.png`));
   }
   if (env.REQFLOW_UI_NOTIFICATION === '1') assert.equal(report.notification?.ok, true, JSON.stringify(report.notification));

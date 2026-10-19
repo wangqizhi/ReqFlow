@@ -275,8 +275,10 @@
       checks.terminalSetting = { ok: toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled) };
       await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
     };
+    const terminalVeil = () => document.querySelector('.publish-terminal-body > .terminal-loading');
+    const veilVisible = () => { const el = terminalVeil(); return !!el && getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).opacity !== '0'; };
     await terminalSetting(true);
-    await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布' && !document.querySelector('.terminal-loading'));
+    await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布' && !veilVisible());
     checks.terminalImmediate = { ok: !!document.querySelector('.publish-terminal .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     await switchProject('发布终端UI检查');
     await waitFor(() => button('发布') && !button('发布').disabled);
@@ -310,13 +312,20 @@
     checks.terminalTimerStopped = { ok: !document.querySelector('.terminal-spinner') && document.querySelector('.publish-terminal').getAttribute('aria-busy') === 'false' && document.querySelector('.terminal-elapsed').textContent === elapsedEnd };
     const terminalBody = document.querySelector('.publish-terminal-body');
     terminalBody.style.maxWidth = 'calc(100% - 40px)';
-    await waitFor(() => !!document.querySelector('.terminal-loading'));
-    checks.terminalResizeLoading = { ok: getComputedStyle(document.querySelector('.publish-terminal-content')).visibility === 'hidden' };
-    await waitFor(() => !document.querySelector('.terminal-loading'));
-    checks.terminalResizeLoading.ok &&= terminalText().includes('stream-first') && terminalText().includes('stream-last');
+    await waitFor(() => veilVisible());
+    const contentHidden = () => getComputedStyle(document.querySelector('.publish-terminal-content')).visibility === 'hidden';
+    checks.terminalResizeLoading = { ok: contentHidden() };
+    // 连续多次尺寸变化（类似窗口最大化时的多帧 WM_SIZE）期间，遮罩必须持续覆盖，不能露出中间帧。
+    for (const width of ['calc(100% - 28px)', 'calc(100% - 56px)', 'calc(100% - 84px)']) {
+      terminalBody.style.maxWidth = width;
+      await new Promise(resolve => setTimeout(resolve, 60));
+      checks.terminalResizeLoading.ok &&= veilVisible() && contentHidden();
+    }
+    await waitFor(() => !veilVisible());
+    checks.terminalResizeLoading.ok &&= !contentHidden() && terminalText().includes('stream-first') && terminalText().includes('stream-last');
     terminalBody.style.maxWidth = '';
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    await waitFor(() => !document.querySelector('.terminal-loading'));
+    await waitFor(() => !veilVisible());
     await switchProject(originalProject);
     await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布');
     checks.terminalIsolation = { ok: !terminalText().includes('stream-first') && !terminalText().includes('stream-last') };
@@ -335,7 +344,7 @@
       await switchProject('发布终端UI检查');
       if (document.querySelector('.publish-terminal-reopen')) await click(document.querySelector('.publish-terminal-reopen'));
       await waitFor(() => terminalText().includes('stream-last'));
-      await waitFor(() => !document.querySelector('.terminal-loading'));
+      await waitFor(() => !veilVisible());
       if (document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成') throw Error('Terminal lost completed result');
     };
     window.__reqflowHideTerminal = async () => {

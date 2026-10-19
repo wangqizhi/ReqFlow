@@ -610,11 +610,10 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .publish-terminal .icon-btn:hover { background: var(--side-hover); color: var(--side-ink); }
 .publish-terminal-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
 .publish-terminal-content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 0 14px 10px; }
-.publish-terminal-body.is-loading .publish-terminal-content { visibility: hidden; }
 .terminal-loading { display: flex; align-items: center; justify-content: center; gap: 12px; flex: 1; min-height: 0; color: var(--side-muted); background: var(--side-bg); }
-.publish-terminal-body > .terminal-loading { position: absolute; inset: 0; }
+.publish-terminal-body > .terminal-loading { position: absolute; inset: 0; z-index: 1; transition: opacity 140ms ease; }
 .terminal-loading-spinner { color: var(--accent); animation: terminal-spin 1s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .terminal-loading-spinner { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .terminal-loading-spinner { animation: none; } .publish-terminal-body > .terminal-loading { transition: none; } }
 .publish-terminal-content .xterm { height: 100%; }
 .publish-terminal-reopen { flex-shrink: 0; padding: 7px 14px; text-align: left; background: var(--side-bg); color: var(--side-ink); font-size: 12px; }
 .publish-terminal-reopen:hover { color: var(--side-muted); }
