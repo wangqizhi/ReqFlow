@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -55,7 +55,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
       veilApi.current?.hide();
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const content = container.current!, overlay = veil.current!;
     let veilHideTimer: ReturnType<typeof setTimeout> | undefined;
     // Keep the opaque veil on top for the whole gesture. The terminal stays
@@ -146,9 +146,9 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
         const stableFor = at - stableSince, aliveFor = at - cycleStarted;
         // Keep the veil up for at least one Windows maximize animation, so a
         // trailing WM_SIZE cannot make the content flash back for a few frames.
-        if (stableFor < 160 || aliveFor < 360) {
+        if (stableFor < 360 || aliveFor < 360) {
           clearTimeout(cycleTimer);
-          cycleTimer = setTimeout(tick, Math.max(20, Math.min(50, 360 - aliveFor, 160 - stableFor)));
+          cycleTimer = setTimeout(tick, Math.max(20, Math.min(50, 360 - aliveFor, 360 - stableFor)));
           return;
         }
         paintAt(ticket);
@@ -158,6 +158,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     };
     const resize = new ResizeObserver(waitForSettledSize);
     resize.observe(content);
+    window.addEventListener('resize', waitForSettledSize);
     fit.fit();
     terminal.writeln(current.current.idle ? '终端已就绪，启动项目发布后将在这里显示输出。' : '发布 · ' + project);
     const poll = async () => {
@@ -189,7 +190,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     return () => {
       disposed = true; generation++;
       clearTimeout(timer); clearTimeout(cycleTimer); clearTimeout(drainTimer); clearTimeout(renderFallback); clearTimeout(veilHideTimer);
-      cancelAnimationFrame(frame); renderSub?.dispose(); resize.disconnect(); terminal.dispose();
+      cancelAnimationFrame(frame); renderSub?.dispose(); resize.disconnect(); window.removeEventListener('resize', waitForSettledSize); terminal.dispose();
       veilApi.current = null;
     };
   }, [runId, project]);
@@ -203,7 +204,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     <div className="publish-terminal-body">
       <div className="publish-terminal-content" ref={container} />
       <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
-        <RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : loading ? '正在加载终端…' : ''}</span>
+        <RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : '正在加载终端…'}</span>
       </div>
     </div>
   </section>;

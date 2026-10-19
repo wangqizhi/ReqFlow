@@ -20,18 +20,20 @@ function detectMention(value: string, caret: number): string | null {
   return query;
 }
 
-export function GuidanceField({ label, value, onChange, root, projectId, kind, rows = 8, placeholder, disabled, hint }:
-  { label: string; value: string; onChange(v: string): void; root: string; projectId: string; kind: 'guidance' | 'delivery'; rows?: number; placeholder?: string; disabled?: boolean; hint?: string }) {
-  const input = useRef<HTMLTextAreaElement>(null);
+export function FileMentionTextarea({ value, onChange, root, rows = 4, placeholder, disabled, inputRef, onPaste, className = '', wrapClassName = '', autoFocus = false, label }: {
+  value: string; onChange(v: string): void; root: string; rows?: number; placeholder?: string; disabled?: boolean;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>; onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  className?: string; wrapClassName?: string; autoFocus?: boolean; label?: string;
+}) {
+  const fallbackInput = useRef<HTMLTextAreaElement>(null);
+  const input = inputRef || fallbackInput;
   const dirCache = useRef(new Map<string, FileEntry[]>());
-  const [editing, setEditing] = useState(false);
   const [mention, setMention] = useState<{ query: string; caret: number } | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [listing, setListing] = useState<{ dir: string; entries: FileEntry[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [index, setIndex] = useState(0);
-  const [ai, setAi] = useState<{ running: boolean; error: string; compare: { original: string; optimized: string; note: string } | null }>({ running: false, error: '', compare: null });
   const menu = useRef<HTMLDivElement>(null);
 
   const completable = !!root && !!bridge.listDir;
@@ -114,36 +116,9 @@ export function GuidanceField({ label, value, onChange, root, projectId, kind, r
     }
   }
 
-  async function runOptimize() {
-    if (ai.running || disabled || !value.trim()) return;
-    if (!bridge.optimizeGuidance) { setAi({ running: false, error: 'AI 优化仅桌面版可用', compare: null }); return; }
-    setEditing(true); // 对比视图挂在编辑区内，优化前先进入编辑态
-    setAi({ running: true, error: '', compare: null });
-    try {
-      const r = await bridge.optimizeGuidance(projectId, kind, value);
-      if (!r.ok || !r.text?.trim()) throw Error(r.error || 'AI 返回的优化结果为空');
-      setAi({ running: false, error: '', compare: { original: value, optimized: r.text, note: r.contextNote || '' } });
-    } catch (e: any) {
-      setAi((s) => ({ ...s, running: false, error: e.message }));
-    }
-  }
-
-  return <div className="field guidance-field" onBlur={(e) => {
-    // 焦点移出整个字段（标题按钮、输入框、对比区之外）时收起为文本块；AI 优化进行中或对比未处理时保持展开
-    if (!e.currentTarget.contains(e.relatedTarget as Node) && !ai.running && !ai.compare) { setEditing(false); setDismissed(true); }
-  }}>
-    <div className="guidance-field-head">
-      <span>{label}</span>
-      <div className="guidance-field-actions">
-        {editing && <button type="button" className="btn sm" disabled={disabled} title="收起编辑框，回到文本块展示" onClick={() => { setEditing(false); setDismissed(true); }}>收起</button>}
-        <button type="button" className="btn sm" disabled={disabled || ai.running || !value.trim()} title="结合最近提交与变更差异，让 AI 优化当前引导词"
-          onClick={() => void runOptimize()}><Wand size={14} />{ai.running ? 'AI 优化中…' : 'AI 优化'}</button>
-      </div>
-    </div>
-    {!editing && <button type="button" className={'guidance-view' + (value.trim() ? '' : ' empty')} title="点击编辑，输入 @ 可补全项目文件路径" onClick={() => setEditing(true)}>{value.trim() || `点击填写${label}`}</button>}
-    {editing && <>
-      <div className="guidance-input-wrap">
-        <textarea className="guide-edit" autoFocus rows={rows} value={value} disabled={disabled} placeholder={placeholder}
+  return (
+      <div className={"guidance-input-wrap " + wrapClassName}>
+        <textarea className={className} autoFocus={autoFocus} aria-label={label} onPaste={onPaste} rows={rows} value={value} disabled={disabled} placeholder={placeholder}
           ref={input} onChange={(e) => { onChange(e.target.value); refreshMention(); }} onKeyDown={onKeyDown}
           onClick={refreshMention} onKeyUp={refreshMention} />
         {open && <div className={'mention-menu' + (shown.length || fetching || loadError ? '' : ' empty')} role="listbox" aria-label="文件与目录补全" ref={menu}>
@@ -164,6 +139,42 @@ export function GuidanceField({ label, value, onChange, root, projectId, kind, r
             </>}
         </div>}
       </div>
+  );
+}
+
+export function GuidanceField({ label, value, onChange, root, projectId, kind, rows = 8, placeholder, disabled, hint }:
+  { label: string; value: string; onChange(v: string): void; root: string; projectId: string; kind: 'guidance' | 'delivery'; rows?: number; placeholder?: string; disabled?: boolean; hint?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [ai, setAi] = useState<{ running: boolean; error: string; compare: { original: string; optimized: string; note: string } | null }>({ running: false, error: '', compare: null });
+  async function runOptimize() {
+    if (ai.running || disabled || !value.trim()) return;
+    if (!bridge.optimizeGuidance) { setAi({ running: false, error: 'AI 优化仅桌面版可用', compare: null }); return; }
+    setEditing(true); // 对比视图挂在编辑区内，优化前先进入编辑态
+    setAi({ running: true, error: '', compare: null });
+    try {
+      const r = await bridge.optimizeGuidance(projectId, kind, value);
+      if (!r.ok || !r.text?.trim()) throw Error(r.error || 'AI 返回的优化结果为空');
+      setAi({ running: false, error: '', compare: { original: value, optimized: r.text, note: r.contextNote || '' } });
+    } catch (e: any) {
+      setAi((s) => ({ ...s, running: false, error: e.message }));
+    }
+  }
+
+  return <div className="field guidance-field" onBlur={(e) => {
+    // 焦点移出整个字段（标题按钮、输入框、对比区之外）时收起为文本块；AI 优化进行中或对比未处理时保持展开
+    if (!e.currentTarget.contains(e.relatedTarget as Node) && !ai.running && !ai.compare) { setEditing(false); }
+  }}>
+    <div className="guidance-field-head">
+      <span>{label}</span>
+      <div className="guidance-field-actions">
+        {editing && <button type="button" className="btn sm" disabled={disabled} title="收起编辑框，回到文本块展示" onClick={() => { setEditing(false); }}>收起</button>}
+        <button type="button" className="btn sm" disabled={disabled || ai.running || !value.trim()} title="结合最近提交与变更差异，让 AI 优化当前引导词"
+          onClick={() => void runOptimize()}><Wand size={14} />{ai.running ? 'AI 优化中…' : 'AI 优化'}</button>
+      </div>
+    </div>
+    {!editing && <button type="button" className={'guidance-view' + (value.trim() ? '' : ' empty')} title="点击编辑，输入 @ 可补全项目文件路径" onClick={() => setEditing(true)}>{value.trim() || `点击填写${label}`}</button>}
+    {editing && <>
+      <FileMentionTextarea value={value} onChange={onChange} root={root} rows={rows} disabled={disabled} placeholder={placeholder} className="guide-edit" autoFocus label={label} />
       {hint && <p className="guidance-field-hint">{hint}</p>}
       {ai.error && <p className="settings-message" role="alert">{ai.error}</p>}
       {ai.compare && <div className="guidance-compare">

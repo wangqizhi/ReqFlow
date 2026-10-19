@@ -611,7 +611,7 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .publish-terminal-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
 .publish-terminal-content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 0 14px 10px; }
 .terminal-loading { display: flex; align-items: center; justify-content: center; gap: 12px; flex: 1; min-height: 0; color: var(--side-muted); background: var(--side-bg); }
-.publish-terminal-body > .terminal-loading { position: absolute; inset: 0; z-index: 1; transition: opacity 140ms ease; }
+.publish-terminal-body > .terminal-loading { position: absolute; inset: 0; z-index: 1; }
 .terminal-loading-spinner { color: var(--accent); animation: terminal-spin 1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .terminal-loading-spinner { animation: none; } .publish-terminal-body > .terminal-loading { transition: none; } }
 .publish-terminal-content .xterm { height: 100%; }
@@ -1045,3 +1045,7 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .ssh-directory-list .side-project span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ssh-connection-fields .field { margin-bottom: 0; }
+
+.body-expand-mention { flex: 1; min-height: 0; display: flex; }
+.body-expand-mention > textarea { flex: 1; min-height: 0; }
+.body-expand-mention > .mention-menu { top: auto; bottom: 8px; }

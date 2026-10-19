@@ -17,7 +17,7 @@ import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
 import { ProjectBrowser } from './browser';
 import { SettingsPage, settingsTabs, type SettingsPageHandle } from './settings';
-import { GuidanceField } from './guide-fields';
+import { GuidanceField, FileMentionTextarea } from './guide-fields';
 import { AIRequirements } from './ai-requirements';
 import { ProjectCreate } from './project-create';
 import { ProjectManager } from './project-manager';
@@ -146,17 +146,23 @@ export default function App() {
   const terminalSession = publishStates[p?.id || ''];
   const terminalRunId = terminalSession?.terminalRunId;
   const terminalDetached = !!terminalRunId && !!detachedTerminals[terminalRunId];
-  const terminalWasEnabled = useRef(terminalEnabled);
+  function rememberTerminal(id: string, open: boolean) {
+    try { localStorage.setItem('reqflow-terminal-open:' + id, String(open)); } catch {}
+  }
+  function setTerminalOpen(id: string, open: boolean) {
+    rememberTerminal(id, open);
+    setPublishStates(states => ({ ...states, [id]: { ...states[id], terminalOpen: open } }));
+  }
   useEffect(() => {
-    const enabling = terminalEnabled && !terminalWasEnabled.current;
-    terminalWasEnabled.current = terminalEnabled;
     if (!terminalEnabled || !p || !bridge.getPublishOutput) return;
     const id = p.id, name = p.name;
     setPublishStates(states => {
-      if (states[id]?.terminalRunId) return enabling && !states[id].terminalOpen ? { ...states, [id]: { ...states[id], terminalOpen: true } } : states;
+      if (states[id]?.terminalRunId) return states;
+      let open = false;
+      try { open = localStorage.getItem('reqflow-terminal-open:' + id) === 'true'; } catch {}
       const now = Date.now();
       const session = states[id] || { running: false, step: '', result: null, startedAt: now, endedAt: now, revision: 1, idle: true };
-      return { ...states, [id]: { ...session, terminalRunId: crypto.randomUUID(), terminalProject: name, terminalOpen: true } };
+      return { ...states, [id]: { ...session, terminalRunId: crypto.randomUUID(), terminalProject: name, terminalOpen: open } };
     });
   }, [terminalEnabled, p?.id, p?.name]);
   useEffect(() => {
@@ -475,6 +481,7 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
+    if (terminalRunId) rememberTerminal(project.id, true);
     update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
@@ -1098,8 +1105,8 @@ export default function App() {
 
         </>}
       </main>
-      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: false } }))} />}
-      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setPublishStates(states => ({ ...states, [p.id]: { ...states[p.id], terminalOpen: true } }))}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
+      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
+      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
@@ -1209,7 +1216,7 @@ export default function App() {
               </div>
               <button className="icon-btn" aria-label="收起放大编辑" onClick={() => setBodyExpanded(false)}><X size={18} /></button>
             </div>
-            <textarea className="body-expand-input" autoFocus value={form.body} onChange={(e) => change({ ...form, body: e.target.value })}
+            <FileMentionTextarea root={p?.dir || ''} label="需求说明" wrapClassName="body-expand-mention" className="body-expand-input" autoFocus value={form.body} onChange={(body) => change({ ...form, body })}
               placeholder={form.type === 'bug' ? '复现步骤、实际表现与预期行为' : '描述要实现的行为、约束或目标指标'} />
           </div>
         </div>
@@ -1301,7 +1308,7 @@ export default function App() {
                 <div className="field"><span>执行方式</span><div className="segmented" role="group" aria-label="需求执行方式">{[['ai', 'AI 执行'], ['human', '人工执行'], ['other', '其他执行器']].map(([id, label]) => <button type="button" key={id} aria-pressed={id === 'other' ? !['ai', 'human'].includes(form.executor || 'ai') : (form.executor || 'ai') === id} className={(id === 'other' ? !['ai', 'human'].includes(form.executor || 'ai') : (form.executor || 'ai') === id) ? 'on' : ''} onClick={() => change({ ...form, executor: id === 'other' ? 'agent:custom' : id })}>{label}</button>)}</div></div>
                 {!['ai', 'human'].includes(form.executor || 'ai') && <label className="field">执行器标识<input value={form.executor} onChange={e => change({ ...form, executor: e.target.value })} placeholder="plugin:名称 或 agent:名称" /></label>}
                 <label className="field">需求说明 · Ctrl+V 可粘贴截图
-                  <textarea ref={bodyInput} rows={4} value={form.body} onChange={(e) => change({ ...form, body: e.target.value })}
+                  <FileMentionTextarea inputRef={bodyInput} root={p?.dir || ''} label="需求说明" rows={4} value={form.body} onChange={(body) => change({ ...form, body })}
                     onPaste={(e) => {
                       const images = Array.from(e.clipboardData.items).filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter((file): file is File => !!file);
                       if (!images.length) return;

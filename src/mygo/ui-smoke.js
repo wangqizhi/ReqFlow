@@ -278,6 +278,9 @@
     const terminalVeil = () => document.querySelector('.publish-terminal-body > .terminal-loading');
     const veilVisible = () => { const el = terminalVeil(); return !!el && getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).opacity !== '0'; };
     await terminalSetting(true);
+    await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
+    checks.terminalDefaultCollapsed = { ok: !document.querySelector('.publish-terminal') };
+    await click(document.querySelector('.publish-terminal-reopen'));
     await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布' && !veilVisible());
     checks.terminalImmediate = { ok: !!document.querySelector('.publish-terminal .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     await switchProject('发布终端UI检查');
@@ -302,8 +305,10 @@
     checks.terminalCollapse = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
     await terminalSetting(false);
     await terminalSetting(true);
+    await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
+    checks.terminalReenable = { ok: !document.querySelector('.publish-terminal') };
+    await click(document.querySelector('.publish-terminal-reopen'));
     await waitFor(() => !!document.querySelector('.publish-terminal'));
-    checks.terminalReenable = { ok: !document.querySelector('.publish-terminal-reopen') };
     await waitFor(() => terminalText().includes('stream-last') && terminalText().includes('stream-stderr'));
     await waitFor(() => document.querySelector('.publish-terminal [role="status"]').textContent === '发布完成');
     checks.terminalComplete = { ok: !document.querySelector('.publish-dialog') && terminalText().includes('stream-first') };
