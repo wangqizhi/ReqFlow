@@ -3,7 +3,8 @@
 //   目录列表按需加载并缓存，输入过程只在内存里过滤，下拉支持 ↑↓ 选择、回车/Tab 确认、
 //   Esc 关闭；选择目录后追加 / 继续深入。焦点离开字段（且无进行中的 AI 优化）自动收起为文本块。
 // - AI 优化：携带最近提交与差异统计请求后端，返回后展示「原文 / 可编辑的优化稿」对比视图。
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { bridge, type FileEntry } from './api';
 import { FileText, Folder, Wand } from './icons';
 
@@ -36,8 +37,25 @@ export function FileMentionTextarea({ value, onChange, root, rows = 4, placehold
   const [index, setIndex] = useState(0);
   const menu = useRef<HTMLDivElement>(null);
 
+  useEffect(() => { dirCache.current.clear(); setListing(null); }, [root]);
   const completable = !!root && !!bridge.listDir;
   const open = !!mention && !dismissed && completable;
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const rect = input.current?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const down = below >= 180 || below >= above;
+      setMenuStyle({ position: 'fixed', left: Math.max(8, rect.left), width: Math.min(rect.width, window.innerWidth - 16), right: 'auto', top: down ? rect.bottom + 4 : 'auto', bottom: down ? 'auto' : window.innerHeight - rect.top + 4, maxHeight: Math.max(60, Math.min(236, down ? below : above)), zIndex: 10000 });
+    };
+    position();
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    return () => { window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
+  }, [open]);
   const query = mention?.query || '';
   const slash = query.lastIndexOf('/');
   const dirRel = slash >= 0 ? query.slice(0, slash) : '';
@@ -120,8 +138,8 @@ export function FileMentionTextarea({ value, onChange, root, rows = 4, placehold
       <div className={"guidance-input-wrap " + wrapClassName}>
         <textarea className={className} autoFocus={autoFocus} aria-label={label} onPaste={onPaste} rows={rows} value={value} disabled={disabled} placeholder={placeholder}
           ref={input} onChange={(e) => { onChange(e.target.value); refreshMention(); }} onKeyDown={onKeyDown}
-          onClick={refreshMention} onKeyUp={refreshMention} />
-        {open && <div className={'mention-menu' + (shown.length || fetching || loadError ? '' : ' empty')} role="listbox" aria-label="文件与目录补全" ref={menu}>
+          onClick={refreshMention} onKeyUp={refreshMention} onBlur={() => setMention(null)} />
+        {open && createPortal(<div style={menuStyle} className={'mention-menu' + (shown.length || fetching || loadError ? '' : ' empty')} role="listbox" aria-label="文件与目录补全" ref={menu}>
           {fetching ? <p className="mention-status">正在读取目录…</p>
             : loadError ? <p className="mention-status">{'目录读取失败：' + loadError}</p>
             : shown.length === 0 ? <p className="mention-status">没有匹配“{filterText}”的文件或目录</p>
@@ -137,7 +155,7 @@ export function FileMentionTextarea({ value, onChange, root, rows = 4, placehold
               ))}
               {hidden > 0 && <p className="mention-status">还有 {hidden} 项未展示，继续输入可缩小范围</p>}
             </>}
-        </div>}
+        </div>, document.body)}
       </div>
   );
 }

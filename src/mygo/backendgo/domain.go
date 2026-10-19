@@ -306,6 +306,7 @@ func MatchesSchedule(date, mode, selected string) bool {
 	return date == "" || date <= selected
 }
 func NormalizeWorkspace(s map[string]any) map[string]any {
+	refreshContextRules(s)
 	folders := coreList(s["folders"])
 	if coreFind(folders, "default") == nil {
 		folders = append([]any{map[string]any{"id": "default", "name": "default"}}, folders...)
@@ -525,7 +526,11 @@ func BuildPrompt(p map[string]any, items []any) string {
 		}
 		tail = append(tail, "交付引导（"+label+"）：\n"+g.text)
 	}
-	r := "# 项目：" + coreString(p["name"]) + "\n\n## 项目上下文\n" + coreString(p["description"]) + "\n\n## 引导词 · v" + coreString(p["guideVersion"]) + "\n" + guidance + "\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n" + strings.Join(sections, "\n\n")
+	rules := ""
+	if text := coreString(p["contextRules"]); text != "" {
+		rules = "\n\n## 项目守则（自动生成）\n" + text
+	}
+	r := "# 项目：" + coreString(p["name"]) + "\n\n## 项目上下文\n" + coreString(p["description"]) + "\n\n## 引导词 · v" + coreString(p["guideVersion"]) + "\n" + guidance + rules + "\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n" + strings.Join(sections, "\n\n")
 	if len(tail) > 0 {
 		r += "\n\n" + strings.Join(tail, "\n\n")
 	}
@@ -743,6 +748,7 @@ func coreApplyOperation(s, a map[string]any) error {
 				return errors.New("提示词不存在")
 			}
 			s["contextPrompts"] = coreRemove(prompts, a["id"])
+			refreshContextRules(s)
 			return nil
 		}
 		title, e := coreNeed(a["title"], "提示词标题")
@@ -773,8 +779,16 @@ func coreApplyOperation(s, a map[string]any) error {
 			old = map[string]any{"id": coreUUID()}
 			prompts = append(prompts, old)
 		}
+		if a["projectId"] != nil {
+			projectID, feature := coreString(a["projectId"]), strings.TrimSpace(coreString(a["feature"]))
+			if projectID != "" && (coreFind(coreList(s["projects"]), projectID) == nil || feature == "") {
+				return errors.New("关联项目不存在或功能名称为空")
+			}
+			old["projectId"], old["feature"] = projectID, feature
+		}
 		old["title"], old["body"], old["tags"] = title, body, tags
 		s["contextPrompts"] = prompts
+		refreshContextRules(s)
 		return nil
 	case "folder":
 		name, e := coreNeed(a["name"], "文件夹名称")

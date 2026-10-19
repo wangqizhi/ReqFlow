@@ -159,7 +159,11 @@ func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64)
 		record["data"] = state
 		next, e := s.store.write(record, &expected)
 		if e == nil {
-			return map[string]any{"state": NormalizeWorkspace(coreMap(next["data"])), "version": coreNum(next["version"])}, nil
+			result := map[string]any{"state": NormalizeWorkspace(coreMap(next["data"])), "version": coreNum(next["version"])}
+			if warning := coreString(next["contextWarning"]); warning != "" {
+				result["warning"] = warning
+			}
+			return result, nil
 		}
 		var conflict *VersionConflictError
 		if !errors.As(e, &conflict) {

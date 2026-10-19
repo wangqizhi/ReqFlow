@@ -21,6 +21,9 @@ function formatSize(bytes: number | undefined): string {
 
 /** 数据用量与归档（REQ-112）：大小每 2 秒刷新，归档后立即能看到清理效果。 */
 function DataSettings({ notify, onArchived, onExport }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void> }) {
+  const [contextDir, setContextDir] = useState('');
+  const [contextMoving, setContextMoving] = useState(false);
+  useEffect(() => { void bridge.getContextSettings?.().then(r => { if (r.ok) setContextDir(r.dir || ''); }); }, []);
   const [usage, setUsage] = useState<DataUsage | null>(null);
   const [usageError, setUsageError] = useState('');
   const [date, setDate] = useState('');
@@ -71,6 +74,7 @@ function DataSettings({ notify, onArchived, onExport }: { notify(text: string, k
     finally { setArchiving(false); }
   }
   return <>
+    <div className="data-archive-section"><h3>上下文数据目录</h3><label className="field">目录<input value={contextDir} disabled={contextMoving} onChange={e => setContextDir(e.target.value)} /></label><p className="settings-hint">上下文以 JSON 和 Markdown 保存在此目录；系统存在 Git 时每次更新自动提交。迁移到空目录，原目录保留为恢复副本，工作区保留关联索引。</p><div className="settings-actions"><button className="btn" disabled={contextMoving || !bridge.pickDir} onClick={async () => { const dir = await bridge.pickDir?.(); if (dir?.ok && dir.dir) setContextDir(dir.dir); }}><FolderOpen size={16} />选择目录</button><button className="btn primary" disabled={contextMoving || !contextDir.trim() || !bridge.saveContextSettings} onClick={async () => { setContextMoving(true); try { const r = await bridge.saveContextSettings!(contextDir); if (!r.ok) throw Error(r.error || '迁移失败'); setContextDir(r.dir || contextDir); notify('上下文目录已迁移，原目录保留为恢复副本'); } catch (e: any) { notify(e.message, 'err'); } finally { setContextMoving(false); } }}>{contextMoving ? '迁移中…' : '保存并迁移上下文'}</button></div></div>
     <div className="data-export-section"><div><h3>完整数据备份</h3><p className="settings-hint">导出全部项目、需求、上下文与历史记录为 JSON 文件，便于备份或迁移。</p></div><button className="btn primary" disabled={exporting} onClick={async () => { setExporting(true); try { await onExport(); } catch (e: any) { notify(e.message, 'err'); } finally { setExporting(false); } }}><Download size={16} />{exporting ? '正在导出…' : '导出全部数据'}</button></div>
     <p className="settings-hint" title={usage?.dataDir}>{usage?.dataDir || usageError || '读取中…'}</p>
     <div className="validation-setting"><div><label>数据目录总大小</label><p>目录内全部文件（含图片附件、日志与备份配置）</p></div><span>{usage ? formatSize(usage.dirSize) : '—'}</span></div>

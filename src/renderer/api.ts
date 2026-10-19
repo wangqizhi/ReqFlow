@@ -37,6 +37,10 @@ export type LocalAgent = { id: string; name: string; command: string; package: s
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
 export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
 export interface ReqFlowBridge {
+  getTerminalSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
+  saveTerminalSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
+  getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
+  saveContextSettings?(dir: string): Promise<{ ok: boolean; dir?: string; error?: string }>;
   listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;
   sshStatus?(root: string): Promise<{ ok: boolean; error?: string }>;
   getStorageStatus?(): Promise<{ ok: boolean; backend?: string; error?: string }>;

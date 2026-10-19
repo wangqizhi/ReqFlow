@@ -206,6 +206,26 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		return b.desktopUpdater(ctx, channel)
 	}
 	switch channel {
+	case "lab:terminal:get", "lab:terminal:save":
+		file := filepath.Join(b.DataDir, "lab-terminal.json")
+		if channel == "lab:terminal:save" {
+			enabled, ok := desktopArg(args, 0).(bool)
+			if !ok {
+				return nil, errors.New("Terminal 设置无效")
+			}
+			if e := desktopAtomicJSON(file, map[string]any{"enabled": enabled}); e != nil {
+				return nil, e
+			}
+		}
+		value, e := desktopReadJSON(file, nil)
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(map[string]any{"settings": value}), nil
+	case "context:settings:get":
+		return b.Workspace.contextSettings()
+	case "context:settings:save":
+		return b.Workspace.moveContexts(desktopText(args, 0))
 	case "workspace:get":
 		r, e := b.Workspace.Get()
 		if e != nil {

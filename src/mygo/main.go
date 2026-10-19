@@ -66,6 +66,19 @@ func run() (int, error) {
 	if len(args) > 0 && args[0] == "--cli" {
 		return backendgo.RunCLI(args[1:], appVersion, dataDir, os.Stdout), nil
 	}
+	if len(args) > 0 && args[0] == "--smoke-ui" {
+		isolated, e := os.MkdirTemp("", "reqflow-smoke-")
+		if e != nil {
+			return 1, e
+		}
+		defer os.RemoveAll(isolated)
+		if os.Getenv("REQFLOW_DATA_DIR") == "" {
+			dataDir = filepath.Join(isolated, "data")
+		}
+		if os.Getenv("REQFLOW_WEBVIEW_DIR") == "" {
+			_ = os.Setenv("REQFLOW_WEBVIEW_DIR", filepath.Join(isolated, "webview"))
+		}
+	}
 	backend := backendgo.NewBackend(dataDir, appDir, appVersion)
 	// An explicit local harness exercises the compiled Go backend without a GUI.
 	if len(args) > 0 && args[0] == "--test-invoke" {
@@ -124,6 +137,14 @@ func run() (int, error) {
 	mygo.App.SetName("ReqFlow")
 	mygo.App.SetVersion(appVersion)
 	webviewDir := os.Getenv("REQFLOW_WEBVIEW_DIR")
+	if webviewDir != "" {
+		// MyGO v0.4.8's Windows backend reads LOCALAPPDATA directly when creating
+		// its WebView2 environment; PathUserData only moves window-state.json.
+		// This process-local override makes the test's browser profile isolated too.
+		if e := os.Setenv("LOCALAPPDATA", webviewDir); e != nil {
+			return 1, e
+		}
+	}
 	if webviewDir == "" {
 		webviewDir = filepath.Join(dataDir, "webview2")
 	}
@@ -185,6 +206,7 @@ func writeReport(path string, value any) error {
 	}
 	return os.WriteFile(path, raw, 0600)
 }
+
 // maximizeTerminalCheck samples the terminal veil from inside the detached
 // window while the native window is maximized, and reports a failed check when
 // the page cannot be evaluated.

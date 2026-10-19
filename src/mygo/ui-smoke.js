@@ -5,7 +5,7 @@
       if (predicate()) return;
       await new Promise(resolve => setTimeout(resolve, 30));
     }
-    throw Error('UI check timed out');
+    throw Error('UI check timed out after ' + lastAction + '; completed checks: ' + Object.keys(checks).join(','));
   };
   const button = text => [...document.querySelectorAll('button')].find(el => el.textContent.trim() === text);
   let lastAction = 'initialization';
@@ -272,6 +272,7 @@
       await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
       const toggle = document.querySelector('[aria-label="启用 Terminal"]');
       if (toggle.checked !== enabled) await click(toggle);
+      await waitFor(() => toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled));
       checks.terminalSetting = { ok: toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled) };
       await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
     };
@@ -499,6 +500,41 @@
     const after = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
     const draft = after.state.projects.find(project => project.name === originalProject).requirementDraft;
     checks.clearDraft = { ok: draft.body === '' && !draft.attachments?.length && draft.title === '' && draft.criteria === '' && draft.executor === 'ai' && draft.aiValidation === false };
+    // REQ-181: file completion must escape the scrollable requirement dialog.
+    const mentionInput = document.querySelector('.requirement-dialog textarea');
+    if (document.querySelector('.guide-settings-summary .linked-dir')) {
+      const typeMention = text => {
+        mentionInput.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(mentionInput, text);
+        mentionInput.setSelectionRange(text.length, text.length);
+        mentionInput.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      typeMention('@');
+      await waitFor(() => !!document.querySelector('.mention-menu'));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const menu = document.querySelector('.mention-menu'), rect = menu.getBoundingClientRect();
+      const dialog = document.querySelector('.requirement-dialog');
+      const hit = document.elementFromPoint(rect.left + 12, rect.top + 12);
+      checks.requirementMentionLayer = { ok: menu.parentElement === document.body && getComputedStyle(menu).position === 'fixed' && menu.contains(hit) && rect.top >= 0 && rect.bottom <= innerHeight && dialog.scrollHeight <= dialog.clientHeight + 1 };
+      mentionInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await waitFor(() => !document.querySelector('.mention-menu'));
+      checks.requirementMentionEscape = { ok: !!document.querySelector('.requirement-dialog') };
+      typeMention('');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    document.querySelector('.requirement-dialog').closest('.overlay').click();
+    await waitFor(() => !document.querySelector('.requirement-dialog'));
+    await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+    await click(button('功能转上下文'));
+    const featureInput = document.querySelector('[aria-label="功能转上下文"] input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(featureInput, '需求排期');
+    featureInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 60));
+    await click(button('生成需求'));
+    await waitFor(() => !!document.querySelector('.requirement-dialog'));
+    checks.contextRequirement = { ok: document.querySelector('.requirement-dialog textarea').value.includes('context put --project') && document.querySelector('.requirement-dialog textarea').value.includes('需求排期') };
+    await click(button('清空需求'));
+    await waitFor(() => !document.querySelector('.requirement-dialog [aria-label="关闭"]')?.disabled);
     document.querySelector('.requirement-dialog').closest('.overlay').click();
     await waitFor(() => !document.querySelector('.requirement-dialog'));
     // REQ-151：编辑设置浮层按功能分 tab；REQ-150：引导词输入 @ 补全文件与目录

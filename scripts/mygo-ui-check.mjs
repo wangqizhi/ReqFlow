@@ -1,7 +1,7 @@
 // Exercise the actual portable binary with a consistent, isolated data copy.
 import assert from 'node:assert/strict';
 import { DatabaseSync, backup } from 'node:sqlite';
-import { mkdtemp, mkdir, readFile, copyFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, copyFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +67,7 @@ try {
     child.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`MyGO exited ${code}: ${stderr}`)); });
   });
   child = undefined;
+  assert.ok((await stat(path.join(temporary, 'webview', 'ReqFlow', 'WebView2'))).isDirectory(), 'Native WebView2 must use the isolated test profile');
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   await mkdir(path.join(root, 'tmp'), { recursive: true });
   await writeFile(path.join(root, 'tmp/mygo-ui-report.json'), JSON.stringify(report, null, 2));

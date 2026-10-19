@@ -18,6 +18,17 @@ ReqFlow.exe --cli <command> [options]
 | `--pretty` | 以缩进格式输出 JSON，便于人工阅读（默认单行 JSON，便于程序解析） |
 | `--out <file>` | 除 stdout 外，把输出同时写入指定文件（适合保存 Prompt 全文） |
 
+## context
+
+功能上下文、项目守则与数据目录。守则自动生成，后续需求 Prompt 自动引用。
+
+| 命令 | 参数 | 说明 |
+| --- | --- | --- |
+| `context list` | `` | 列出上下文及关联的 projectId / feature。 |
+| `context put` | `--title <标题> --file <Markdown文件> [--id <上下文ID>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]` | 新增或更新上下文；也可用 --body 直接传正文。关联项目后自动生成守则，并同步目录与 Git。 |
+| `context settings` | `` | 查看上下文数据目录及 Git 可用状态。 |
+| `context migrate` | `--dir <绝对路径>` | 迁移上下文到空目录并切换后续写入位置，原目录保留为恢复副本。 |
+
 ## 基础
 
 帮助、版本与工作区整体读写。

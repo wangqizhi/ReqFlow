@@ -99,10 +99,11 @@ export type Project = {
   folderId?: string;
   hidden?: boolean;
   revision?: number;
+  contextRules?: string;
   requirementDraft?: Record<string, any>;
 };
 
-export type ContextPrompt = { id: string; title: string; body: string; tags: string[] };
+export type ContextPrompt = { id: string; title: string; body: string; tags: string[]; projectId?: string; feature?: string };
 export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; contextPrompts?: ContextPrompt[] };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
@@ -244,6 +245,7 @@ export function buildPrompt(p: Project, items: Item[]) {
     p.guideVersion +
     '\n' +
     guidance +
+    (p.contextRules ? "\n\n## 项目守则（自动生成）\n" + p.contextRules : "") +
     '\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n' +
     sections +
     (tail.length ? '\n\n' + tail.join('\n\n') : '')
@@ -251,6 +253,7 @@ export function buildPrompt(p: Project, items: Item[]) {
 }
 
 export function normalizeWorkspace(s: Workspace) {
+  refreshContextRules(s);
   if (!Array.isArray(s.folders)) s.folders = [];
   if (!s.folders.some((f) => f.id === 'default')) s.folders.unshift({ id: 'default', name: 'default' });
   // 全局基准模板（REQ-071）：留空视为未设置，项目回退到默认模板
@@ -369,9 +372,11 @@ async function applyOperation(s: Workspace, a: any) {
       prompts.splice(index, 1);
     } else {
       if (!Array.isArray(a.tags) || a.tags.some((tag: unknown) => typeof tag !== 'string')) throw Error('标签格式无效');
-      const prompt = { id: a.id || crypto.randomUUID(), title: needed(a.title, '提示词标题'), body: needed(a.body, '提示词内容'), tags: [...new Set<string>(a.tags.map((tag: string) => tag.trim()).filter(Boolean))] };
+      if (a.projectId && (!s.projects.some(p => p.id === a.projectId) || !String(a.feature || '').trim())) throw Error('关联项目不存在或功能名称为空');
+      const prompt = { projectId: a.projectId ?? prompts[index]?.projectId, feature: a.feature ?? prompts[index]?.feature, id: a.id || crypto.randomUUID(), title: needed(a.title, '提示词标题'), body: needed(a.body, '提示词内容'), tags: [...new Set<string>(a.tags.map((tag: string) => tag.trim()).filter(Boolean))] };
       if (index < 0) prompts.push(prompt); else prompts[index] = prompt;
     }
+    refreshContextRules(s);
     return;
   }
 
@@ -914,4 +919,13 @@ export function compareArchivedItems(a: Item, b: Item) {
     return Date.parse(h?.time || '') || 0;
   };
   return time(b) - time(a) || b.number.localeCompare(a.number, undefined, { numeric: true });
+}
+
+// 守则是关联上下文的投影，不能由用户直接编辑。
+export function refreshContextRules(s: Workspace) {
+  for (const project of s.projects || []) {
+    const linked = (s.contextPrompts || []).filter(c => c.projectId === project.id && c.feature);
+    if (!linked.length) { delete project.contextRules; continue; }
+    project.contextRules = '# ' + project.name + ' · 项目守则\n\n' + linked.map(c => '## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n' + c.body).join('\n\n');
+  }
 }

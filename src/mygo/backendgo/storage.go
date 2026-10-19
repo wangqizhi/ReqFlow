@@ -160,6 +160,13 @@ func (s *workspaceStore) write(record map[string]any, expected *int64) (map[stri
 		if e = s.replace(record); e != nil {
 			return nil, e
 		}
+		oldContexts, newContexts := coreMap(coreMap(current)["data"])["contextPrompts"], coreMap(record["data"])["contextPrompts"]
+		if coreJSON(oldContexts) != coreJSON(newContexts) {
+			service := &WorkspaceService{store: s}
+			if syncErr := service.syncContexts(coreMap(record["data"])); syncErr != nil {
+				record["contextWarning"] = "上下文已保存，但目录或 Git 同步失败：" + syncErr.Error()
+			}
+		}
 		return record, nil
 	})
 }

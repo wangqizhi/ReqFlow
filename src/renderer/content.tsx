@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { ContextPrompt } from '../core/domain';
+import type { ContextPrompt, Project } from '../core/domain';
 import { Plus, Search, Trash, X } from './icons';
 
-export function ContentWorkspace({ prompts, busy, apply, notify }: {
-  prompts: ContextPrompt[]; busy: boolean;
+export function ContentWorkspace({ prompts, projects, busy, apply, notify }: {
+  projects: Project[]; prompts: ContextPrompt[]; busy: boolean;
   apply(action: any): Promise<unknown>;
   notify(text: string, kind?: 'ok' | 'err'): void;
 }) {
   const [query, setQuery] = useState(''), [tag, setTag] = useState('');
-  const [form, setForm] = useState<{ id?: string; title: string; body: string; tags: string } | null>(null);
+  const [form, setForm] = useState<{ id?: string; title: string; body: string; tags: string; projectId?: string; feature?: string } | null>(null);
   const [deleting, setDeleting] = useState<ContextPrompt | null>(null);
   const [saving, setSaving] = useState(false);
   const locked = busy || saving;
@@ -40,6 +40,8 @@ export function ContentWorkspace({ prompts, busy, apply, notify }: {
       {form ? <form onSubmit={e => { e.preventDefault(); void save({ op: 'contextPrompt', ...form, tags: form.tags.split(/[,，;；\n]/).map(value => value.trim()).filter(Boolean) }); }}>
         <label className="field">标题<input required autoFocus value={form.title} disabled={locked} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
         <label className="field">提示词内容<textarea required rows={10} value={form.body} disabled={locked} onChange={e => setForm({ ...form, body: e.target.value })} /></label>
+        <label className="field">关联项目<select value={form.projectId || ''} disabled={locked} onChange={e => setForm({ ...form, projectId: e.target.value })}><option value="">不关联项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        {form.projectId && <label className="field">功能名称<input required value={form.feature || ''} disabled={locked} onChange={e => setForm({ ...form, feature: e.target.value })} /></label>}
         <label className="field">自定义标签<input value={form.tags} disabled={locked} placeholder="多个标签用逗号分隔，例如：开发，文案，审查" onChange={e => setForm({ ...form, tags: e.target.value })} /></label>
         <div className="settings-actions"><button type="button" className="btn" disabled={locked} onClick={() => setForm(null)}>取消</button><button className="btn primary" disabled={locked || !form.title.trim() || !form.body.trim()}>{saving ? '保存中…' : '保存提示词'}</button></div>
       </form> : <><p>确认删除「{deleting?.title}」？删除后无法恢复。</p><div className="settings-actions"><button className="btn" disabled={locked} onClick={() => setDeleting(null)}>取消</button><button className="btn danger" disabled={locked} onClick={() => void save({ op: 'deleteContextPrompt', id: deleting!.id })}>确认删除</button></div></>}

@@ -23,6 +23,7 @@ import { ProjectCreate } from './project-create';
 import { ProjectManager } from './project-manager';
 import { SSHDirectory, isSSH } from './ssh-directory';
 import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
+import { renderMarkdown } from './markdown';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
 import { ModsOverlay } from './mods';
@@ -135,6 +136,9 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false);
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
+  const [contextWizard, setContextWizard] = useState(false);
+  const [contextFeature, setContextFeature] = useState('');
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [terminalEnabled] = useTerminalSetting();
   const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
@@ -833,7 +837,7 @@ export default function App() {
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'CONTENT' ? <ContentWorkspace prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
+        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'CONTENT' ? <ContentWorkspace projects={data.projects} prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -860,7 +864,7 @@ export default function App() {
                 <Play size={16} />运行
               </button>
             )}
-            <div className="new-requirement-split" ref={newMenuRef} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setNewMenu(false); }}><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
+            <div className="new-requirement-split" ref={newMenuRef} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setNewMenu(false); }}><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={() => { setNewMenu(false); setContextFeature(''); setContextWizard(true); }}>功能转上下文</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
           </div>
         </section>
 
@@ -872,6 +876,7 @@ export default function App() {
             <div className="guide-settings-summary">
               {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? setBrowserOpen(true) : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
               {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
+              {p?.contextRules && <button className="btn sm" onClick={() => setRulesOpen(true)}>守则</button>}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
               <span className={'guide-flag' + (p?.deliveryGuidance ? ' on' : '')} title={p?.deliveryGuidance ? '已配置引导交付' : '未配置引导交付'}>{p?.deliveryGuidance && <Check size={12} />}引导交付</span>
               <span className="guide-flag" title="该项目记录的全部需求数">历史需求 {p?.items.length ?? 0} 条</span>
@@ -1105,6 +1110,19 @@ export default function App() {
 
         </>}
       </main>
+      {contextWizard && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="功能转上下文"><form className="dialog" onSubmit={e => {
+        e.preventDefault(); setContextWizard(false); edit();
+        const feature = contextFeature.trim();
+        setForm({ ...defaultRequirementForm(), body: [
+          '将现有功能「' + feature + '」归纳为项目上下文。',
+          '请阅读现有代码，整理架构、功能行为、约束和对应代码路径（含关键符号），形成 Markdown 功能文档。不要臆造不存在的实现。',
+          '将文档保存到临时 Markdown 文件，然后调用 ReqFlow CLI 提交到上下文管理：',
+          'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<Markdown文件绝对路径>"',
+          '先运行 context list 检查已有文档；更新时在 context put 中携带 --id，避免重复创建。使用当前 ReqFlow 数据目录。',
+          '提交后运行 context list 确认文档和项目关联；如返回 warning，解决目录或 Git 同步问题。守则会自动生成并加入后续需求 Prompt。'
+        ].join('\n\n') });
+      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交功能文档。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
+      {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><h3>项目守则 · 自动生成</h3><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
       </div>

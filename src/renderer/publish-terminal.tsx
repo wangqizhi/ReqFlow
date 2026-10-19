@@ -13,9 +13,27 @@ function subscribe(listener: () => void) {
   window.addEventListener('storage', listener);
   return () => { window.removeEventListener(settingEvent, listener); window.removeEventListener('storage', listener); };
 }
-export function useTerminalSetting(): [boolean, (enabled: boolean) => void] {
+let terminalLoaded = false;
+let terminalSaving = false;
+async function loadTerminalSetting() {
+  if (terminalLoaded || !bridge.getTerminalSetting) return;
+  terminalLoaded = true;
+  try {
+    const r = await bridge.getTerminalSetting();
+    if (!r.ok) throw Error('读取 Terminal 设置失败');
+    if (terminalSaving) return;
+    if (r.settings) localStorage.setItem(settingKey, String(r.settings.enabled));
+    else await bridge.saveTerminalSetting?.(readSetting());
+    window.dispatchEvent(new Event(settingEvent));
+  } catch { terminalLoaded = false; }
+}
+export function useTerminalSetting(): [boolean, (enabled: boolean) => Promise<void>] {
+  useEffect(() => { void loadTerminalSetting(); }, []);
   const enabled = useSyncExternalStore(subscribe, readSetting);
-  return [enabled, value => {
+  return [enabled, async value => {
+    terminalSaving = true;
+    const result = await bridge.saveTerminalSetting?.(value);
+    if (result && !result.ok) throw Error(result.error || '无法保存 Terminal 设置');
     localStorage.setItem(settingKey, String(value));
     window.dispatchEvent(new Event(settingEvent));
   }];

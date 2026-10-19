@@ -160,6 +160,39 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 }
 func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, version string) (map[string]any, error) {
 	switch command {
+	case "context list":
+		r, e := s.Get()
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"contexts": coreMap(r["state"])["contextPrompts"]}, nil
+	case "context put":
+		body := coreString(a["body"])
+		if file := coreString(a["file"]); file != "" {
+			raw, e := os.ReadFile(file)
+			if e != nil {
+				return nil, e
+			}
+			body = string(raw)
+		}
+		tags := []any{}
+		for _, tag := range strings.Split(coreString(a["tags"]), ",") {
+			if strings.TrimSpace(tag) != "" {
+				tags = append(tags, strings.TrimSpace(tag))
+			}
+		}
+		action := map[string]any{"op": "contextPrompt", "id": a["id"], "title": a["title"], "body": body, "tags": tags}
+		if _, ok := a["project"]; ok {
+			action["projectId"], action["feature"] = coreString(a["project"]), coreString(a["feature"])
+		} else if a["feature"] != nil {
+			return nil, errors.New("--feature 需要同时提供 --project")
+		}
+		return s.Mutate(action, nil)
+	case "context settings":
+		return s.contextSettings()
+	case "context migrate":
+		return s.moveContexts(coreString(a["dir"]))
+
 	case "version":
 		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
 	case "plugin version", "plugin bundle":

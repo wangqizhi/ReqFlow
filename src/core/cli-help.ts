@@ -26,6 +26,12 @@ export const CLI_GLOBAL_OPTIONS: CliCommandDoc[] = [
 ];
 
 export const CLI_DOCS: CliGroupDoc[] = [
+  { group: 'context', desc: '功能上下文、项目守则与数据目录。守则自动生成，后续需求 Prompt 自动引用。', commands: [
+    { name: 'context list', args: '', desc: '列出上下文及关联的 projectId / feature。' },
+    { name: 'context put', args: '--title <标题> --file <Markdown文件> [--id <上下文ID>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]', desc: '新增或更新上下文；也可用 --body 直接传正文。关联项目后自动生成守则，并同步目录与 Git。' },
+    { name: 'context settings', args: '', desc: '查看上下文数据目录及 Git 可用状态。' },
+    { name: 'context migrate', args: '--dir <绝对路径>', desc: '迁移上下文到空目录并切换后续写入位置，原目录保留为恢复副本。' }
+  ] },
   {
     group: '基础',
     desc: '帮助、版本与工作区整体读写。',

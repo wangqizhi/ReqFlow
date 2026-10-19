@@ -1,6 +1,10 @@
 // Typed frontend contract for the Go backend; no Electron or Node runtime.
 declare global { interface Window { mygo: { call<T = unknown>(method: string, ...args: unknown[]): Promise<T> } } }
 const channels = {
+  getTerminalSetting: 'lab:terminal:get',
+  saveTerminalSetting: 'lab:terminal:save',
+  getContextSettings: 'context:settings:get',
+  saveContextSettings: 'context:settings:save',
   listSSH: 'ssh:list',
   sshStatus: 'ssh:status',
   getStorageStatus: 'storage:status',
