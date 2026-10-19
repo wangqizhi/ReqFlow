@@ -135,7 +135,7 @@ type aiBackupState struct {
 var aiBackupStates sync.Map
 
 func aiEmptyBackup() map[string]any {
-	return map[string]any{"provider": "github", "url": "", "branch": "main", "sshKeyPath": "", "autoSync": true}
+	return map[string]any{"provider": "github", "url": "", "branch": "main", "sshKeyPath": "", "autoSync": false}
 }
 func aiCloneMap(value map[string]any) map[string]any {
 	out := make(map[string]any, len(value))
@@ -365,6 +365,8 @@ func (b *Backend) invokeRemote(channel string, args []any) (any, error) {
 			return map[string]any{"ok": false, "error": err.Error(), "status": status}, nil
 		}
 		return map[string]any{"ok": true, "status": status}, nil
+	case "backup:import":
+		return b.importBackup(args...)
 	case "remote:test":
 		settings, err := ValidateRemote(aiArg(args, 0))
 		if err != nil {

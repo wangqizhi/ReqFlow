@@ -213,16 +213,16 @@ func TestBackupSettingsLifecycle(t *testing.T) {
 	b.StartAI()
 	defer b.StopAI()
 	result, err := b.invokeRemote("backup:get", nil)
-	if err != nil || aiMap(aiMap(result)["settings"])["autoSync"] != true {
+	if err != nil || aiMap(aiMap(result)["settings"])["autoSync"] != false {
 		t.Fatal("default backup settings differ")
 	}
-	settings := map[string]any{"provider": "gitlab", "url": "ssh://git@example.invalid/repo", "branch": "main", "sshKeyPath": "", "autoSync": false}
+	settings := map[string]any{"provider": "gitlab", "url": "ssh://git@example.invalid/repo", "branch": "main", "sshKeyPath": "", "autoSync": true}
 	if _, err = b.invokeRemote("backup:save", []any{settings}); err != nil {
 		t.Fatal(err)
 	}
 	other := NewBackend(b.DataDir, b.AppDir, "2.0.0")
 	result, err = other.invokeRemote("backup:get", nil)
-	if err != nil || aiMap(aiMap(result)["settings"])["autoSync"] != false {
+	if err != nil || aiMap(aiMap(result)["settings"])["autoSync"] != true {
 		t.Fatal("backup persisted settings differ")
 	}
 	if _, err = b.invokeRemote("backup:save", []any{map[string]any{"provider": "github", "autoSync": "false"}}); err == nil {

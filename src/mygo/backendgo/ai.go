@@ -507,7 +507,7 @@ func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 	case "ai:guidance:optimize":
 		result, err := b.optimizeGuidance(args)
 		return result, true, err
-	case "backup:get", "backup:save", "backup:sync", "remote:test", "remote:apply":
+	case "backup:get", "backup:save", "backup:sync", "backup:import", "remote:test", "remote:apply":
 		result, err := b.invokeRemote(channel, args)
 		return result, true, err
 	case "agents:get", "agents:save", "agents:detect":

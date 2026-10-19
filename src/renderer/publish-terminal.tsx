@@ -21,7 +21,7 @@ export function useTerminalSetting(): [boolean, (enabled: boolean) => void] {
   }];
 }
 
-type PublishSession = Pick<TerminalSession, 'running' | 'step' | 'startedAt' | 'endedAt'> & { result: { ok: boolean; output?: string; error?: string } | null };
+type PublishSession = Pick<TerminalSession, 'running' | 'step' | 'startedAt' | 'endedAt' | 'idle'> & { result: { ok: boolean; output?: string; error?: string } | null };
 function elapsedTime(start: number, end: number) {
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   return (seconds >= 3600 ? String(Math.floor(seconds / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(seconds / 60) % 60).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
@@ -32,6 +32,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
   current.current = session;
   const [readError, setReadError] = useState('');
   const [detachError, setDetachError] = useState(''), [detaching, setDetaching] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!session.running) return;
@@ -46,6 +47,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     finally { setDetaching(false); }
   }
   useEffect(() => {
+    setLoading(true);
     const terminal = new Terminal({
       convertEol: true, disableStdin: true, cursorBlink: false, scrollback: 5000, screenReaderMode: true,
       fontFamily: '"Cascadia Code", Consolas, "Microsoft YaHei", monospace', fontSize: 12,
@@ -54,11 +56,32 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container.current!);
-    const resize = new ResizeObserver(() => { if (container.current?.clientHeight && container.current.clientWidth) fit.fit(); });
+    let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
+    let renderTimer: ReturnType<typeof setTimeout>, frame = 0, generation = 0, replayReady = false;
+    // Fit once after the native window settles, then reveal only after xterm has
+    // drained its write queue and painted at the final size.
+    const reveal = () => {
+      const ticket = ++generation;
+      if (container.current) container.current.style.visibility = 'hidden';
+      setLoading(true); clearTimeout(renderTimer); cancelAnimationFrame(frame);
+      renderTimer = setTimeout(() => {
+        if (disposed || !replayReady || !container.current?.clientHeight || !container.current.clientWidth) return;
+        fit.fit(); terminal.refresh(0, terminal.rows - 1);
+        terminal.write('', () => {
+          if (disposed || ticket !== generation) return;
+          frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
+            if (!disposed && ticket === generation) {
+              if (container.current) container.current.style.visibility = '';
+              setLoading(false);
+            }
+          }); });
+        });
+      }, 120);
+    };
+    const resize = new ResizeObserver(reveal);
     resize.observe(container.current!);
     fit.fit();
-    terminal.writeln('发布 · ' + project);
-    let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
+    terminal.writeln(current.current.idle ? '终端已就绪，启动项目发布后将在这里显示输出。' : '发布 · ' + project);
     const poll = async () => {
       let streamRunning = false;
       try {
@@ -75,25 +98,29 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
         setReadError(error.message || '无法读取发布输出');
       }
       if (disposed) return;
+      if (!replayReady) { replayReady = true; reveal(); }
       if (!current.current.running && !streamRunning) {
         const result = current.current.result;
         if (offset === 0 && result?.output) terminal.write(result.output);
-        terminal.writeln('\r\n' + (result?.ok ? '发布完成' : '发布失败：' + (result?.error || '执行失败')));
+        if (!current.current.idle) terminal.writeln('\r\n' + (result?.ok ? '发布完成' : '发布失败：' + (result?.error || '执行失败')));
         return;
       }
       timer = setTimeout(poll, 250);
     };
-    void poll();
-    return () => { disposed = true; clearTimeout(timer); resize.disconnect(); terminal.dispose(); };
+    if (current.current.idle) { replayReady = true; reveal(); } else void poll();
+    return () => { disposed = true; clearTimeout(timer); clearTimeout(renderTimer); cancelAnimationFrame(frame); resize.disconnect(); terminal.dispose(); };
   }, [runId, project]);
-  return <section className="publish-terminal" aria-label="发布终端" aria-busy={session.running} data-run-id={runId}>
+  return <section className="publish-terminal" aria-label="发布终端" aria-busy={session.running || loading || detaching} data-run-id={runId}>
     <header><strong>Terminal · {project}</strong>
-      <span className={'terminal-indicator ' + (session.running ? 'running' : session.result?.ok ? 'success' : 'failure')} aria-label={session.running ? '发布运行中' : session.result?.ok ? '发布成功' : '发布失败'}>{session.running ? <RefreshCw size={14} className="terminal-spinner" /> : session.result?.ok ? <Check size={14} /> : <X size={14} />}</span>
-      <span className="terminal-status" role="status">{detachError || readError || (session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
-      <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>
+      {!session.idle && <span className={'terminal-indicator ' + (session.running ? 'running' : session.result?.ok ? 'success' : 'failure')} aria-label={session.running ? '发布运行中' : session.result?.ok ? '发布成功' : '发布失败'}>{session.running ? <RefreshCw size={14} className="terminal-spinner" /> : session.result?.ok ? <Check size={14} /> : <X size={14} />}</span>}
+      <span className="terminal-status" role="status">{detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
+      {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
       <button className="icon-btn" aria-label={onDetach ? '收起发布终端' : '关闭发布终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>
-    <div className="publish-terminal-content" ref={container} />
+    <div className={'publish-terminal-body' + (loading || detaching ? ' is-loading' : '')}>
+      <div className="publish-terminal-content" ref={container} />
+      {(loading || detaching) && <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : '正在加载终端…'}</span></div>}
+    </div>
   </section>;
 }
 
@@ -117,5 +144,5 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
     try { const result = await bridge.closePublishTerminal?.(runId); if (!result?.ok) throw Error(result?.error || '无法关闭终端窗口'); }
     catch (e: any) { setError(e.message); }
   }
-  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <p role="status">{error ? '正在重试…' : '正在加载发布终端…'}</p>}</div>;
+  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载发布终端…'}</span></div>}</div>;
 }

@@ -35,7 +35,7 @@ export type GitOpResult = { ok: true; summary?: string; warning?: string } | { o
 
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
-export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; result: { ok: boolean; error?: string } | null };
+export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
 export interface ReqFlowBridge {
   listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;
   sshStatus?(root: string): Promise<{ ok: boolean; error?: string }>;
@@ -55,6 +55,7 @@ export interface ReqFlowBridge {
   getBackupSettings?(): Promise<{ ok: boolean; settings: BackupSettings; status: BackupStatus }>;
   saveBackupSettings?(settings: BackupSettings): Promise<{ ok: boolean; error?: string }>;
   syncBackup?(): Promise<{ ok: boolean; error?: string; status: BackupStatus }>;
+  importBackup?(settings: BackupSettings): Promise<{ ok: boolean; error?: string; settings?: BackupSettings; status?: BackupStatus; projects?: number; items?: number }>;
   testRemote?(settings: RemoteSettings): Promise<{ ok: boolean; error?: string }>;
   applyRemote?(project: string): Promise<{ ok: boolean; error?: string }>;
   pickSSHKey?(): Promise<{ ok: boolean; path?: string }>;

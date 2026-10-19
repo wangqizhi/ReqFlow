@@ -7,7 +7,7 @@ export type RemoteSettings = {
 export type BackupSettings = RemoteSettings & { autoSync: boolean };
 export type BackupStatus = { running: boolean; lastSuccess?: string; error?: string };
 export const emptyRemote: RemoteSettings = { provider: 'github', url: '', branch: 'main', sshKeyPath: '' };
-export const emptyBackup: BackupSettings = { ...emptyRemote, autoSync: true };
+export const emptyBackup: BackupSettings = { ...emptyRemote, autoSync: false };
 
 export function validateRemote(value: RemoteSettings): RemoteSettings {
   if (!value || !['github', 'gitlab'].includes(value.provider)) throw Error('请选择 GitHub 或 GitLab');

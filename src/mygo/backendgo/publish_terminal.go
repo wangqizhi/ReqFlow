@@ -10,6 +10,7 @@ import (
 // Keep it in memory so all terminal windows can observe the same session.
 type publishTerminalSession struct {
 	Project   string `json:"project"`
+	Idle      bool   `json:"idle,omitempty"`
 	Running   bool   `json:"running"`
 	Step      string `json:"step"`
 	StartedAt int64  `json:"startedAt"`

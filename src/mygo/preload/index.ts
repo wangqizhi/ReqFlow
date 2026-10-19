@@ -19,6 +19,7 @@ const channels = {
   getBackupSettings: 'backup:get',
   saveBackupSettings: 'backup:save',
   syncBackup: 'backup:sync',
+  importBackup: 'backup:import',
   testRemote: 'remote:test',
   applyRemote: 'remote:apply',
   pickSSHKey: 'ssh:pick',

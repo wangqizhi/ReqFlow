@@ -195,6 +195,28 @@
     checks.settingsUnsaved.ok &&= afterDiscard.state.baselineTemplate.endsWith('跨页保存检查');
     await click(button('设置'));
     await waitFor(() => document.querySelector('.settings-page'));
+    await click(settingsTab('同步备份'));
+    await waitFor(() => document.querySelector('#backup-auto') && !document.querySelector('#backup-auto').disabled);
+    const backupURL = document.querySelector('.remote-fields input');
+    checks.backupDefaults = { ok: !document.querySelector('#backup-auto').checked && button('从远端导入').disabled };
+    await edit(backupURL, 'https://example.invalid/backup.git');
+    await click(button('从远端导入'));
+    checks.backupImportConfirm = { ok: !!document.querySelector('[aria-labelledby="remote-import-title"]') && !button('确认导入').disabled };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !document.querySelector('[aria-labelledby="remote-import-title"]'));
+    const importBackup = window.reqflow.importBackup;
+    const saveBackup = window.reqflow.saveBackupSettings;
+    let importSettings;
+    window.reqflow.saveBackupSettings = async () => { throw Error('导入不能先单独保存配置'); };
+    window.reqflow.importBackup = async settings => { importSettings = settings; return { ok: false, error: '远端导入失败测试', status: { running: false } }; };
+    try {
+      await click(button('从远端导入'));
+      await click(button('确认导入'));
+      await waitFor(() => !button('确认导入').disabled);
+      checks.backupImportFailure = { ok: importSettings?.url === 'https://example.invalid/backup.git' && !!document.querySelector('[aria-labelledby="remote-import-title"]') && document.querySelector('[aria-labelledby="remote-import-title"]').textContent.includes('远端导入失败测试') && backupURL.value === importSettings.url };
+      await click(button('取消'));
+    } finally { window.reqflow.importBackup = importBackup; window.reqflow.saveBackupSettings = saveBackup; }
+    await edit(backupURL, '');
     await click([...document.querySelectorAll('[aria-label="设置功能菜单"] button')].find(el => el.textContent === '数据'));
     await waitFor(() => button('导出全部数据'));
     const anchorClick = HTMLAnchorElement.prototype.click;
@@ -254,6 +276,8 @@
       await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));
     };
     await terminalSetting(true);
+    await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布' && !document.querySelector('.terminal-loading'));
+    checks.terminalImmediate = { ok: !!document.querySelector('.publish-terminal .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     await switchProject('发布终端UI检查');
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
@@ -274,15 +298,28 @@
     checks.terminalReattached = { ok: !button('发布终端') && !!document.querySelector('.terminal-elapsed') };
     await click(document.querySelector('[aria-label="收起发布终端"]'));
     checks.terminalCollapse = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
-    await click(document.querySelector('.publish-terminal-reopen'));
+    await terminalSetting(false);
+    await terminalSetting(true);
+    await waitFor(() => !!document.querySelector('.publish-terminal'));
+    checks.terminalReenable = { ok: !document.querySelector('.publish-terminal-reopen') };
     await waitFor(() => terminalText().includes('stream-last') && terminalText().includes('stream-stderr'));
     await waitFor(() => document.querySelector('.publish-terminal [role="status"]').textContent === '发布完成');
     checks.terminalComplete = { ok: !document.querySelector('.publish-dialog') && terminalText().includes('stream-first') };
     const elapsedEnd = document.querySelector('.terminal-elapsed').textContent;
     await new Promise(resolve => setTimeout(resolve, 1100));
     checks.terminalTimerStopped = { ok: !document.querySelector('.terminal-spinner') && document.querySelector('.publish-terminal').getAttribute('aria-busy') === 'false' && document.querySelector('.terminal-elapsed').textContent === elapsedEnd };
+    const terminalBody = document.querySelector('.publish-terminal-body');
+    terminalBody.style.maxWidth = 'calc(100% - 40px)';
+    await waitFor(() => !!document.querySelector('.terminal-loading'));
+    checks.terminalResizeLoading = { ok: getComputedStyle(document.querySelector('.publish-terminal-content')).visibility === 'hidden' };
+    await waitFor(() => !document.querySelector('.terminal-loading'));
+    checks.terminalResizeLoading.ok &&= terminalText().includes('stream-first') && terminalText().includes('stream-last');
+    terminalBody.style.maxWidth = '';
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await waitFor(() => !document.querySelector('.terminal-loading'));
     await switchProject(originalProject);
-    checks.terminalIsolation = { ok: !document.querySelector('.publish-terminal') };
+    await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布');
+    checks.terminalIsolation = { ok: !terminalText().includes('stream-first') && !terminalText().includes('stream-last') };
     await switchProject('发布终端UI检查');
     await waitFor(() => terminalText().includes('stream-last'));
     checks.terminalIsolation.ok &&= terminalText().includes('stream-first');
@@ -298,6 +335,7 @@
       await switchProject('发布终端UI检查');
       if (document.querySelector('.publish-terminal-reopen')) await click(document.querySelector('.publish-terminal-reopen'));
       await waitFor(() => terminalText().includes('stream-last'));
+      await waitFor(() => !document.querySelector('.terminal-loading'));
       if (document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成') throw Error('Terminal lost completed result');
     };
     window.__reqflowHideTerminal = async () => {

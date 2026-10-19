@@ -113,6 +113,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [backupLoaded, setBackupLoaded] = useState(false);
+  const [importConfirm, setImportConfirm] = useState(false);
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [cliStatuses, setCLIStatuses] = useState<AICLIStatus[]>([]);
@@ -157,7 +158,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   }
   useEffect(() => { void detectCLIs(); }, []);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
-  useEffect(() => { setMessage(''); }, [tab]);
+  useEffect(() => { setMessage(''); setImportConfirm(false); }, [tab]);
+  useEffect(() => {
+    if (!importConfirm || busy) return;
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setImportConfirm(false); } };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, [importConfirm, busy]);
   const [logs, setLogs] = useState<AIRequestLog[]>([]);
   const [logError, setLogError] = useState('');
   const [logKind, setLogKind] = useState('ai');
@@ -218,6 +225,18 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     try { const r = await action(); if (!r?.ok) throw Error(r?.error || '操作失败'); setMessage(success); notify(success); return true; }
     catch (e: any) { setMessage(e.message); notify(e.message, 'err'); return false; }
     finally { setBusy(false); }
+  }
+  async function importRemoteBackup() {
+    if (busy || !bridge.importBackup) return;
+    let summary = '';
+    const success = await perform(async () => {
+      const result = await bridge.importBackup!(backup);
+      if (result.settings) { setBackup(result.settings); setSavedBackup(fingerprint(result.settings)); }
+      if (result.status) setStatus(result.status);
+      if (result.ok) summary = '已从远端导入 ' + (result.projects || 0) + ' 个新项目、' + (result.items || 0) + ' 条新需求；已有内容保留。';
+      return result;
+    }, '远端备份导入完成');
+    if (success) { setImportConfirm(false); setMessage(summary); onArchived?.(); }
   }
   // 各分类共用固定底部保存按钮，保存后继续停留在设置工作台。
   // 数据 tab（REQ-112）无保存项，操作即时生效
@@ -337,15 +356,18 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
         {tab === 'backup' && <>
           <p className="settings-hint">使用专用 GitHub / GitLab 仓库保存配置、全部需求、历史和参考图片。</p>
           <RemoteFields value={backup} change={(v) => setBackup({ ...backup, ...v })} disabled={busy || !backupLoaded} />
-          <div className="validation-setting"><div><label htmlFor="backup-auto">自动同步 · 每 1 分钟</label><p>默认开启，应用运行期间生效；也可关闭后手动同步。</p></div><label className="switch"><input id="backup-auto" type="checkbox" checked={backup.autoSync} disabled={busy || !backupLoaded} onChange={(e) => setBackup({ ...backup, autoSync: e.target.checked })} /><span className="slider" /><span className="switch-state">{backup.autoSync ? '已开启' : '已关闭'}</span></label></div>
+          <div className="validation-setting"><div><label htmlFor="backup-auto">自动同步 · 每 1 分钟</label><p>默认关闭，可手动同步或按需开启；已保存的开关设置继续生效。</p></div><label className="switch"><input id="backup-auto" type="checkbox" checked={backup.autoSync} disabled={busy || !backupLoaded} onChange={(e) => setBackup({ ...backup, autoSync: e.target.checked })} /><span className="slider" /><span className="switch-state">{backup.autoSync ? '已开启' : '已关闭'}</span></label></div>
           <p className="settings-hint">AI 配置（含供应商、URL、模型和密钥）与私钥文件不上传。备份文件中的 workspace 可作为完整工作区导入。</p>
           <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running} onClick={() => perform(async () => { const saved = await bridge.saveBackupSettings!(backup); if (!saved.ok) return saved; setSavedBackup(fingerprint(backup)); const r = await bridge.syncBackup!(); setStatus(r.status); return r; }, '备份同步完成')}>立即同步</button><button className="btn" disabled={busy || !backupLoaded || !backup.url || !bridge.testRemote} onClick={() => perform(() => bridge.testRemote!(backup), '备份仓库连接成功')}>测试连接</button></div>
+          <div className="settings-actions"><button className="btn" disabled={busy || !backupLoaded || !backup.url || status.running || !bridge.importBackup} onClick={() => setImportConfirm(true)}><Download size={16} />从远端导入</button></div>
+          <p className="settings-hint">导入会读取远端备份，补充缺失项目、需求与历史；相同 ID 保留本机内容。导入前保留本机恢复副本，不上传本机数据。</p>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}
       <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
+      {importConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title"><div className="dialog-head"><h2 id="remote-import-title">从远端导入备份</h2></div><p>将先保存当前备份仓库设置，再读取所选分支的备份。仅补充本机缺失内容，相同 ID 的项目设置与需求保留本机版本；远端执行锁不会恢复。</p><p>导入前的本机工作区会保存在数据目录的 before-remote-import.json 中。</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setImportConfirm(false)}>取消</button><button className="btn primary" disabled={busy || status.running} onClick={() => void importRemoteBackup()}>{busy ? '正在导入…' : '确认导入'}</button></div></div></div>}
       {leaveConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title"><div className="dialog-head"><h2 id="unsaved-settings-title">设置尚未保存</h2></div><p>存在未保存的设置，是否保存后返回项目菜单？</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setLeaveConfirm(false)}>继续编辑</button><button className="btn" disabled={busy} onClick={onLeave}>放弃更改</button><button className="btn primary" disabled={busy || (backupDirty && status.running)} onClick={() => void saveAllAndLeave()}>{busy ? '保存中…' : '保存并返回'}</button></div></div></div>}
   </section>;
 });

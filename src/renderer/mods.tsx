@@ -57,7 +57,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         <div className="lab-target"><span>项目目录</span><code title={projectDir}>{projectDir || '当前项目未关联本地目录，请先在首页「浏览项目 / 关联目录」绑定'}</code></div>
         <section>
           <div className="validation-setting"><h3>Terminal</h3><label className="switch"><input type="checkbox" aria-label="启用 Terminal" checked={terminalEnabled} disabled={!bridge.getPublishOutput} onChange={e => { try { setTerminalEnabled(e.target.checked); } catch { setLabError('无法保存 Terminal 设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{terminalEnabled ? '已开启' : '已关闭'}</span></label></div>
-          <p className="settings-hint">开启后，点击「发布」会在窗口底部显示实时脚本日志；可收起、重新打开与滚动查看。当前支持查看输出。</p>
+            <p className="settings-hint">开启后立即显示终端，发布时实时显示脚本日志；可收起、重新打开或在独立窗口查看。当前支持查看输出。</p>
         </section>
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
           <div className="validation-setting"><h3>{agent.name}</h3><label className="switch"><input type="checkbox" aria-label={'启用 ' + agent.name} checked={enabled.includes(agent.id)} disabled={busy || !loaded} onChange={e => void configure(agent.id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(agent.id) ? '已开启' : '已关闭'}</span></label></div>

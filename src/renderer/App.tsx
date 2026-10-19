@@ -136,7 +136,7 @@ export default function App() {
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [publishScript, setPublishScript] = useState(''); // 发布脚本相对路径（REQ-070），空串表示未检测到
   const [terminalEnabled] = useTerminalSetting();
-  const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
+  const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
@@ -146,6 +146,19 @@ export default function App() {
   const terminalSession = publishStates[p?.id || ''];
   const terminalRunId = terminalSession?.terminalRunId;
   const terminalDetached = !!terminalRunId && !!detachedTerminals[terminalRunId];
+  const terminalWasEnabled = useRef(terminalEnabled);
+  useEffect(() => {
+    const enabling = terminalEnabled && !terminalWasEnabled.current;
+    terminalWasEnabled.current = terminalEnabled;
+    if (!terminalEnabled || !p || !bridge.getPublishOutput) return;
+    const id = p.id, name = p.name;
+    setPublishStates(states => {
+      if (states[id]?.terminalRunId) return enabling && !states[id].terminalOpen ? { ...states, [id]: { ...states[id], terminalOpen: true } } : states;
+      const now = Date.now();
+      const session = states[id] || { running: false, step: '', result: null, startedAt: now, endedAt: now, revision: 1, idle: true };
+      return { ...states, [id]: { ...session, terminalRunId: crypto.randomUUID(), terminalProject: name, terminalOpen: true } };
+    });
+  }, [terminalEnabled, p?.id, p?.name]);
   useEffect(() => {
     for (const session of Object.values(publishStates)) {
       if (session.terminalRunId && session.terminalProject) {
@@ -462,7 +475,7 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    update({ running: true, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
+    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
