@@ -24,7 +24,7 @@ try {
   await fs.writeFile(fixture, JSON.stringify(state));
   const config = { executable: path.resolve('release/win-unpacked/ReqFlow.exe'), dataDir: path.join(temporary, 'data') };
   await callCli(config, ['workspace', 'import', '--file', fixture]);
-  const clients = await Promise.all(['reqflow-agent', 'reqflow-agent-zcode', 'reqflow-agent-pi'].map(name => import(pathToFileURL(path.resolve('plugins', name, 'scripts/reqflow.mjs')).href)));
+  const clients = await Promise.all(['reqflow-agent', 'reqflow-agent-zcode', 'reqflow-agent-pi', 'reqflow-agent-opencode'].map(name => import(pathToFileURL(path.resolve('plugins', name, 'scripts/reqflow.mjs')).href)));
   const preview = await clients[0].readRun(config, projectDir, path.join(temporary, 'preview'), { claim: false });
   assert.equal(preview.runFile, null);
   assert.equal((await callCli(config, ['item', 'show', '--project', project.id, '--id', item.id])).item.aiExecution, undefined);

@@ -47,6 +47,35 @@ try {
     const config = host === 'zcode' ? { pluginUpdater: { executable: 'supported-adapter.exe', args: ['{pluginDir}'] } } : {};
     await assert.rejects(ensurePlugin(config, info, host, cli, { ...options, runHost: async () => { throw Error('host failed'); } }), /host failed/);
   }
+  // The OpenCode host updates the copy that is actually installed and never
+  // installs a second copy next to it.
+  {
+    const { ensurePlugin: ensureOpencode } = await import('../plugins/reqflow-agent-opencode/scripts/update.mjs');
+    const name = 'reqflow-agent-opencode';
+    const manifest = 'package.json';
+    const destination = path.join(temporary, 'project', '.opencode', 'plugins', name);
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, manifest), JSON.stringify({ name, version: '0.1.0' }));
+    const files = { [manifest]: JSON.stringify({ name, version: '0.2.0' }), 'scripts/reqflow.mjs': '// latest', 'index.ts': '// latest' };
+    const bundle = { name, host: 'opencode', version: '0.2.0', files, sha256: digest(files) };
+    const cli = async (_config, args) => args[1] === 'version' ? { ...bundle, files: undefined, updateAvailable: true } : bundle;
+    const options = { root: destination, updateDir: path.join(temporary, 'opencode-updates') };
+    const updated = await ensureOpencode({}, info, 'opencode', cli, options);
+    assert.equal(updated.updated, true);
+    assert.equal(updated.pluginDir, destination);
+    assert.equal(await readFile(path.join(destination, 'scripts/reqflow.mjs'), 'utf8'), '// latest');
+    const outside = path.join(temporary, 'elsewhere', name);
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, manifest), JSON.stringify({ name, version: '0.1.0' }));
+    const blocked = await ensureOpencode({}, info, 'opencode', cli, { ...options, root: outside });
+    assert.equal(blocked.updated, false);
+    assert.equal(blocked.updateRequired, true);
+    assert.match(blocked.instruction, /手动更新/);
+    // A ReqFlow build without the opencode host keeps the installed version.
+    const legacy = await ensureOpencode({}, info, 'opencode', async () => { throw Error('--host 必须为 codex / zcode / pi / claude-code'); }, options);
+    assert.equal(legacy.updated, false);
+    assert.equal(legacy.updateSupported, false);
+  }
   console.log('PASS: plugin version negotiation, SHA256, safe paths, host installation and update blockers.');
 } finally {
   const relative = path.relative(os.tmpdir(), temporary);

@@ -9,6 +9,7 @@ export async function buildPluginBundles(root) {
     ['zcode', 'reqflow-agent-zcode', '.zcode-plugin/plugin.json'],
     ['pi', 'reqflow-agent-pi', 'package.json'],
     ['claude-code', 'reqflow-agent-claude', '.claude-plugin/plugin.json'],
+    ['opencode', 'reqflow-agent-opencode', 'package.json'],
   ]) {
     const directory = path.join(root, 'plugins', name);
     const meta = JSON.parse(await readFile(path.join(directory, manifest), 'utf8'));

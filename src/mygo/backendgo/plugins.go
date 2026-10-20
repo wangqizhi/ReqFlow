@@ -15,8 +15,8 @@ func pluginRelease(command string, args map[string]any) (map[string]any, error) 
 		return nil, err
 	}
 	host := coreString(args["host"])
-	if host != "codex" && host != "zcode" && host != "pi" && host != "claude-code" {
-		return nil, errors.New("--host 必须为 codex / zcode / pi / claude-code")
+	if host != "codex" && host != "zcode" && host != "pi" && host != "claude-code" && host != "opencode" {
+		return nil, errors.New("--host 必须为 codex / zcode / pi / claude-code / opencode")
 	}
 	bundle, ok := bundles[host]
 	if !ok {

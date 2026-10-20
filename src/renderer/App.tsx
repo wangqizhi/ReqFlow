@@ -38,7 +38,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH', opencode: 'OpenCode' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';

@@ -65,6 +65,7 @@ data-dir.cfg
 .reqflow-codex/
 .reqflow-zcode/
 .reqflow-pi/
+.reqflow-opencode/
 
 # ---- 私钥与证书容器 ----
 .ssh/

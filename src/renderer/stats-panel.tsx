@@ -10,7 +10,7 @@ import { ActivityCalendar } from './stats-calendar';
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
 const RANGES: [label: string, days: number][] = [['近 7 天', 7], ['近 14 天', 14], ['近 30 天', 30], ['全部', 0]];
-const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH' };
+const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH', opencode: 'OpenCode' };
 
 function dayKeyOf(iso: string): string {
   const t = Date.parse(iso);

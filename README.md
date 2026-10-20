@@ -73,11 +73,11 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 执行具体命令时，请将示例路径和 `<项目ID>` 替换为实际值。CLI 默认输出单行 JSON，退出码为 0 或 1；`--pretty` 用于人工阅读。Windows 图形程序在部分终端中可能不直接显示输出，可使用管道、重定向或子进程读取。
 
-可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/` 或 `.reqflow-pi/`，其中包含本地需求快照。
+可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/`、`.reqflow-pi/` 或 `.reqflow-opencode/`，其中包含本地需求快照。
 
 - [完整 CLI 参考](docs/cli-reference.md)
 - [Codex 插件接入](docs/reqflow-codex-plugin.md)
-- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md)
+- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md) · [OpenCode 插件](plugins/reqflow-agent-opencode/README.md)
 - [MOD 协议](docs/mod-protocol.md)
 
 ## 本地开发
