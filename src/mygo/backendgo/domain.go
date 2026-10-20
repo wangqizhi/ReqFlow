@@ -829,6 +829,11 @@ func coreApplyOperation(s, a map[string]any) error {
 				seen[file] = true
 			}
 			old["files"] = files
+			captured, err := captureContextFiles(s, old)
+			if err != nil {
+				return err
+			}
+			old["codeFiles"] = captured
 		}
 		old["title"], old["body"], old["tags"] = title, body, tags
 		s["contextPrompts"] = prompts

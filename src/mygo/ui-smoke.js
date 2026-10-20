@@ -287,6 +287,8 @@
     await switchProject('发布终端UI检查');
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
+    checks.terminalPublishCollapsed = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
+    await click(document.querySelector('.publish-terminal-reopen'));
     const terminalText = () => document.querySelector('.publish-terminal .xterm')?.textContent || '';
     await waitFor(() => terminalText().includes('stream-first'));
     checks.terminalLive = { ok: document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成' && !terminalText().includes('stream-last') };
@@ -301,8 +303,8 @@
     checks.terminalDetached = { ok: detached.ok && detached.detached && document.querySelector('.main').getBoundingClientRect().height > dockHeight + 100 && !document.querySelector('.publish-terminal-reopen') };
     await window.reqflow.closePublishTerminal(terminalRunId);
     await waitFor(() => !!document.querySelector('.publish-terminal'));
-    checks.terminalReattached = { ok: !button('发布终端') && !!document.querySelector('.terminal-elapsed') };
-    await click(document.querySelector('[aria-label="收起发布终端"]'));
+    checks.terminalReattached = { ok: !button('终端') && !!document.querySelector('.terminal-elapsed') };
+    await click(document.querySelector('[aria-label="收起终端"]'));
     checks.terminalCollapse = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
     await terminalSetting(false);
     await terminalSetting(true);

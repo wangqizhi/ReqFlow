@@ -55,7 +55,7 @@ export function ContentWorkspace({ prompts, projects, busy, apply, notify }: {
     {git?.available === false && <div className="context-git-bar off" role="status">
       <GitBranch size={16} />
       <div><strong>未检测到 Git，上下文暂不会自动提交版本</strong>
-        <span>文档与代码摘录仍会保存到上下文目录。安装 Git 后重启 ReqFlow，即可自动为每次更新提交历史；Windows 可运行 <code>winget install --id Git.Git -e</code>。</span></div>
+        <span>总结与原始代码文件仍会保存到上下文目录。安装 Git 后重启 ReqFlow，即可自动为每次更新提交历史；Windows 可运行 <code>winget install --id Git.Git -e</code>。</span></div>
       <button className="btn sm" disabled={!bridge.openExternal} onClick={() => void bridge.openExternal?.('https://git-scm.com/download/win')}><ExternalLink size={14} />Git 下载页</button>
     </div>}
     {git?.available === true && <div className="context-git-bar on"><GitBranch size={16} />
@@ -70,20 +70,20 @@ export function ContentWorkspace({ prompts, projects, busy, apply, notify }: {
       <p className="content-body">{prompt.body}</p>
       {!!prompt.files?.length && <p className="content-files" title={prompt.files.join('\n')}><FileText size={14} />{[...prompt.files].join(' · ')}</p>}
       {!!prompt.code?.trim() && <details className="content-code"><summary>相关代码 · {prompt.files?.length || 1} 处<ExternalLink size={13} /></summary><pre>{prompt.code.trim()}</pre></details>}
-      <div className="card-actions"><button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(contextText(prompt)); notify('提示词已复制'); } catch { notify('复制失败，请检查剪贴板权限', 'err'); } }}>复制</button><button className="btn" disabled={locked} onClick={() => setForm({ ...prompt, tags: prompt.tags.join('，'), files: (prompt.files || []).join('，'), code: prompt.code || '' })}>编辑</button><button className="btn" disabled={locked} onClick={() => setDeleting(prompt)}><Trash size={14} />删除</button></div>
+      <div className="card-actions">{git?.dir && <button className="btn" disabled={!bridge.openProjectDir} onClick={async () => { try { const r = await bridge.openProjectDir!(git.dir + "/" + prompt.id); if (!r.ok) throw Error(r.error || "打开目录失败"); } catch (e: any) { notify(e.message, "err"); } }}><FileText size={14} />打开上下文目录</button>}<button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(contextText(prompt)); notify('提示词已复制'); } catch { notify('复制失败，请检查剪贴板权限', 'err'); } }}>复制</button><button className="btn" disabled={locked} onClick={() => setForm({ ...prompt, tags: prompt.tags.join('，'), files: (prompt.files || []).join('，'), code: prompt.code || '' })}>编辑</button><button className="btn" disabled={locked} onClick={() => setDeleting(prompt)}><Trash size={14} />删除</button></div>
     </article>) : <p className="empty">{prompts.length ? '没有符合筛选条件的提示词。' : '还没有提示词，点击「新建提示词」开始记录。'}</p>}</div>
     {(form || deleting) && <div className="overlay" role="dialog" aria-modal="true" aria-label={form ? '编辑提示词' : '删除提示词'} onClick={e => { if (e.target === e.currentTarget && !locked) { setForm(null); setDeleting(null); } }}><div className="dialog content-dialog"><div className="dialog-head"><h3>{form ? form.id ? '编辑提示词' : '新建提示词' : '删除提示词'}</h3><button className="icon-btn" aria-label="关闭提示词窗口" disabled={locked} onClick={() => { setForm(null); setDeleting(null); }}><X size={18} /></button></div>
       {form ? <form onSubmit={e => { e.preventDefault(); void save({ op: 'contextPrompt', ...form, files: form.files?.split(/[,，;；\n]/).map(value => value.trim()).filter(Boolean) || [], tags: form.tags.split(/[,，;；\n]/).map(value => value.trim()).filter(Boolean) }); }}>
         <label className="field">标题<input required autoFocus value={form.title} disabled={locked} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
         <label className="field">上下文内容<textarea required rows={8} value={form.body} disabled={locked} onChange={e => setForm({ ...form, body: e.target.value })} placeholder="这段功能是什么、如何实现、与相邻模块的边界与约束" /></label>
         <label className="field">相关文件 · 每行或逗号分隔<input value={form.files || ''} disabled={locked} placeholder="src/renderer/App.tsx, src/core/domain.ts" onChange={e => setForm({ ...form, files: e.target.value })} /></label>
-        <label className="field">相关代码摘录 · Markdown<textarea rows={6} value={form.code || ''} disabled={locked} onChange={e => setForm({ ...form, code: e.target.value })} placeholder={'### src/core/domain.ts\n```ts\n关键代码片段\n```'} /></label>
+        <label className="field">补充说明 · 兼容旧代码摘录<textarea rows={6} value={form.code || ''} disabled={locked} onChange={e => setForm({ ...form, code: e.target.value })} placeholder={'### src/core/domain.ts\n```ts\n关键代码片段\n```'} /></label>
         <label className="field">关联项目<select value={form.projectId || ''} disabled={locked} onChange={e => setForm({ ...form, projectId: e.target.value })}><option value="">不关联项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         {form.projectId && <label className="field">功能名称<input required value={form.feature || ''} disabled={locked} onChange={e => setForm({ ...form, feature: e.target.value })} /></label>}
         <label className="field">自定义标签<input value={form.tags} disabled={locked} placeholder="多个标签用逗号分隔，例如：开发，文案，审查" onChange={e => setForm({ ...form, tags: e.target.value })} /></label>
-        <p className="settings-hint">相关代码与文件会写入上下文目录的 <code>code/</code> 与 <code>contexts.md</code>，检测到 Git 时随每次保存自动提交。</p>
+        <p className="settings-hint">每条上下文保存在独立的 ID 文件夹中：<code>summary.md</code> 为总结，<code>files/</code> 保存关联项目内的原始代码文件；检测到 Git 时自动提交。</p>
         <div className="settings-actions"><button type="button" className="btn" disabled={locked} onClick={() => setForm(null)}>取消</button><button className="btn primary" disabled={locked || !form.title.trim() || !form.body.trim()}>{saving ? '保存中…' : '保存提示词'}</button></div>
-      </form> : <><p>确认删除「{deleting?.title}」？删除后无法恢复，相关代码摘录也会从 Git 目录移除。</p><div className="settings-actions"><button className="btn" disabled={locked} onClick={() => setDeleting(null)}>取消</button><button className="btn danger" disabled={locked} onClick={() => void save({ op: 'deleteContextPrompt', id: deleting!.id })}>确认删除</button></div></>}
+      </form> : <><p>确认删除「{deleting?.title}」？删除后无法恢复，原始代码副本也会从上下文目录移除，Git 历史保留。</p><div className="settings-actions"><button className="btn" disabled={locked} onClick={() => setDeleting(null)}>取消</button><button className="btn danger" disabled={locked} onClick={() => void save({ op: 'deleteContextPrompt', id: deleting!.id })}>确认删除</button></div></>}
     </div></div>}
   </section>;
 }

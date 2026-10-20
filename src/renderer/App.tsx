@@ -165,7 +165,7 @@ export default function App() {
     setPublishStates(states => {
       if (states[id]?.terminalRunId) return states;
       let open = false;
-      try { open = localStorage.getItem('reqflow-terminal-open:' + id) === 'true'; } catch {}
+      // Each application session starts with the terminal collapsed.
       const now = Date.now();
       const session = states[id] || { running: false, step: '', result: null, startedAt: now, endedAt: now, revision: 1, idle: true };
       return { ...states, [id]: { ...session, terminalRunId: crypto.randomUUID(), terminalProject: name, terminalOpen: open } };
@@ -488,8 +488,8 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    if (terminalRunId) rememberTerminal(project.id, true);
-    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
+    if (terminalRunId) rememberTerminal(project.id, false);
+    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: false, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
@@ -863,7 +863,7 @@ export default function App() {
                 <Rocket size={16} />{publishing ? publishStep || '发布中…' : '发布'}
               </button>
             )}
-            {terminalDetached && <button className="btn" onClick={() => void detachTerminal().catch(e => notify(e.message, 'err'))}>发布终端</button>}
+            {terminalDetached && <button className="btn" onClick={() => void detachTerminal().catch(e => notify(e.message, 'err'))}>终端</button>}
             {!!p?.verifySource && (
               <button className="btn run" onClick={runVerifySource} title={'运行验证源：' + p.verifySource.value}>
                 <Play size={16} />运行
@@ -1122,16 +1122,16 @@ export default function App() {
         setForm({ ...defaultRequirementForm(), body: [
           '将现有功能「' + feature + '」整理为一条项目上下文。',
           '只说明这个上下文与该功能的联系，不需要完整架构：简述功能职责、关键入口或文件、与相邻模块的边界与约束，保持精简。不要臆造不存在的实现。',
-          '同时把相关代码带入上下文管理：阅读该功能的实现，挑选关键入口、数据结构与调用链，摘录少量关键代码（每处标注文件路径与行号，总计约 150 行以内），写入单独的代码 Markdown 文件，使用 ```语言 代码块。',
-          '将功能说明保存为 Markdown 文件，相关代码保存为另一个 Markdown 文件，然后调用 ReqFlow CLI 提交到上下文管理：',
-          'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<说明文件绝对路径>" --code "<代码摘录文件绝对路径>" --files "相对路径1,相对路径2"',
+          '同时把相关代码文件带入上下文管理：阅读该功能的实现，选择相关源代码文件，保留原始文件内容与项目相对路径，不要把代码改写成 Markdown 摘录。',
+          '只有功能总结保存为 Markdown。通过 --files 指定项目内的原始代码文件，系统会复制到每个上下文片段的独立目录并用 Git 管理：',
+          'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<说明文件绝对路径>" --files "相对路径1,相对路径2"',
           '先运行 context list 检查已有文档；更新时在 context put 中携带 --id，避免重复创建。使用当前 ReqFlow 数据目录。',
           '提交后运行 context list 确认说明、相关代码和项目关联；如返回 warning，解决目录或 Git 同步问题。守则会自动生成并加入后续需求 Prompt。'
         ].join('\n\n') });
-      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
+      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
-      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
+      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>

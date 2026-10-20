@@ -122,52 +122,76 @@ func TestContextRulesAreConciseAndLimited(t *testing.T) {
 	}
 }
 
-func TestContextCodeExcerptsAreVersionedAndRemovable(t *testing.T) {
+func TestContextOriginalFilesAreVersionedAndPortable(t *testing.T) {
 	dir := t.TempDir()
 	s := NewWorkspaceService(dir)
 	state := coreMap(coreTestGet(t, s)["state"])
 	pid := coreString(coreMap(coreList(state["projects"])[0])["id"])
-	codeFile := filepath.Join(t.TempDir(), "code.md")
-	code := "### src/core/domain.ts\n\n```ts\nexport function apply() {}\n```"
-	if e := os.WriteFile(codeFile, []byte(code), 0600); e != nil {
-		t.Fatal(e)
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, "src"), 0700); err != nil {
+		t.Fatal(err)
 	}
-	r := coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "排期功能", "--body", "上下文说明",
-		"--code", codeFile, "--files", "src/renderer/App.tsx, ./src/core/domain.ts")
+	original := []byte("package feature\r\n// 原始代码\r\n")
+	file := filepath.Join(project, "src", "feature.go")
+	if err := os.WriteFile(file, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Mutate(map[string]any{"op": "projectDir", "project": pid, "dir": project}, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "排期功能", "--body", "上下文说明", "--files", "./src/feature.go")
+	if r["warning"] != nil {
+		t.Fatal(r["warning"])
+	}
 	prompt := coreMap(coreList(coreMap(r["state"])["contextPrompts"])[0])
-	if !strings.Contains(coreString(prompt["code"]), "export function apply") {
-		t.Fatal("code excerpt was not stored")
-	}
-	if files := coreList(prompt["files"]); len(files) != 2 || files[0] != "src/renderer/App.tsx" || files[1] != "src/core/domain.ts" {
-		t.Fatalf("related files were not normalized: %v", files)
-	}
-	source := filepath.Join(dir, "contexts")
-	raw, e := os.ReadFile(filepath.Join(source, "contexts.md"))
-	if e != nil || !strings.Contains(string(raw), "### 相关代码") || !strings.Contains(string(raw), "src/core/domain.ts") {
-		t.Fatal("contexts.md did not include code excerpts", e)
-	}
-	codePath := filepath.Join(source, "code", coreString(prompt["id"])+".md")
-	if snapshot, e := os.ReadFile(codePath); e != nil || !strings.Contains(string(snapshot), "export function apply") {
-		t.Fatal("code snapshot file missing", e)
-	}
-	index, _ := os.ReadFile(filepath.Join(source, "index.json"))
-	if !strings.Contains(string(index), "export function apply") {
-		t.Fatal("index.json did not include the code excerpt")
-	}
-	if _, e := exec.LookPath("git"); e == nil {
-		cmd := exec.Command("git", "-C", source, "log", "--oneline")
-		if out, e := cmd.CombinedOutput(); e != nil || strings.TrimSpace(string(out)) == "" {
-			t.Fatal("code update was not committed", e, string(out))
+	id := coreString(prompt["id"])
+	library := filepath.Join(dir, "contexts")
+	check := func(root string) {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(root, id, "files", "src", "feature.go"))
+		if err != nil || string(raw) != string(original) {
+			t.Fatalf("original bytes lost: %q %v", raw, err)
+		}
+		summary, err := os.ReadFile(filepath.Join(root, id, "summary.md"))
+		if err != nil || !strings.Contains(string(summary), "上下文说明") {
+			t.Fatal("summary missing", err)
 		}
 	}
-	// Clearing the excerpt removes the managed snapshot instead of leaving stale code behind.
-	coreTestCLI(t, dir, "context", "put", "--id", coreString(prompt["id"]), "--title", "排期功能", "--body", "上下文说明", "--code", "", "--files", "")
-	if _, e := os.Stat(codePath); !os.IsNotExist(e) {
-		t.Fatal("cleared code left a stale snapshot", e)
+	check(library)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
 	}
-	raw, _ = os.ReadFile(filepath.Join(source, "contexts.md"))
-	if strings.Contains(string(raw), "### 相关代码") {
-		t.Fatal("cleared code remained in contexts.md")
+	// Migrating after the source disappears must preserve the captured bytes.
+	target := filepath.Join(t.TempDir(), "library")
+	coreTestCLI(t, dir, "context", "migrate", "--dir", target)
+	check(target)
+	// Unrelated saves must preserve the existing capture.
+	coreTestCLI(t, dir, "context", "put", "--id", id, "--title", "改名", "--body", "上下文说明")
+	check(target)
+	// A failed recapture must not change the saved context.
+	if _, err := s.Mutate(map[string]any{"op": "contextPrompt", "id": id, "title": "错误", "body": "说明", "tags": []any{}, "files": []any{"../outside.go"}}, nil); err == nil {
+		t.Fatal("path escape accepted")
+	}
+	if _, err := s.Mutate(map[string]any{"op": "contextPrompt", "id": id, "title": "错误", "body": "说明", "tags": []any{}, "files": []any{"missing.go"}}, nil); err == nil {
+		t.Fatal("missing source accepted")
+	}
+	check(target)
+	coreTestCLI(t, dir, "context", "put", "--id", id, "--title", "清空", "--body", "说明", "--files", "")
+	if _, err := os.Stat(filepath.Join(target, id, "files", "src", "feature.go")); !os.IsNotExist(err) {
+		t.Fatal("stale code remained", err)
+	}
+	if _, err := s.Mutate(map[string]any{"op": "deleteContextPrompt", "id": id}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, id)); !os.IsNotExist(err) {
+		t.Fatal("deleted context folder remained", err)
+	}
+	if _, err := exec.LookPath("git"); err == nil {
+		cmd := exec.Command("git", "-C", target, "log", "--all", "--oneline", "--", id+"/files/src/feature.go")
+		raw, err := cmd.CombinedOutput()
+		if err != nil || strings.TrimSpace(string(raw)) == "" {
+			t.Fatal("Git lost file history", err, string(raw))
+		}
 	}
 }
 

@@ -44,7 +44,7 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
       <label className="field">项目目录 · 可选<input value={dir} readOnly={isSSH(dir)} onChange={(e) => { setDir(e.target.value); setMessage(''); }} placeholder="选择本地文件夹或连接远程服务器" /></label>
       <div className="settings-actions">
         <button type="button" className="btn" disabled={busy || !bridge.pickDir} onClick={() => perform(async () => {
-          const r = await bridge.pickDir!(); if (!r.ok) throw Error(r.error || '选择目录失败'); if (r.dir) setDir(r.dir);
+          const r = await bridge.pickDir!(); if (!r.ok) throw Error(r.error || '选择目录失败'); if (r.dir) { setDir(r.dir); setName(current => current.trim() ? current : r.dir!.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || ''); }
         })}><FolderOpen />选择系统文件夹</button>
         <button type="button" className="btn" disabled={busy} onClick={() => setSSHOpen(true)}><FolderOpen />连接远程服务器</button>
         {isSSH(dir) && <button type="button" className="btn" onClick={() => setDir('')}>取消远程绑定</button>}
@@ -67,6 +67,6 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
     </fieldset>
     {message && <p className={'settings-message' + (error ? ' project-create-error' : '')} role={error ? 'alert' : 'status'}>{message}</p>}
     <div className="settings-actions"><button className="btn primary" disabled={busy || !name.trim()}>{working ? (bindRemote ? '创建并拉取中…' : '处理中…') : '创建项目'}</button></div>
-    {sshOpen && <SSHDirectory initial={dir} onClose={() => setSSHOpen(false)} onSelect={value => { setDir(value); setBindRemote(false); setSSHOpen(false); }} />}
+    {sshOpen && <SSHDirectory initial={dir} onClose={() => setSSHOpen(false)} onSelect={value => { setDir(value); setName(current => current.trim() ? current : value.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || ""); setBindRemote(false); setSSHOpen(false); }} />}
   </form>;
 }

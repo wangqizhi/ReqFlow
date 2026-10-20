@@ -212,13 +212,13 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
       veilApi.current = null;
     };
   }, [runId, project]);
-  return <section className="publish-terminal" aria-label="发布终端" aria-busy={session.running || loading || detaching} data-run-id={runId}>
+  return <section className="publish-terminal" aria-label="终端" aria-busy={session.running || loading || detaching} data-run-id={runId}>
     <header><strong>Terminal · {project}</strong>
       {!session.idle && <span className={'terminal-indicator ' + (session.running ? 'running' : session.result?.ok ? 'success' : 'failure')} aria-label={session.running ? '发布运行中' : session.result?.ok ? '发布成功' : '发布失败'}>{session.running ? <RefreshCw size={14} className="terminal-spinner" /> : session.result?.ok ? <Check size={14} /> : <X size={14} />}</span>}
       <span className="terminal-status" role="status">{detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
-      <button className="icon-btn" aria-label={onDetach ? '收起发布终端' : '关闭发布终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>
+      <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>
     <div className="publish-terminal-body">
       <div className="publish-terminal-content" ref={container} />
       <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
@@ -236,7 +236,7 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
       try {
         const result = await bridge.getPublishTerminal?.(runId);
         if (cancelled) return;
-        if (!result?.ok || !result.session) throw Error(result?.error || '发布终端会话不可用');
+        if (!result?.ok || !result.session) throw Error(result?.error || '终端会话不可用');
         setSession(result.session); setError(''); document.title = 'Terminal · ' + result.session.project;
       } catch (e: any) { if (!cancelled) setError(e.message); }
       finally { if (!cancelled) timer = setTimeout(poll, 250); }
@@ -248,5 +248,5 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
     try { const result = await bridge.closePublishTerminal?.(runId); if (!result?.ok) throw Error(result?.error || '无法关闭终端窗口'); }
     catch (e: any) { setError(e.message); }
   }
-  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载发布终端…'}</span></div>}</div>;
+  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载终端…'}</span></div>}</div>;
 }

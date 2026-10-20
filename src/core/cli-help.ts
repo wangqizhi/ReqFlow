@@ -28,7 +28,7 @@ export const CLI_GLOBAL_OPTIONS: CliCommandDoc[] = [
 export const CLI_DOCS: CliGroupDoc[] = [
   { group: 'context', desc: '功能上下文、项目守则与数据目录。守则自动生成，后续需求 Prompt 自动引用。', commands: [
     { name: 'context list', args: '', desc: '列出上下文及关联的 projectId / feature，含相关代码与源码路径。' },
-    { name: 'context put', args: '--title <标题> --file <Markdown文件> [--id <上下文ID>] [--code <代码摘录Markdown>] [--files <逗号分隔文件路径>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]', desc: '新增或更新上下文；也可用 --body 直接传正文。--code 把相关代码摘录一并写入上下文库（code/ 目录，随 Git 提交），--files 记录相关源码路径。关联项目后自动生成守则，并同步目录与 Git。', example: 'ReqFlow.exe --cli context put --title "排期功能" --file feature.md --code code.md --files "src/renderer/App.tsx,src/core/domain.ts" --project <id> --feature 排期' },
+    { name: 'context put', args: '--title <标题> --file <Markdown文件> [--id <上下文ID>] [--code <代码摘录Markdown>] [--files <逗号分隔文件路径>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]', desc: '新增或更新上下文；也可用 --body 直接传正文。--files 从关联项目目录复制原始代码文件（最多60个，单文件2MB、总计8MB）。每条上下文使用独立的 ID 目录，summary.md 保存总结，files/ 保留代码原文件与相对路径；--code 兼容旧摘录并保存在元数据中。关联项目后自动生成守则，并同步目录与 Git。', example: 'ReqFlow.exe --cli context put --title "排期功能" --file feature.md --files "src/renderer/App.tsx,src/core/domain.ts" --project <id> --feature 排期' },
     { name: 'context settings', args: '', desc: '查看上下文数据目录及 Git 可用状态。' },
     { name: 'context migrate', args: '--dir <绝对路径>', desc: '迁移上下文到空目录并切换后续写入位置，原目录保留为恢复副本。' }
   ] },

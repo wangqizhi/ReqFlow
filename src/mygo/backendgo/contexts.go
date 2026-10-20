@@ -2,7 +2,9 @@ package backendgo
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -128,6 +130,68 @@ func contextFiles(c map[string]any) []string {
 	return files
 }
 
+// Capture bytes at save time, so unrelated workspace changes never replace a
+// saved context with a newer (or deleted) working tree file.
+func captureContextFiles(state, c map[string]any) (map[string]any, error) {
+	result := map[string]any{}
+	files := contextFiles(c)
+	if len(files) == 0 {
+		return result, nil
+	}
+	p := coreFind(coreList(state["projects"]), c["projectId"])
+	root := coreString(p["dir"])
+	if root == "" || !filepath.IsAbs(root) {
+		return nil, errors.New("保存相关代码需要关联本地项目目录")
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
+	total := int64(0)
+	for _, name := range files {
+		if !safeContextPath(name) {
+			return nil, fmt.Errorf("相关文件路径必须位于项目内：%s", name)
+		}
+		source, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			return nil, fmt.Errorf("读取相关文件 %s：%w", name, err)
+		}
+		rel, err := filepath.Rel(root, source)
+		if err != nil || !safeContextPath(filepath.ToSlash(rel)) {
+			return nil, errors.New("相关文件不能通过符号链接指向项目外部")
+		}
+		info, err := os.Stat(source)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() || info.Size() > 2*1024*1024 {
+			return nil, fmt.Errorf("相关文件必须是 2 MB 以内的普通文件：%s", name)
+		}
+		total += info.Size()
+		if total > 8*1024*1024 {
+			return nil, errors.New("相关代码文件总大小不能超过 8 MB")
+		}
+		raw, err := os.ReadFile(source)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = base64.StdEncoding.EncodeToString(raw)
+	}
+	return result, nil
+}
+
+func safeContextPath(name string) bool {
+	if name == "" || strings.ContainsAny(name, "\\:") || filepath.IsAbs(name) {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." || strings.EqualFold(part, ".git") {
+			return false
+		}
+	}
+	return true
+}
+
 // contextSnapshotName reports whether a file name is one of the per-context
 // snapshots written by writeContextSnapshot (a UUID plus .md). Cleanup only
 // touches managed snapshots and leaves any other files in code/ alone.
@@ -152,48 +216,85 @@ func writeContextSnapshot(dir string, state map[string]any) error {
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
-	// index.json, contexts.md and the optional code/ excerpts form a portable,
-	// versioned context library that Git can track as a whole.
+	// Upgrade old path-only contexts before replacing any managed snapshots.
+	for _, cv := range coreList(state["contextPrompts"]) {
+		c := coreMap(cv)
+		if c["codeFiles"] == nil && len(contextFiles(c)) > 0 {
+			captured, err := captureContextFiles(state, c)
+			if err != nil {
+				return err
+			}
+			c["codeFiles"] = captured
+		}
+	}
+	// Each fragment has a portable folder; index.json retains library metadata.
 	if e := desktopAtomicJSON(filepath.Join(dir, "index.json"), coreList(state["contextPrompts"])); e != nil {
 		return e
 	}
 	docs := []string{"# ReqFlow 上下文库（自动生成）"}
-	codeDir := filepath.Join(dir, "code")
-	codeFiles := map[string]bool{}
+	managed := map[string]bool{}
 	for _, cv := range coreList(state["contextPrompts"]) {
 		c := coreMap(cv)
-		section := "## " + coreString(c["title"]) + "\n\n" + coreString(c["body"])
-		if files := contextFiles(c); len(files) > 0 {
-			lines := make([]string, len(files))
-			for n, file := range files {
-				lines[n] = "- `" + file + "`"
-			}
-			section += "\n\n相关文件：\n\n" + strings.Join(lines, "\n")
+		id := coreString(c["id"])
+		if !contextSnapshotName(id) {
+			return errors.New("上下文 ID 格式无效")
 		}
-		if code := strings.TrimSpace(coreString(c["code"])); code != "" {
-			section += "\n\n### 相关代码\n\n" + code
-			if id := coreString(c["id"]); id != "" {
-				if e := os.MkdirAll(codeDir, 0700); e != nil {
-					return e
-				}
-				if e := coreAtomicWrite(filepath.Join(codeDir, id+".md"), []byte("# "+coreString(c["title"])+"\n\n"+code+"\n")); e != nil {
-					return e
-				}
-				codeFiles[id] = true
+		managed[id] = true
+		folder := filepath.Join(dir, id)
+		if info, err := os.Lstat(folder); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("上下文目录不能是符号链接")
+		}
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			return err
+		}
+		if err := desktopAtomicJSON(filepath.Join(folder, "context.json"), c); err != nil {
+			return err
+		}
+		if err := coreAtomicWrite(filepath.Join(folder, "summary.md"), []byte("# "+coreString(c["title"])+"\n\n"+coreString(c["body"])+"\n")); err != nil {
+			return err
+		}
+		codeDir := filepath.Join(folder, "files")
+		// Only the generated files subtree is replaced; user files elsewhere stay.
+		if err := os.RemoveAll(codeDir); err != nil {
+			return err
+		}
+		for name, encoded := range coreMap(c["codeFiles"]) {
+			if !safeContextPath(name) {
+				return errors.New("上下文代码路径无效")
+			}
+			raw, err := base64.StdEncoding.DecodeString(coreString(encoded))
+			if err != nil {
+				return err
+			}
+			dest := filepath.Join(codeDir, filepath.FromSlash(name))
+			if err = os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
+				return err
+			}
+			if err = coreAtomicWrite(dest, raw); err != nil {
+				return err
 			}
 		}
-		docs = append(docs, section)
+		docs = append(docs, "## "+coreString(c["title"])+"\n\n"+coreString(c["body"])+"\n\n目录："+id+"/（summary.md 与 files/ 原始代码文件）")
 	}
-	// Drop excerpts for contexts whose code was removed so Git records the deletion.
-	if entries, e := os.ReadDir(codeDir); e == nil {
-		for _, entry := range entries {
-			name := entry.Name()
-			base := strings.TrimSuffix(name, ".md")
-			if entry.IsDir() || !strings.HasSuffix(name, ".md") || codeFiles[base] || !contextSnapshotName(base) {
-				continue
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if contextSnapshotName(entry.Name()) && !managed[entry.Name()] {
+			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				return err
 			}
-			if e := os.Remove(filepath.Join(codeDir, name)); e != nil && !os.IsNotExist(e) {
-				return e
+		}
+	}
+	// Remove only legacy generated excerpt files after upgrading the layout.
+	legacyDir := filepath.Join(dir, "code")
+	if entries, err := os.ReadDir(legacyDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") && contextSnapshotName(strings.TrimSuffix(entry.Name(), ".md")) {
+				if err := os.Remove(filepath.Join(legacyDir, entry.Name())); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -208,11 +309,8 @@ func writeContextSnapshot(dir string, state map[string]any) error {
 			return e
 		}
 	}
-	paths := []string{"index.json", "contexts.md"}
-	if info, e := os.Stat(codeDir); e == nil && info.IsDir() {
-		paths = append(paths, "code")
-	}
-	if e := contextGit(dir, append([]string{"add", "--"}, paths...)...); e != nil {
+	paths := []string{"."}
+	if e := contextGit(dir, "add", "-A", "--", "."); e != nil {
 		return e
 	}
 	// Empty commits are avoided; local identity never changes the user's Git config.
