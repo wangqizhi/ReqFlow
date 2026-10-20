@@ -1016,10 +1016,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .milestone-card { min-width: 0; margin: 6px 0 8px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; transition: border-color .12s, box-shadow .12s; }
 .milestone-item:hover .milestone-card { border-color: var(--line-2); box-shadow: 0 4px 16px rgba(28, 25, 23, .06); }
 .milestone-card-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
-.milestone-card-head strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.milestone-card-head strong { white-space: pre-wrap; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .milestone-refs { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 .milestone-ref { padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; white-space: nowrap; }
-.milestone-body { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.milestone-body { display: block; margin: 8px 0 0; overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .milestone-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 11.5px; }
 .milestone-meta code { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: 11px; }
 .milestone-meta time { margin-left: auto; }
@@ -1126,3 +1126,7 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .body-expand-mention { flex: 1; min-height: 0; display: flex; }
 .body-expand-mention > textarea { flex: 1; min-height: 0; }
 .body-expand-mention > .mention-menu { top: auto; bottom: 8px; }
+
+.stats-project-link { appearance: none; min-width: 0; max-width: 100%; border: 0; padding: 0; background: transparent; font-family: inherit; text-align: left; cursor: pointer; }
+.stats-project-link:hover { color: var(--accent); text-decoration: underline; }
+.stats-project-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }

@@ -94,12 +94,12 @@ function LineChart({ title, points, unit = '', width, height = 176 }: { title: s
 }
 
 /** 单色水平条形列表：类别身份由行标签承载，条形恒用槽 1 蓝，值标注在条尾之外。 */
-function BarList({ rows, unit = '' }: { rows: { label: string; value: number; hint?: string }[]; unit?: string }) {
+function BarList({ rows, unit = '', onSelect }: { rows: { id?: string; label: string; value: number; hint?: string }[]; unit?: string; onSelect?(id: string): void }) {
   const max = Math.max(...rows.map(r => r.value), 1);
   return <div className="stats-bars">
     {rows.length === 0 && <p className="settings-hint">暂无数据</p>}
-    {rows.map(r => <div className="stats-bar-row" key={r.label} title={r.hint || `${r.label}：${r.value}${unit}`}>
-      <span className="stats-bar-label">{r.label}</span>
+    {rows.map(r => <div className="stats-bar-row" key={r.id || r.label} title={r.hint || `${r.label}：${r.value}${unit}`}>
+      {onSelect && r.id ? <button type="button" className="stats-bar-label stats-project-link" title={`查看 ${r.label} 的里程碑`} onClick={() => onSelect(r.id!)}>{r.label}</button> : <span className="stats-bar-label">{r.label}</span>}
       <span className="stats-bar-track"><span className="stats-bar-fill" style={{ width: `${(r.value / max) * 100}%` }} /></span>
       <span className="stats-bar-value">{compact(r.value)}{unit}</span>
     </div>)}
@@ -288,7 +288,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const projectRows = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of inRange.created) counts.set(e.project, (counts.get(e.project) || 0) + 1);
-    return (workspace?.projects || []).map(p => ({ label: p.name, value: counts.get(p.id) || 0 })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    return (workspace?.projects || []).map(p => ({ id: p.id, label: p.name, value: counts.get(p.id) || 0 })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   }, [inRange, workspace]);
 
   const clientRows = useMemo(() => {
@@ -343,7 +343,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
         <h4>每日新建需求{currentName ? ` · ${currentName}` : ''}</h4>
         <div className="stats-project-tags">
           <button className={'tag-btn' + (projectId === '' ? ' on' : '')} aria-pressed={projectId === ''} onClick={() => setProjectId('')}>全部</button>
-          {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} title={`查看 ${p.name} 的里程碑`} onClick={() => { setProjectId(p.id); setMilestones({ loading: true, error: '', data: null }); setMilestoneId(p.id); }}>{p.name}</button>)}
+          {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} onClick={() => setProjectId(p.id)}>{p.name}</button>)}
         </div>
       </div>
       <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
@@ -354,7 +354,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <div className="stats-chart-block"><h4>每日 AI 执行用时</h4><LineChart key={`minutes-${range}`} title="AI 执行用时" unit=" 分" points={series.minutes} width={354} height={150} /></div>
     </div>
     <div className="stats-grid-2">
-      <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} /></div>
+      <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} /></div>
       <div className="stats-chart-block"><h4>AI 客户端使用</h4><BarList rows={clientRows} unit=" 次" /></div>
     </div>
     <div className="settings-actions">

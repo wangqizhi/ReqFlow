@@ -331,6 +331,11 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                     const tag=[...document.querySelectorAll('.stats-project-tags .tag-btn')].find(b=>b.textContent.trim()!=='全部');
                     if(!tag) return {ok:false,error:'no project tag',height:innerHeight};
                     tag.click();
+                    await pause();
+                    if(document.querySelector('.milestone-view')||tag.getAttribute('aria-pressed')!=='true') return {ok:false,error:'project filter navigated instead of filtering',height:innerHeight};
+                    const link=document.querySelector('.stats-project-link');
+                    if(!link) return {ok:false,error:'no project milestone link',height:innerHeight};
+                    link.click();
                     const end=Date.now()+4000;
                     while(!document.querySelector('.milestone-view')&&Date.now()<end) await new Promise(r=>setTimeout(r,40));
                     const view=document.querySelector('.milestone-view');
