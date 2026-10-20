@@ -15,7 +15,7 @@ func ActiveAIExecution(i map[string]any) map[string]any {
 }
 
 func claimAIExecution(p, a map[string]any, now string) error {
-	if !coreIn(coreString(a["client"]), "codex", "zcode", "pi", "claude-code") || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(coreString(a["run"])) {
+	if !coreIn(coreString(a["client"]), "codex", "zcode", "pi", "claude-code", "dsh") || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(coreString(a["run"])) {
 		return errors.New("AI 领取客户端或运行 ID 无效")
 	}
 	requests, ok := a["claims"].([]any)

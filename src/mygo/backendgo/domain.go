@@ -306,7 +306,6 @@ func MatchesSchedule(date, mode, selected string) bool {
 	return date == "" || date <= selected
 }
 func NormalizeWorkspace(s map[string]any) map[string]any {
-	refreshContextRules(s)
 	folders := coreList(s["folders"])
 	if coreFind(folders, "default") == nil {
 		folders = append([]any{map[string]any{"id": "default", "name": "default"}}, folders...)
@@ -336,6 +335,16 @@ func NormalizeWorkspace(s map[string]any) map[string]any {
 		}
 		if _, ok := p["aiValidation"].(bool); !ok {
 			p["aiValidation"] = false
+		}
+		if coreSafeInt(p["contextRulesLimit"]) {
+			limit := int(coreNum(p["contextRulesLimit"]))
+			if limit >= MinContextRulesLimit && limit <= MaxContextRulesLimit {
+				p["contextRulesLimit"] = int64(limit)
+			} else {
+				delete(p, "contextRulesLimit")
+			}
+		} else {
+			delete(p, "contextRulesLimit")
 		}
 		for _, k := range []string{"dir", "baselineTemplate"} {
 			v, ok := p[k].(string)
@@ -392,6 +401,7 @@ func NormalizeWorkspace(s map[string]any) map[string]any {
 			}
 		}
 	}
+	refreshContextRules(s)
 	return s
 }
 func coreFailureEntries(i map[string]any) []any {
@@ -1028,7 +1038,26 @@ func coreApplyOperation(s, a map[string]any) error {
 				return e
 			}
 		}
-		if text == p["guidance"] && delivery == p["deliveryGuidance"] {
+		limit := ProjectContextRulesLimit(p)
+		if coreHas(a, "contextRulesLimit") {
+			if !coreSafeInt(a["contextRulesLimit"]) {
+				return errors.New("守则字数上限必须是整数")
+			}
+			limit = int(coreNum(a["contextRulesLimit"]))
+			if limit < MinContextRulesLimit || limit > MaxContextRulesLimit {
+				return errors.New("守则字数上限需在 50 到 5000 字之间")
+			}
+		}
+		guideChanged := text != p["guidance"] || delivery != p["deliveryGuidance"]
+		limitChanged := limit != ProjectContextRulesLimit(p)
+		if !guideChanged && !limitChanged {
+			return nil
+		}
+		if limitChanged {
+			p["contextRulesLimit"] = int64(limit)
+			refreshContextRules(s)
+		}
+		if !guideChanged {
 			return nil
 		}
 		p["guideHistory"] = append([]any{map[string]any{"version": p["guideVersion"], "text": p["guidance"], "deliveryGuidance": p["deliveryGuidance"], "aiValidation": p["aiValidation"], "time": now}}, coreList(p["guideHistory"])...)

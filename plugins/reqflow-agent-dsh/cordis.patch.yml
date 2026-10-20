@@ -1,0 +1,6 @@
+# ReqFlow Agent for DeepSeek Harness.
+# The bundle inserts one host row. Tools, the /reqflow command and the
+# reqflow-execute / reqflow-setup skills are registered by lib/index.js.
+- insert:
+    - id: reqflow-agent-dsh
+      name: 'reqflow-agent-dsh'

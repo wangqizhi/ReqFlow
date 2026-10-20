@@ -1,0 +1,33 @@
+{
+  "name": "reqflow-agent-dsh",
+  "version": "0.1.1",
+  "private": true,
+  "description": "DeepSeek Harness 插件：按当前目录读取 ReqFlow AI 排期需求，实现后回写待验证。",
+  "author": {
+    "name": "ReqFlow"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "scripts/reqflow.mjs",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    ".dsh-plugin/plugin.json"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

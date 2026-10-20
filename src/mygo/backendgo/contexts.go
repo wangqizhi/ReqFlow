@@ -11,20 +11,74 @@ import (
 	"time"
 )
 
+const (
+	DefaultContextRulesLimit = 500
+	MinContextRulesLimit     = 50
+	MaxContextRulesLimit     = 5000
+)
+
+func ProjectContextRulesLimit(p map[string]any) int {
+	if coreSafeInt(p["contextRulesLimit"]) {
+		limit := int(coreNum(p["contextRulesLimit"]))
+		if limit >= MinContextRulesLimit && limit <= MaxContextRulesLimit {
+			return limit
+		}
+	}
+	return DefaultContextRulesLimit
+}
+
+func truncateContextRunes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
 func refreshContextRules(s map[string]any) {
+	type linkedContext struct {
+		feature string
+		title   string
+		id      string
+		body    string
+	}
 	for _, pv := range coreList(s["projects"]) {
 		p := coreMap(pv)
-		sections := []string{}
+		linked := []linkedContext{}
 		for _, cv := range coreList(s["contextPrompts"]) {
 			c := coreMap(cv)
 			if c["projectId"] == p["id"] && coreString(c["feature"]) != "" {
-				sections = append(sections, "## "+coreString(c["feature"])+"\n上下文："+coreString(c["title"])+"（"+coreString(c["id"])+"）\n\n"+coreString(c["body"]))
+				linked = append(linked, linkedContext{
+					feature: coreString(c["feature"]),
+					title:   coreString(c["title"]),
+					id:      coreString(c["id"]),
+					body:    strings.TrimSpace(coreString(c["body"])),
+				})
 			}
 		}
 		delete(p, "contextRules")
-		if len(sections) > 0 {
-			p["contextRules"] = "# " + coreString(p["name"]) + " · 项目守则\n\n" + strings.Join(sections, "\n\n")
+		if len(linked) == 0 {
+			continue
 		}
+		// 守则只保留上下文与功能的简短联系，并按项目设置的字数上限截断，避免把完整架构带进排期 Prompt。
+		limit := ProjectContextRulesLimit(p)
+		header := "# " + coreString(p["name"]) + " · 项目守则"
+		overhead := len([]rune(header))
+		for _, c := range linked {
+			overhead += len([]rune("## " + c.feature + "\n上下文：" + c.title + "（" + c.id + "）\n\n"))
+		}
+		share := (limit - overhead) / len(linked)
+		if share < 0 {
+			share = 0
+		}
+		sections := make([]string, len(linked))
+		for n, c := range linked {
+			sections[n] = "## " + c.feature + "\n上下文：" + c.title + "（" + c.id + "）\n\n" + truncateContextRunes(c.body, share)
+		}
+		p["contextRules"] = truncateContextRunes(header+"\n\n"+strings.Join(sections, "\n\n"), limit)
 	}
 }
 func (s *WorkspaceService) contextDir() (string, error) {

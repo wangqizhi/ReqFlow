@@ -487,6 +487,15 @@
       await click(button('取消'));
     }
     await click(button('记录新需求'));
+    const modalBar = document.querySelector('.modal-window-bar');
+    const modalControls = modalBar?.querySelector('.window-controls');
+    checks.modalDragStrip = {
+      ok: !!modalBar && !!modalControls
+        && getComputedStyle(modalBar).getPropertyValue('--app-region').trim() === 'drag'
+        && getComputedStyle(modalControls).getPropertyValue('--app-region').trim() === 'no-drag'
+        && Math.abs(modalBar.getBoundingClientRect().width - innerWidth) < 1
+        && modalBar.getBoundingClientRect().bottom <= document.querySelector('.requirement-dialog').getBoundingClientRect().top + 1
+    };
     await click(button('展开更多设置 · 图片、标题、验收与交付'));
     const textarea = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, '长中文说明、附件与高级字段清空检查。'.repeat(35));
@@ -532,7 +541,7 @@
     await new Promise(resolve => setTimeout(resolve, 60));
     await click(button('生成需求'));
     await waitFor(() => !!document.querySelector('.requirement-dialog'));
-    checks.contextRequirement = { ok: document.querySelector('.requirement-dialog textarea').value.includes('context put --project') && document.querySelector('.requirement-dialog textarea').value.includes('需求排期') };
+    checks.contextRequirement = { ok: document.querySelector('.requirement-dialog textarea').value.includes('context put --project') && document.querySelector('.requirement-dialog textarea').value.includes('需求排期') && document.querySelector('.requirement-dialog textarea').value.includes('联系') && !document.querySelector('.requirement-dialog textarea').value.includes('整理架构') };
     await click(button('清空需求'));
     await waitFor(() => !document.querySelector('.requirement-dialog [aria-label="关闭"]')?.disabled);
     document.querySelector('.requirement-dialog').closest('.overlay').click();
@@ -544,6 +553,8 @@
     const guideDialog = document.querySelector('.project-guide-dialog');
     const guideTabs = [...guideDialog.querySelectorAll('.settings-tabs button')];
     checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
+    const rulesLimitInput = guideDialog.querySelector('input[type="number"]');
+    checks.rulesLimitField = { ok: !!rulesLimitInput && rulesLimitInput.value === '500' && rulesLimitInput.min === '50' && rulesLimitInput.max === '5000' };
     // 引导词默认只读文本块，点击进入编辑框；点另一个字段时前一个自动收起
     checks.guideView = { ok: guideDialog.querySelectorAll('.guidance-view').length === 2 && !guideDialog.querySelector('.guidance-input-wrap textarea') };
     checks.guideFullWidth = { ok: true, widths: [] };

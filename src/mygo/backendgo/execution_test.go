@@ -22,8 +22,8 @@ func TestAIExecutionExclusiveClaim(t *testing.T) {
 	}
 	b := coreMap(coreList(coreMap(coreList(coreMap(r["state"])["projects"])[0])["batches"])[0])
 	claims := []any{map[string]any{"id": iid, "version": i["version"], "batchId": b["id"], "hash": b["hash"]}}
-	runs := []string{coreUUID(), coreUUID(), coreUUID(), coreUUID()}
-	clients := []string{"codex", "zcode", "pi", "claude-code"}
+	runs := []string{coreUUID(), coreUUID(), coreUUID(), coreUUID(), coreUUID()}
+	clients := []string{"codex", "zcode", "pi", "claude-code", "dsh"}
 	var wait sync.WaitGroup
 	var mu sync.Mutex
 	errors := []error{}

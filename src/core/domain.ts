@@ -4,7 +4,7 @@
 import { validateRemote, type RemoteSettings } from './remote';
 import { validateDate } from './dates';
 export type Attachment = { id: string; label: string; name: string; dataUrl: string; path?: string };
-export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi' | 'claude-code'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
+export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi' | 'claude-code' | 'dsh'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
 export const activeAIExecution = (i: Item) => i.aiExecution?.runId && !i.aiExecution.endedAt ? i.aiExecution : undefined;
 function finishAIExecution(i: Item, now: string, outcome: 'completed' | 'released') {
   const execution = activeAIExecution(i);
@@ -100,6 +100,7 @@ export type Project = {
   hidden?: boolean;
   revision?: number;
   contextRules?: string;
+  contextRulesLimit?: number; // 守则字数上限，默认 500
   requirementDraft?: Record<string, any>;
 };
 
@@ -107,6 +108,9 @@ export type ContextPrompt = { id: string; title: string; body: string; tags: str
 export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; contextPrompts?: ContextPrompt[] };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
+export const DEFAULT_CONTEXT_RULES_LIMIT = 500;
+export const MIN_CONTEXT_RULES_LIMIT = 50;
+export const MAX_CONTEXT_RULES_LIMIT = 5000;
 export const DEFAULT_GUIDANCE =
   '请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。';
 
@@ -266,6 +270,7 @@ export function normalizeWorkspace(s: Workspace) {
     if (!s.folders.some((f) => f.id === p.folderId)) p.folderId = 'default';
     if (typeof p.deliveryGuidance !== 'string') p.deliveryGuidance = DEFAULT_DELIVERY;
     if (typeof p.aiValidation !== 'boolean') p.aiValidation = false;
+    if (!(Number.isSafeInteger(p.contextRulesLimit) && p.contextRulesLimit! >= MIN_CONTEXT_RULES_LIMIT && p.contextRulesLimit! <= MAX_CONTEXT_RULES_LIMIT)) delete p.contextRulesLimit;
     if (typeof p.dir !== 'string' || !p.dir.trim()) p.dir = undefined;
     if (typeof p.baselineTemplate === 'string' && p.baselineTemplate.trim()) p.baselineTemplate = p.baselineTemplate.trim();
     else p.baselineTemplate = undefined;
@@ -496,7 +501,7 @@ async function applyOperation(s: Workspace, a: any) {
   }
   const now = new Date().toISOString();
   if (a.op === 'executionClaim') {
-    if (!['codex', 'zcode', 'pi', 'claude-code'].includes(a.client) || !/^[a-f0-9-]{36}$/.test(a.run || '')) throw Error('AI 领取客户端或运行 ID 无效');
+    if (!['codex', 'zcode', 'pi', 'claude-code', 'dsh'].includes(a.client) || !/^[a-f0-9-]{36}$/.test(a.run || '')) throw Error('AI 领取客户端或运行 ID 无效');
     if (!Array.isArray(a.claims) || !a.claims.length) throw Error('AI 领取请求不能为空');
     const seen = new Set();
     for (const r of a.claims) {
@@ -543,7 +548,20 @@ async function applyOperation(s: Workspace, a: any) {
     const text = needed(a.text, '项目引导词');
     const delivery =
       a.deliveryGuidance === undefined ? p.deliveryGuidance : needed(a.deliveryGuidance, '交付引导');
-    if (text === p.guidance && delivery === p.deliveryGuidance) return;
+    let limit = contextRulesLimit(p);
+    if (a.contextRulesLimit !== undefined) {
+      if (!Number.isSafeInteger(a.contextRulesLimit) || a.contextRulesLimit < MIN_CONTEXT_RULES_LIMIT || a.contextRulesLimit > MAX_CONTEXT_RULES_LIMIT)
+        throw new Error('守则字数上限需在 50 到 5000 字之间');
+      limit = a.contextRulesLimit;
+    }
+    const guideChanged = text !== p.guidance || delivery !== p.deliveryGuidance;
+    const limitChanged = limit !== contextRulesLimit(p);
+    if (!guideChanged && !limitChanged) return;
+    if (limitChanged) {
+      p.contextRulesLimit = limit;
+      refreshContextRules(s);
+    }
+    if (!guideChanged) return;
     p.guideHistory.unshift({
       version: p.guideVersion,
       text: p.guidance,
@@ -922,10 +940,28 @@ export function compareArchivedItems(a: Item, b: Item) {
 }
 
 // 守则是关联上下文的投影，不能由用户直接编辑。
+// 只保留上下文与功能的简短联系，并按项目设置的字数上限截断，避免把完整架构带进排期 Prompt。
+export const contextRulesLimit = (p: Project) =>
+  Number.isSafeInteger(p.contextRulesLimit) && p.contextRulesLimit! >= MIN_CONTEXT_RULES_LIMIT && p.contextRulesLimit! <= MAX_CONTEXT_RULES_LIMIT
+    ? p.contextRulesLimit!
+    : DEFAULT_CONTEXT_RULES_LIMIT;
+
+function truncateContextText(text: string, limit: number): string {
+  if (limit <= 0) return '';
+  const chars = Array.from(text);
+  return chars.length <= limit ? text : chars.slice(0, limit - 1).join('') + '…';
+}
+
 export function refreshContextRules(s: Workspace) {
   for (const project of s.projects || []) {
     const linked = (s.contextPrompts || []).filter(c => c.projectId === project.id && c.feature);
     if (!linked.length) { delete project.contextRules; continue; }
-    project.contextRules = '# ' + project.name + ' · 项目守则\n\n' + linked.map(c => '## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n' + c.body).join('\n\n');
+    const limit = contextRulesLimit(project);
+    const header = '# ' + project.name + ' · 项目守则';
+    const overhead = Array.from(header).length + linked.reduce((total, c) =>
+      total + Array.from('## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n').length, 0);
+    const share = Math.max(0, Math.floor((limit - overhead) / linked.length));
+    const sections = linked.map(c => '## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n' + truncateContextText(c.body.trim(), share));
+    project.contextRules = truncateContextText(header + '\n\n' + sections.join('\n\n'), limit);
   }
 }

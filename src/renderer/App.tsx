@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
+  DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CONTEXT_RULES_LIMIT, MIN_CONTEXT_RULES_LIMIT, MAX_CONTEXT_RULES_LIMIT, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
   scheduledBatch, activeAIExecution, type Item, type Project, type Workspace
 } from '../core/domain';
 import { bridge, type PublishSession } from './api';
@@ -38,7 +38,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
@@ -83,6 +83,7 @@ export default function App() {
   const [verifyKind, setVerifyKind] = useState<'none' | 'exe' | 'url'>('none'); // 验证源类型（REQ-060）
   const [verifyValue, setVerifyValue] = useState('');
   const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
+  const [rulesLimit, setRulesLimit] = useState(DEFAULT_CONTEXT_RULES_LIMIT); // 守则字数上限（REQ-185）
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
@@ -607,7 +608,8 @@ export default function App() {
   const shownItems = tab === 'archived'
     ? visible.filter(i => (!archiveDate || archivedDate(i) === archiveDate) && (!archiveBatch || archiveBatch.items.some((old) => old.id === i.id)))
     : visible;
-  const windowBar = bridge.windowControl && <div className="window-bar"><div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div></div>;
+  const windowControls = () => <div className="window-controls"><button aria-label="最小化" onClick={() => void bridge.windowControl?.('minimize')}><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" /></svg></button><button className="window-close" aria-label="关闭窗口" onClick={() => void bridge.windowControl?.('close')}><X size={16} /></button></div>;
+  const windowBar = bridge.windowControl ? <div className="window-bar">{windowControls()}</div> : null;
   const batch = p?.batches.find((b) => b.id === batchId) || p?.batches.find((b) => b.mode === 'develop');
   const stale = !!batch && !!p && (
     batch.guideVersion !== p.guideVersion ||
@@ -884,6 +886,7 @@ export default function App() {
           </div>
           <button className="btn plain" onClick={() => {
             setGuide(p!.guidance); setDelivery(p!.deliveryGuidance);
+            setRulesLimit(p!.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT);
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
             setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
@@ -1114,15 +1117,15 @@ export default function App() {
         e.preventDefault(); setContextWizard(false); edit();
         const feature = contextFeature.trim();
         setForm({ ...defaultRequirementForm(), body: [
-          '将现有功能「' + feature + '」归纳为项目上下文。',
-          '请阅读现有代码，整理架构、功能行为、约束和对应代码路径（含关键符号），形成 Markdown 功能文档。不要臆造不存在的实现。',
+          '将现有功能「' + feature + '」整理为一条项目上下文。',
+          '只说明这个上下文与该功能的联系，不需要完整架构：简述功能职责、关键入口或文件、与相邻模块的边界与约束，保持精简。不要臆造不存在的实现。',
           '将文档保存到临时 Markdown 文件，然后调用 ReqFlow CLI 提交到上下文管理：',
           'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<Markdown文件绝对路径>"',
           '先运行 context list 检查已有文档；更新时在 context put 中携带 --id，避免重复创建。使用当前 ReqFlow 数据目录。',
           '提交后运行 context list 确认文档和项目关联；如返回 warning，解决目录或 Git 同步问题。守则会自动生成并加入后续需求 Prompt。'
         ].join('\n\n') });
-      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交功能文档。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
-      {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><h3>项目守则 · 自动生成</h3><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
+      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
+      {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
@@ -1237,6 +1240,13 @@ export default function App() {
             <FileMentionTextarea root={p?.dir || ''} label="需求说明" wrapClassName="body-expand-mention" className="body-expand-input" autoFocus value={form.body} onChange={(body) => change({ ...form, body })}
               placeholder={form.type === 'bug' ? '复现步骤、实际表现与预期行为' : '描述要实现的行为、约束或目标指标'} />
           </div>
+        </div>
+      )}
+      {/* REQ-186：记录新需求弹窗打开时，顶部仍保留可拖动窗口的区域与窗口按钮。 */}
+      {modal === 'item' && bridge.windowControl && (
+        <div className="modal-window-bar">
+          <span>ReqFlow · {editing ? '编辑需求' : '记录新需求'}</span>
+          {windowControls()}
         </div>
       )}
       {modal && (
@@ -1372,6 +1382,11 @@ export default function App() {
                   {guideTab === 'guide' && <>
                     <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={8} disabled={busy} />
                     <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={6} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
+                    <label className="field">守则字数上限（{MIN_CONTEXT_RULES_LIMIT}–{MAX_CONTEXT_RULES_LIMIT}）
+                      <input type="number" min={MIN_CONTEXT_RULES_LIMIT} max={MAX_CONTEXT_RULES_LIMIT} step={50} value={rulesLimit} disabled={busy}
+                        onChange={e => setRulesLimit(Number(e.target.value))} />
+                    </label>
+                    <p className="settings-hint">关联上下文自动生成的项目守则最多保留 {Number.isFinite(rulesLimit) ? rulesLimit : DEFAULT_CONTEXT_RULES_LIMIT} 字，超出部分省略；默认 {DEFAULT_CONTEXT_RULES_LIMIT} 字。守则会加入后续排期 Prompt。</p>
                     <p className="settings-hint">{p!.dir ? '输入 @ 可补全项目内文件或目录（↑↓ 选择、回车确认、Esc 关闭）；「AI 优化」会结合最近提交与变更差异给出对比稿。' : '关联项目目录后，可在引导词中输入 @ 引用项目文件；「AI 优化」会结合最近提交与变更差异给出对比稿。'}</p>
                   </>}
                   {guideTab === 'template' && <>
@@ -1425,13 +1440,13 @@ export default function App() {
                 </div>
                 <div className="settings-footer">
                   <span className="guide-footer-note">保存会应用全部标签页的修改</span>
-                  <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
+                  <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || !Number.isInteger(rulesLimit) || rulesLimit < MIN_CONTEXT_RULES_LIMIT || rulesLimit > MAX_CONTEXT_RULES_LIMIT || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
                     onClick={async () => {
                       if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
                       if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
                       if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
                       const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
-                      if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery }, true)) return;
+                      if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, contextRulesLimit: rulesLimit }, true)) return;
                       setModal('');
                       if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
                       else notify('设置已保存');

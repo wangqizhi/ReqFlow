@@ -85,6 +85,43 @@ func TestLinkedContextsPromptMigrationAndGit(t *testing.T) {
 	}
 }
 
+func TestContextRulesAreConciseAndLimited(t *testing.T) {
+	dir := t.TempDir()
+	s := NewWorkspaceService(dir)
+	initial := coreMap(coreTestGet(t, s)["state"])
+	pid := coreString(coreMap(coreList(initial["projects"])[0])["id"])
+	body := strings.Repeat("这段说明只描述功能与上下文的联系。", 120)
+	r := coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "排期功能", "--body", body)
+	p := coreFind(coreList(coreMap(r["state"])["projects"]), pid)
+	rules := coreString(p["contextRules"])
+	if n := len([]rune(rules)); n > DefaultContextRulesLimit {
+		t.Fatalf("default context rules kept %d runes, want <= %d", n, DefaultContextRulesLimit)
+	}
+	if !strings.Contains(rules, "排期") || !strings.Contains(rules, "…") {
+		t.Fatalf("truncated rules lost the feature or truncation mark: %q", rules)
+	}
+	prompt := BuildPrompt(p, []any{})
+	if !strings.Contains(prompt, "## 项目守则（自动生成）") || !strings.Contains(prompt, rules) {
+		t.Fatal("scheduling prompt did not include the limited context rules")
+	}
+	// 上限可在项目设置中调整，并且同样严格约束守则长度。
+	r, e := s.Mutate(map[string]any{"op": "guidance", "project": pid, "text": coreString(p["guidance"]), "contextRulesLimit": int64(120)}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p = coreFind(coreList(coreMap(r["state"])["projects"]), pid)
+	rules = coreString(p["contextRules"])
+	if n := len([]rune(rules)); n > 120 {
+		t.Fatalf("custom context rules kept %d runes, want <= 120", n)
+	}
+	if coreFind(coreList(coreMap(r["state"])["projects"]), pid)["contextRulesLimit"] == nil {
+		t.Fatal("custom limit was not persisted")
+	}
+	if _, e := s.Mutate(map[string]any{"op": "guidance", "project": pid, "text": coreString(p["guidance"]), "contextRulesLimit": int64(10)}, nil); e == nil {
+		t.Fatal("out-of-range limit was accepted")
+	}
+}
+
 func TestTerminalSettingSurvivesRestartAndSeparateTestData(t *testing.T) {
 	dir := t.TempDir()
 	app := NewBackend(dir, t.TempDir(), "test")
