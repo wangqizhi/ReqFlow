@@ -786,7 +786,7 @@ func coreApplyOperation(s, a map[string]any) error {
 			}
 		}
 		if old == nil {
-			old = map[string]any{"id": coreUUID()}
+			old = map[string]any{"id": coreUUID(), "code": "", "files": []any{}}
 			prompts = append(prompts, old)
 		}
 		if a["projectId"] != nil {
@@ -795,6 +795,40 @@ func coreApplyOperation(s, a map[string]any) error {
 				return errors.New("关联项目不存在或功能名称为空")
 			}
 			old["projectId"], old["feature"] = projectID, feature
+		}
+		if raw, exists := a["code"]; exists {
+			code, ok := raw.(string)
+			if !ok {
+				return errors.New("相关代码格式无效")
+			}
+			code = strings.TrimSpace(code)
+			if len([]rune(code)) > MaxContextCodeRunes {
+				return errors.New("相关代码过多，请只保留关键片段后重试")
+			}
+			old["code"] = code
+		}
+		if raw, exists := a["files"]; exists {
+			list, ok := raw.([]any)
+			if !ok {
+				return errors.New("相关文件格式无效")
+			}
+			files, seen := []any{}, map[string]bool{}
+			for _, value := range list {
+				file, ok := value.(string)
+				if !ok {
+					return errors.New("相关文件格式无效")
+				}
+				file = strings.TrimPrefix(strings.TrimSpace(strings.ReplaceAll(file, "\\", "/")), "./")
+				if file == "" || len([]rune(file)) > 300 || seen[file] {
+					continue
+				}
+				if len(files) >= MaxContextCodeFiles {
+					break
+				}
+				files = append(files, file)
+				seen[file] = true
+			}
+			old["files"] = files
 		}
 		old["title"], old["body"], old["tags"] = title, body, tags
 		s["contextPrompts"] = prompts

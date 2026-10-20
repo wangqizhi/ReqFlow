@@ -105,7 +105,7 @@ export type Project = {
   requirementDraft?: Record<string, any>;
 };
 
-export type ContextPrompt = { id: string; title: string; body: string; tags: string[]; projectId?: string; feature?: string };
+export type ContextPrompt = { id: string; title: string; body: string; tags: string[]; projectId?: string; feature?: string; code?: string; files?: string[] };
 export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; contextPrompts?: ContextPrompt[] };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
@@ -379,7 +379,7 @@ async function applyOperation(s: Workspace, a: any) {
     } else {
       if (!Array.isArray(a.tags) || a.tags.some((tag: unknown) => typeof tag !== 'string')) throw Error('标签格式无效');
       if (a.projectId && (!s.projects.some(p => p.id === a.projectId) || !String(a.feature || '').trim())) throw Error('关联项目不存在或功能名称为空');
-      const prompt = { projectId: a.projectId ?? prompts[index]?.projectId, feature: a.feature ?? prompts[index]?.feature, id: a.id || crypto.randomUUID(), title: needed(a.title, '提示词标题'), body: needed(a.body, '提示词内容'), tags: [...new Set<string>(a.tags.map((tag: string) => tag.trim()).filter(Boolean))] };
+      const prompt = { projectId: a.projectId ?? prompts[index]?.projectId, feature: a.feature ?? prompts[index]?.feature, id: a.id || crypto.randomUUID(), title: needed(a.title, '提示词标题'), body: needed(a.body, '提示词内容'), tags: [...new Set<string>(a.tags.map((tag: string) => tag.trim()).filter(Boolean))], code: String(a.code ?? prompts[index]?.code ?? '').trim(), files: a.files === undefined ? prompts[index]?.files || [] : [...new Set<string>((Array.isArray(a.files) ? a.files : []).map((file: string) => String(file).trim().replaceAll('\\', '/')).filter(Boolean))] };
       if (index < 0) prompts.push(prompt); else prompts[index] = prompt;
     }
     refreshContextRules(s);

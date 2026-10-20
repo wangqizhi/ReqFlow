@@ -260,6 +260,41 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 	}
 	git := func(values ...string) (string, error) { return desktopGitRun(ctx, values, root) }
 	switch channel {
+	case "git:milestones":
+		// Read-only history feed for the dashboard milestone view. Limited and
+		// newest-first; the UI groups commits into milestones.
+		limit := 120
+		if n, ok := desktopArg(args, 1).(float64); ok && n >= 10 && n <= 300 {
+			limit = int(n)
+		}
+		inside, e := git("rev-parse", "--is-inside-work-tree")
+		if e != nil || strings.TrimSpace(inside) != "true" {
+			return desktopOK(map[string]any{"repo": false, "branch": "", "total": 0, "commits": []any{}}), nil
+		}
+		branch, _ := git("symbolic-ref", "--short", "HEAD")
+		total := 0
+		if count, e := git("rev-list", "--count", "HEAD"); e == nil {
+			total, _ = strconv.Atoi(strings.TrimSpace(count))
+		}
+		history, e := git("log", "-n", strconv.Itoa(limit), "--format=%H%x00%h%x00%an%x00%aI%x00%D%x00%s%x00%b%x1e")
+		if e != nil {
+			return nil, e
+		}
+		commits := []any{}
+		for _, record := range strings.Split(history, "\x1e") {
+			fields := strings.Split(strings.Trim(record, "\r\n"), "\x00")
+			if len(fields) < 7 || fields[0] == "" {
+				continue
+			}
+			refs := []any{}
+			for _, ref := range strings.Split(fields[4], ", ") {
+				if ref = strings.TrimSpace(ref); ref != "" {
+					refs = append(refs, ref)
+				}
+			}
+			commits = append(commits, map[string]any{"hash": fields[0], "short": fields[1], "author": fields[2], "date": fields[3], "refs": refs, "subject": strings.TrimSpace(fields[5]), "body": strings.TrimSpace(fields[6])})
+		}
+		return desktopOK(map[string]any{"repo": true, "branch": strings.TrimSpace(branch), "total": total, "commits": commits}), nil
 	case "git:status":
 		inside, e := git("rev-parse", "--is-inside-work-tree")
 		if e != nil || strings.TrimSpace(inside) != "true" {

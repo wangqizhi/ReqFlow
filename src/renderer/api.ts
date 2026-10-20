@@ -33,6 +33,10 @@ export type GitStatusInfo = {
 };
 export type GitOpResult = { ok: true; summary?: string; warning?: string } | { ok: false; error: string };
 
+/** Git 提交（里程碑视图）：按提交时间倒序，refs 为 HEAD/标签/远端等装饰。 */
+export type GitCommit = { hash: string; short: string; author: string; date: string; refs: string[]; subject: string; body: string };
+export type GitMilestoneInfo = { repo: boolean; branch: string; total: number; commits: GitCommit[] };
+
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
 export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
@@ -113,6 +117,8 @@ export interface ReqFlowBridge {
   // Git 支持：仅当主进程检测到本机 git 时可用（gitAvailable 返回 available=false 时界面不显示 Git 入口）
   gitAvailable?(): Promise<{ ok: boolean; available: boolean }>;
   gitStatus?(root: string): Promise<({ ok: true } & GitStatusInfo) | { ok: false; error: string }>;
+  /** 里程碑视图：读取项目目录最近的 Git 提交历史（只读）。仅桌面版提供。 */
+  gitMilestones?(root: string, limit?: number): Promise<({ ok: true } & GitMilestoneInfo) | { ok: false; error: string }>;
   gitInit?(root: string): Promise<GitOpResult>;
   gitStage?(root: string, mode: 'stage' | 'unstage', paths: string[]): Promise<GitOpResult>;
   gitCommit?(root: string, message: string, project?: string, items?: { id: string; version: number }[]): Promise<GitOpResult>;

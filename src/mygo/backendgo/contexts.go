@@ -15,6 +15,10 @@ const (
 	DefaultContextRulesLimit = 500
 	MinContextRulesLimit     = 50
 	MaxContextRulesLimit     = 5000
+	// Context documents may carry excerpts of the feature's code; keep them
+	// bounded so workspace.json and the Git snapshots stay readable.
+	MaxContextCodeRunes = 120000
+	MaxContextCodeFiles = 60
 )
 
 func ProjectContextRulesLimit(p map[string]any) int {
@@ -111,18 +115,87 @@ func contextGit(dir string, args ...string) error {
 	}
 	return nil
 }
+func contextFiles(c map[string]any) []string {
+	files := []string{}
+	seen := map[string]bool{}
+	for _, v := range coreList(c["files"]) {
+		file := strings.TrimSpace(coreString(v))
+		if file != "" && !seen[file] {
+			files = append(files, file)
+			seen[file] = true
+		}
+	}
+	return files
+}
+
+// contextSnapshotName reports whether a file name is one of the per-context
+// snapshots written by writeContextSnapshot (a UUID plus .md). Cleanup only
+// touches managed snapshots and leaves any other files in code/ alone.
+func contextSnapshotName(name string) bool {
+	if len(name) != 36 {
+		return false
+	}
+	for i, r := range name {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if r != '-' {
+				return false
+			}
+			continue
+		}
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
 func writeContextSnapshot(dir string, state map[string]any) error {
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
-	// These two managed files form a portable, versioned context library.
+	// index.json, contexts.md and the optional code/ excerpts form a portable,
+	// versioned context library that Git can track as a whole.
 	if e := desktopAtomicJSON(filepath.Join(dir, "index.json"), coreList(state["contextPrompts"])); e != nil {
 		return e
 	}
 	docs := []string{"# ReqFlow 上下文库（自动生成）"}
+	codeDir := filepath.Join(dir, "code")
+	codeFiles := map[string]bool{}
 	for _, cv := range coreList(state["contextPrompts"]) {
 		c := coreMap(cv)
-		docs = append(docs, "## "+coreString(c["title"])+"\n\n"+coreString(c["body"]))
+		section := "## " + coreString(c["title"]) + "\n\n" + coreString(c["body"])
+		if files := contextFiles(c); len(files) > 0 {
+			lines := make([]string, len(files))
+			for n, file := range files {
+				lines[n] = "- `" + file + "`"
+			}
+			section += "\n\n相关文件：\n\n" + strings.Join(lines, "\n")
+		}
+		if code := strings.TrimSpace(coreString(c["code"])); code != "" {
+			section += "\n\n### 相关代码\n\n" + code
+			if id := coreString(c["id"]); id != "" {
+				if e := os.MkdirAll(codeDir, 0700); e != nil {
+					return e
+				}
+				if e := coreAtomicWrite(filepath.Join(codeDir, id+".md"), []byte("# "+coreString(c["title"])+"\n\n"+code+"\n")); e != nil {
+					return e
+				}
+				codeFiles[id] = true
+			}
+		}
+		docs = append(docs, section)
+	}
+	// Drop excerpts for contexts whose code was removed so Git records the deletion.
+	if entries, e := os.ReadDir(codeDir); e == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			base := strings.TrimSuffix(name, ".md")
+			if entry.IsDir() || !strings.HasSuffix(name, ".md") || codeFiles[base] || !contextSnapshotName(base) {
+				continue
+			}
+			if e := os.Remove(filepath.Join(codeDir, name)); e != nil && !os.IsNotExist(e) {
+				return e
+			}
+		}
 	}
 	if e := coreAtomicWrite(filepath.Join(dir, "contexts.md"), []byte(strings.Join(docs, "\n\n"))); e != nil {
 		return e
@@ -135,13 +208,17 @@ func writeContextSnapshot(dir string, state map[string]any) error {
 			return e
 		}
 	}
-	if e := contextGit(dir, "add", "--", "index.json", "contexts.md"); e != nil {
+	paths := []string{"index.json", "contexts.md"}
+	if info, e := os.Stat(codeDir); e == nil && info.IsDir() {
+		paths = append(paths, "code")
+	}
+	if e := contextGit(dir, append([]string{"add", "--"}, paths...)...); e != nil {
 		return e
 	}
 	// Empty commits are avoided; local identity never changes the user's Git config.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet", "--", "index.json", "contexts.md")
+	cmd := exec.CommandContext(ctx, "git", append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...)
 	cmd.Dir = dir
 	desktopHideCommand(cmd)
 	if e := cmd.Run(); e == nil {
@@ -149,7 +226,7 @@ func writeContextSnapshot(dir string, state map[string]any) error {
 	} else if exit, ok := e.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 		return e
 	}
-	return contextGit(dir, "-c", "user.name=ReqFlow", "-c", "user.email=reqflow@localhost", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "commit", "-m", "Update ReqFlow contexts", "--", "index.json", "contexts.md")
+	return contextGit(dir, append([]string{"-c", "user.name=ReqFlow", "-c", "user.email=reqflow@localhost", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "commit", "-m", "Update ReqFlow contexts", "--"}, paths...)...)
 }
 func (s *WorkspaceService) syncContexts(state map[string]any) error {
 	dir, e := s.contextDir()

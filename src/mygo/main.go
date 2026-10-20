@@ -299,7 +299,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 		for _, height := range []int{900, 720} {
 			w.SetSize(1440, height)
 			time.Sleep(150 * time.Millisecond)
-			for _, surface := range []string{"terminal", "sidebar", "stats", "directory"} {
+			for _, surface := range []string{"terminal", "sidebar", "stats", "milestones", "directory"} {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));
                   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
@@ -325,6 +325,21 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                     const page=document.querySelector('.stats-page'),calendar=page.querySelector('.activity-calendar');
                     const rect=page.getBoundingClientRect();
                     return {ok:rect.bottom<=innerHeight+1&&page.scrollWidth===page.clientWidth&&calendar.querySelectorAll('button.activity-day').length===365,height:innerHeight};
+                  }
+                  if(SURFACE==='milestones') {
+                    // REQ-190：点击项目切换到 Git 里程碑视图，时间轴与卡片不得横向溢出。
+                    const tag=[...document.querySelectorAll('.stats-project-tags .tag-btn')].find(b=>b.textContent.trim()!=='全部');
+                    if(!tag) return {ok:false,error:'no project tag',height:innerHeight};
+                    tag.click();
+                    const end=Date.now()+4000;
+                    while(!document.querySelector('.milestone-view')&&Date.now()<end) await new Promise(r=>setTimeout(r,40));
+                    const view=document.querySelector('.milestone-view');
+                    if(!view) return {ok:false,error:'milestone view missing',height:innerHeight};
+                    const ready=Date.now()+5000;
+                    while(view.querySelector('.milestone-loading')&&Date.now()<ready) await new Promise(r=>setTimeout(r,40));
+                    await pause();
+                    const page=document.querySelector('.stats-page');
+                    return {ok:view.scrollWidth===view.clientWidth&&page.scrollWidth===page.clientWidth&&view.querySelectorAll('.milestone-stat').length===4&&view.querySelector('.milestone-hero').scrollWidth<=view.clientWidth+1&&[...view.querySelectorAll('.milestone-card')].every(card=>card.scrollWidth<=card.clientWidth+1),height:innerHeight,cards:view.querySelectorAll('.milestone-card').length};
                   }
                   button('返回项目').click();await pause();button('浏览项目').click();await pause();button('关联目录设置').click();await pause();
                   const dialog=document.querySelector('.directory-settings');
@@ -439,6 +454,26 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 			}
 			_, _ = w.Page().EvalContext(ctx, `(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click();await new Promise(r=>setTimeout(r,100));[...document.querySelectorAll('button')].find(b=>b.textContent==='放弃更改')?.click()})()`)
 			time.Sleep(100 * time.Millisecond)
+			// REQ-188：单独捕获上下文管理页（加入 Git 后的状态栏与卡片布局）。
+			contentCode := `(async()=>{
+              const pause=()=>new Promise(r=>setTimeout(r,100));
+              const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+              button('上下文管理').click();await pause();await pause();
+              const page=document.querySelector('.content-workspace');
+              if(!page) return {ok:false,error:'content workspace missing',height:innerHeight};
+              const bar=page.querySelector('.context-git-bar');
+              const card=page.querySelector('.content-card');
+              return {ok:!!bar&&page.scrollWidth===page.clientWidth&&page.getBoundingClientRect().bottom<=innerHeight+1&&(!card||card.scrollWidth<=card.clientWidth+1),height:innerHeight,cards:page.querySelectorAll('.content-card').length,git:(bar&&bar.className)||''};
+            })()`
+			contentReport, contentErr := w.Page().EvalContext(ctx, contentCode)
+			if contentErr != nil {
+				contentReport = map[string]any{"ok": false, "error": contentErr.Error()}
+			}
+			contentName := fmt.Sprintf("%s.content-%d", path, height)
+			_ = writeReport(contentName+".json", contentReport)
+			if png, err := w.CapturePage(); err == nil {
+				_ = os.WriteFile(contentName+".png", png, 0600)
+			}
 		}
 	}
 	mygo.App.Quit()

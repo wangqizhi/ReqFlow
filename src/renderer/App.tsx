@@ -1122,12 +1122,13 @@ export default function App() {
         setForm({ ...defaultRequirementForm(), body: [
           '将现有功能「' + feature + '」整理为一条项目上下文。',
           '只说明这个上下文与该功能的联系，不需要完整架构：简述功能职责、关键入口或文件、与相邻模块的边界与约束，保持精简。不要臆造不存在的实现。',
-          '将文档保存到临时 Markdown 文件，然后调用 ReqFlow CLI 提交到上下文管理：',
-          'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<Markdown文件绝对路径>"',
+          '同时把相关代码带入上下文管理：阅读该功能的实现，挑选关键入口、数据结构与调用链，摘录少量关键代码（每处标注文件路径与行号，总计约 150 行以内），写入单独的代码 Markdown 文件，使用 ```语言 代码块。',
+          '将功能说明保存为 Markdown 文件，相关代码保存为另一个 Markdown 文件，然后调用 ReqFlow CLI 提交到上下文管理：',
+          'ReqFlow.exe --cli context put --project ' + p.id + ' --feature ' + JSON.stringify(feature) + ' --title ' + JSON.stringify(feature + ' · 功能文档') + ' --file "<说明文件绝对路径>" --code "<代码摘录文件绝对路径>" --files "相对路径1,相对路径2"',
           '先运行 context list 检查已有文档；更新时在 context put 中携带 --id，避免重复创建。使用当前 ReqFlow 数据目录。',
-          '提交后运行 context list 确认文档和项目关联；如返回 warning，解决目录或 Git 同步问题。守则会自动生成并加入后续需求 Prompt。'
+          '提交后运行 context list 确认说明、相关代码和项目关联；如返回 warning，解决目录或 Git 同步问题。守则会自动生成并加入后续需求 Prompt。'
         ].join('\n\n') });
-      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
+      }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、发布终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
       {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开发布终端{publishing ? ' · 执行中' : ''}</button>}
@@ -1381,13 +1382,18 @@ export default function App() {
                 </div>
                 <div className="settings-body">
                   {guideTab === 'guide' && <>
-                    <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={8} disabled={busy} />
-                    <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={6} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
-                    <div className="settings-actions"><span>项目守则{p!.contextRulesDisabled ? ' · 已删除' : ''}</span>{p!.contextRulesDisabled ? <button className="btn" disabled={busy} onClick={() => void act({ op: 'guidance', text: p!.guidance, contextRulesDisabled: false }, true)}>重新生成</button> : <button className="btn" disabled={busy || !p!.contextRules} onClick={() => setDeleteRulesConfirm(true)}><Trash />删除守则</button>}</div>
-                    <label className="field">守则字数上限（{MIN_CONTEXT_RULES_LIMIT}–{MAX_CONTEXT_RULES_LIMIT}）
-                      <input type="number" min={MIN_CONTEXT_RULES_LIMIT} max={MAX_CONTEXT_RULES_LIMIT} step={50} value={rulesLimit} disabled={busy}
-                        onChange={e => setRulesLimit(Number(e.target.value))} />
-                    </label>
+                    <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={6} disabled={busy} />
+                    <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={4} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
+                    <div className="settings-actions guide-rules-row">
+                      <span className="guide-rules-title">项目守则{p!.contextRulesDisabled ? ' · 已删除' : ''}</span>
+                      <label className="field inline guide-rules-limit" title="项目守则自动生成时的字数上限">字数上限
+                        <input type="number" min={MIN_CONTEXT_RULES_LIMIT} max={MAX_CONTEXT_RULES_LIMIT} step={50} value={rulesLimit} disabled={busy}
+                          onChange={e => setRulesLimit(Number(e.target.value))} />
+                      </label>
+                      {p!.contextRulesDisabled
+                        ? <button className="btn" disabled={busy} onClick={() => void act({ op: 'guidance', text: p!.guidance, contextRulesDisabled: false }, true)}>重新生成</button>
+                        : <button className="btn" disabled={busy || !p!.contextRules} onClick={() => setDeleteRulesConfirm(true)}><Trash />删除守则</button>}
+                    </div>
                     <p className="settings-hint">关联上下文自动生成的项目守则最多保留 {Number.isFinite(rulesLimit) ? rulesLimit : DEFAULT_CONTEXT_RULES_LIMIT} 字，超出部分省略；默认 {DEFAULT_CONTEXT_RULES_LIMIT} 字。守则会加入后续排期 Prompt。</p>
                     <p className="settings-hint">{p!.dir ? '输入 @ 可补全项目内文件或目录（↑↓ 选择、回车确认、Esc 关闭）；「AI 优化」会结合最近提交与变更差异给出对比稿。' : '关联项目目录后，可在引导词中输入 @ 引用项目文件；「AI 优化」会结合最近提交与变更差异给出对比稿。'}</p>
                   </>}

@@ -24,8 +24,8 @@ ReqFlow.exe --cli <command> [options]
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `context list` | `` | 列出上下文及关联的 projectId / feature。 |
-| `context put` | `--title <标题> --file <Markdown文件> [--id <上下文ID>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]` | 新增或更新上下文；也可用 --body 直接传正文。关联项目后自动生成守则，并同步目录与 Git。 |
+| `context list` | `` | 列出上下文及关联的 projectId / feature，含相关代码与源码路径。 |
+| `context put` | `--title <标题> --file <Markdown文件> [--id <上下文ID>] [--code <代码摘录Markdown>] [--files <逗号分隔文件路径>] [--project <项目ID> --feature <功能名>] [--tags <逗号分隔标签>]` | 新增或更新上下文；也可用 --body 直接传正文。--code 把相关代码摘录一并写入上下文库（code/ 目录，随 Git 提交），--files 记录相关源码路径。关联项目后自动生成守则，并同步目录与 Git。<br/>例：`ReqFlow.exe --cli context put --title "排期功能" --file feature.md --code code.md --files "src/renderer/App.tsx,src/core/domain.ts" --project <id> --feature 排期` |
 | `context settings` | `` | 查看上下文数据目录及 Git 可用状态。 |
 | `context migrate` | `--dir <绝对路径>` | 迁移上下文到空目录并切换后续写入位置，原目录保留为恢复副本。 |
 

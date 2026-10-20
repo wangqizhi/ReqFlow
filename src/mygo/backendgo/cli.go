@@ -182,6 +182,28 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 			}
 		}
 		action := map[string]any{"op": "contextPrompt", "id": a["id"], "title": a["title"], "body": body, "tags": tags}
+		if raw, ok := a["code"]; ok {
+			code := ""
+			if file := strings.TrimSpace(coreString(raw)); file != "" {
+				if raw, e := os.ReadFile(file); e != nil {
+					return nil, e
+				} else {
+					code = string(raw)
+				}
+			}
+			action["code"] = code
+		} else if raw, ok := a["code-body"]; ok {
+			action["code"] = coreString(raw)
+		}
+		if raw, ok := a["files"]; ok {
+			files := []any{}
+			for _, file := range strings.Split(coreString(raw), ",") {
+				if file = strings.TrimSpace(file); file != "" {
+					files = append(files, file)
+				}
+			}
+			action["files"] = files
+		}
 		if _, ok := a["project"]; ok {
 			action["projectId"], action["feature"] = coreString(a["project"]), coreString(a["feature"])
 		} else if a["feature"] != nil {

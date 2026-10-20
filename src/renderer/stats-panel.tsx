@@ -2,10 +2,13 @@
 // 图表遵循 docs/ui-guidelines.md 与数据可视化规范：每图单轴、单系列单色（槽 1 蓝）、
 // hairline 实线网格、2px 线宽 + 白环端点、crosshair 悬浮提示与明细表兜底；
 // 次数与时长分图呈现，不做双坐标轴。文案与轴刻度用文字色，不借用系列色。
-import { useMemo, useState } from 'react';
-import { activeAIExecution, type Item, type Workspace } from '../core/domain';
+// REQ-190：点击项目进入里程碑视图，把 Git 提交历史呈现为带 commit log 文案的时间轴。
+import { useEffect, useMemo, useState } from 'react';
+import { activeAIExecution, type Item, type Project, type Workspace } from '../core/domain';
 import { localDate } from '../core/dates';
+import { bridge, type GitCommit, type GitMilestoneInfo } from './api';
 import { ActivityCalendar } from './stats-calendar';
+import { ChevronRight, GitBranch, RefreshCw } from './icons';
 
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
@@ -103,10 +106,144 @@ function BarList({ rows, unit = '' }: { rows: { label: string; value: number; hi
   </div>;
 }
 
+type MilestoneState = { loading: boolean; error: string; data: GitMilestoneInfo | null; missing?: 'dir' | 'desktop' };
+
+function commitDate(commit: GitCommit): Date | null {
+  const value = new Date(commit.date);
+  return Number.isNaN(value.getTime()) ? null : value;
+}
+function dateParts(commit: GitCommit): { month: string; day: string; time: string; full: string } {
+  const date = commitDate(commit);
+  if (!date) return { month: '未知', day: '--', time: '', full: commit.date };
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    month: `${date.getFullYear()} 年 ${pad(date.getMonth() + 1)} 月`,
+    day: `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+    full: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  };
+}
+function refLabel(ref: string): string {
+  if (ref.startsWith('HEAD -> ')) return 'HEAD · ' + ref.slice(8);
+  if (ref.startsWith('tag: ')) return ref.slice(5);
+  if (ref === 'HEAD') return 'HEAD';
+  return ref;
+}
+
+/** 里程碑时间轴：每个提交是一个节点，标注 commit log 文案、作者与短哈希。 */
+function MilestoneTimeline({ commits }: { commits: GitCommit[] }) {
+  const groups = useMemo(() => {
+    const list: { month: string; commits: GitCommit[] }[] = [];
+    for (const commit of commits) {
+      const month = dateParts(commit).month;
+      const last = list[list.length - 1];
+      if (last && last.month === month) last.commits.push(commit);
+      else list.push({ month, commits: [commit] });
+    }
+    return list;
+  }, [commits]);
+  return <div className="milestone-timeline">
+    {groups.map(group => <section className="milestone-month" key={group.month}>
+      <h3>{group.month}<span>{group.commits.length} 个里程碑</span></h3>
+      <div className="milestone-list">
+        {group.commits.map(commit => {
+          const parts = dateParts(commit);
+          const refs = commit.refs.filter(ref => ref === 'HEAD' || ref.startsWith('HEAD ->') || ref.startsWith('tag:'));
+          const head = refs.some(ref => ref === 'HEAD' || ref.startsWith('HEAD ->'));
+          return <article className={'milestone-item' + (head ? ' head' : '')} key={commit.hash}>
+            <div className="milestone-date"><strong>{parts.day}</strong><span>{parts.time}</span></div>
+            <div className="milestone-rail" aria-hidden="true"><span className="milestone-dot" /></div>
+            <div className="milestone-card">
+              <div className="milestone-card-head">
+                <strong>{commit.subject || '（无提交信息）'}</strong>
+                {refs.length > 0 && <span className="milestone-refs">{refs.slice(0, 3).map(ref => <span className="milestone-ref" key={ref}>{refLabel(ref)}</span>)}</span>}
+              </div>
+              {commit.body && <p className="milestone-body" title={commit.body}>{commit.body}</p>}
+              <div className="milestone-meta">
+                <span className="milestone-avatar" aria-hidden="true">{Array.from(commit.author || '?')[0]}</span>
+                <span>{commit.author || '未知作者'}</span>
+                <code title={commit.hash}>{commit.short || commit.hash.slice(0, 7)}</code>
+                <time dateTime={commit.date} title={parts.full}>{parts.full}</time>
+              </div>
+            </div>
+          </article>;
+        })}
+      </div>
+    </section>)}
+  </div>;
+}
+
+function MilestoneView({ project, state, onBack, onReload }: { project: Project; state: MilestoneState; onBack(): void; onReload(): void }) {
+  const commits = state.data?.commits || [];
+  const authors = new Set(commits.map(commit => commit.author).filter(Boolean));
+  const newest = commits[0] && dateParts(commits[0]);
+  const oldest = commits.length > 1 && dateParts(commits[commits.length - 1]);
+  const span = oldest && newest ? `${oldest.full.slice(0, 10)} → ${newest.full.slice(0, 10)}` : newest ? newest.full.slice(0, 10) : '—';
+  return <section className="milestone-view" aria-label={`${project.name} 里程碑`}>
+    <header className="milestone-hero">
+      <div className="milestone-hero-main">
+        <button type="button" className="btn milestone-back" onClick={onBack}><ChevronRight size={15} />返回统计</button>
+        <p className="eyebrow">PROJECT MILESTONES</p>
+        <h2>{project.name}</h2>
+        <p className="milestone-hero-path"><GitBranch size={14} />{state.data?.branch || '未检测到分支'}<code title={project.dir}>{project.dir || '未关联本地目录'}</code></p>
+      </div>
+      <div className="milestone-stats">
+        <div className="milestone-stat"><strong>{state.loading ? '—' : compact(state.data?.total || commits.length)}</strong><span>提交总数</span></div>
+        <div className="milestone-stat"><strong>{state.loading ? '—' : compact(commits.length)}</strong><span>已展示</span></div>
+        <div className="milestone-stat"><strong>{state.loading ? '—' : compact(authors.size)}</strong><span>参与作者</span></div>
+        <div className="milestone-stat"><strong className="milestone-span">{state.loading ? '—' : span}</strong><span>时间跨度</span></div>
+      </div>
+    </header>
+    <div className="milestone-toolbar">
+      <h3>提交历史即里程碑</h3>
+      <button type="button" className="btn" disabled={state.loading || state.missing !== undefined} onClick={onReload}><RefreshCw size={15} />{state.loading ? '读取中…' : '刷新'}</button>
+    </div>
+    {state.loading && <div className="milestone-empty milestone-loading"><strong>正在读取 Git 历史…</strong><span>位置：{project.dir || '未关联本地目录'}</span></div>}
+    {!state.loading && state.missing === 'dir' && <div className="milestone-empty">
+      <strong>还没有关联本地目录</strong>
+      <span>在「编辑设置 · 关联目录」绑定项目目录后，就能按 Git 提交历史生成里程碑。</span>
+      <span>没有 Git 时仍可正常记录与排期需求，绑定后将自动读取提交。</span>
+    </div>}
+    {!state.loading && state.missing === 'desktop' && <div className="milestone-empty"><strong>里程碑需要桌面版</strong><span>浏览器预览无法读取本地 Git 历史，请使用 ReqFlow 桌面版查看。</span></div>}
+    {!state.loading && !state.missing && state.error && <div className="milestone-empty"><strong>读取 Git 历史失败</strong><span>{state.error}</span><span>请确认目录存在且 Git 可用，然后点「刷新」重试。</span></div>}
+    {!state.loading && !state.missing && !state.error && state.data && !state.data.repo && <div className="milestone-empty">
+      <strong>这个目录还不是 Git 仓库</strong>
+      <span>在项目目录执行 <code>git init</code> 并完成首次提交后，提交历史会在这里成为里程碑。</span>
+    </div>}
+    {!state.loading && !state.missing && !state.error && state.data?.repo && commits.length === 0 && <div className="milestone-empty"><strong>仓库还没有提交记录</strong><span>完成第一次提交后，这里会出现第一个里程碑。</span></div>}
+    {!state.loading && !state.missing && !state.error && commits.length > 0 && <>
+      <p className="milestone-legend"><span className="milestone-dot" aria-hidden="true" />每个节点对应一条 Git 提交；带标签或位于 HEAD 的提交会额外标记。</p>
+      <MilestoneTimeline commits={commits} />
+      {!!state.data?.total && state.data.total > commits.length && <p className="settings-hint">仅展示最近 {commits.length} 条提交（仓库共 {state.data.total} 条）。</p>}
+    </>}
+  </section>;
+}
+
 export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const [range, setRange] = useState(7);
   const [projectId, setProjectId] = useState(''); // 空 = 全部项目合计
   const [showTable, setShowTable] = useState(false);
+  const [milestoneId, setMilestoneId] = useState('');
+  const [milestones, setMilestones] = useState<MilestoneState>({ loading: false, error: '', data: null });
+  const [reload, setReload] = useState(0);
+
+  const projects = workspace?.projects || [];
+
+  // REQ-190：点击项目后读取该项目目录的 Git 历史（只读，最多 120 条）。
+  useEffect(() => {
+    if (!milestoneId) return;
+    const project = (workspace?.projects || []).find(p => p.id === milestoneId);
+    if (!project?.dir) { setMilestones({ loading: false, error: '', data: null, missing: 'dir' }); return; }
+    if (!bridge.gitMilestones) { setMilestones({ loading: false, error: '', data: null, missing: 'desktop' }); return; }
+    let cancelled = false;
+    setMilestones({ loading: true, error: '', data: null });
+    bridge.gitMilestones(project.dir, 120).then(r => {
+      if (cancelled) return;
+      if (!r.ok) setMilestones({ loading: false, error: r.error || '读取 Git 历史失败', data: null });
+      else setMilestones({ loading: false, error: '', data: r });
+    }).catch((e: any) => { if (!cancelled) setMilestones({ loading: false, error: e?.message || '读取 Git 历史失败', data: null }); });
+    return () => { cancelled = true; };
+  }, [milestoneId, reload, workspace]);
 
   // 全量事件流：创建（按项目）、AI 领取（按客户端）、已完成执行的时长（按领取日归组）
   const events = useMemo(() => {
@@ -184,8 +321,12 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
     executing: (workspace?.projects || []).reduce((sum, p) => sum + (p.items || []).filter(i => activeAIExecution(i)).length, 0),
   }), [inRange, workspace]);
 
-  const projects = workspace?.projects || [];
   const currentName = projectId ? projects.find(p => p.id === projectId)?.name : '';
+  const milestoneProject = milestoneId ? projects.find(p => p.id === milestoneId) : undefined;
+
+  if (milestoneProject) return <MilestoneView project={milestoneProject} state={milestones}
+    onBack={() => setMilestoneId('')} onReload={() => setReload(n => n + 1)} />;
+
   return <section className="stats-panel" aria-label="数据面板">
     <div className="stats-filters">
       <div className="segmented" role="group" aria-label="统计时间范围">{RANGES.map(([label, value]) => <button key={value} aria-pressed={range === value} className={range === value ? 'on' : ''} onClick={() => setRange(value)}>{label}</button>)}</div>
@@ -202,7 +343,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
         <h4>每日新建需求{currentName ? ` · ${currentName}` : ''}</h4>
         <div className="stats-project-tags">
           <button className={'tag-btn' + (projectId === '' ? ' on' : '')} aria-pressed={projectId === ''} onClick={() => setProjectId('')}>全部</button>
-          {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} title={p.name} onClick={() => setProjectId(projectId === p.id ? '' : p.id)}>{p.name}</button>)}
+          {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} title={`查看 ${p.name} 的里程碑`} onClick={() => { setProjectId(p.id); setMilestones({ loading: true, error: '', data: null }); setMilestoneId(p.id); }}>{p.name}</button>)}
         </div>
       </div>
       <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />

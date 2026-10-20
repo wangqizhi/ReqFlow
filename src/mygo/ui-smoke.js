@@ -258,7 +258,7 @@
     const contextStyle = getComputedStyle(contextButton);
     checks.contextEntry = { ok: contextButton.getBoundingClientRect().top >= document.querySelector('.side-project-section').getBoundingClientRect().bottom && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
     await click(contextButton);
-    checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
+    checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !!document.querySelector('.context-git-bar') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
     // REQ-169：统计移到侧栏，实验室不再显示；检查日历筛选和键盘导航。
@@ -309,7 +309,13 @@
     await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
     checks.terminalReenable = { ok: !document.querySelector('.publish-terminal') };
     await click(document.querySelector('.publish-terminal-reopen'));
-    await waitFor(() => !!document.querySelector('.publish-terminal'));
+    try { await waitFor(() => !!document.querySelector('.publish-terminal')); }
+    catch {
+      // 若首次点击与终端状态轮询竞争导致未展开，再点一次重开按钮后继续。
+      const reopen = document.querySelector('.publish-terminal-reopen');
+      if (reopen) await click(reopen);
+      await waitFor(() => !!document.querySelector('.publish-terminal'));
+    }
     await waitFor(() => terminalText().includes('stream-last') && terminalText().includes('stream-stderr'));
     await waitFor(() => document.querySelector('.publish-terminal [role="status"]').textContent === '发布完成');
     checks.terminalComplete = { ok: !document.querySelector('.publish-dialog') && terminalText().includes('stream-first') };
@@ -370,7 +376,14 @@
     const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
     const projectTag = [...statsPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent !== '全部');
     if (projectTag) await click(projectTag);
-    const calendar = statsPanel.querySelector('.activity-calendar');
+    await waitFor(() => !!document.querySelector('.milestone-view'));
+    const milestone = document.querySelector('.milestone-view');
+    checks.projectMilestones = { ok: !!milestone && !!milestone.querySelector('.milestone-hero h2') && milestone.querySelectorAll('.milestone-stat').length === 4 && (!milestone.querySelector('.milestone-timeline') || milestone.querySelectorAll('.milestone-item').length > 0) };
+    const milestoneBack = [...milestone.querySelectorAll('button')].find(el => el.textContent.trim() === '返回统计');
+    if (milestoneBack) await click(milestoneBack);
+    await waitFor(() => !!document.querySelector('.stats-panel .activity-calendar'));
+    const restoredPanel = document.querySelector('.stats-panel');
+    const calendar = restoredPanel.querySelector('.activity-calendar');
     const calendarCells = [...calendar.querySelectorAll('button.activity-day')];
     const calendarProject = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state.projects.find(p => p.name === projectTag?.textContent);
     const created = new Map();
@@ -386,9 +399,9 @@
     const navigated = document.activeElement === calendarCells.at(-8);
     await click(calendarCells[0]);
     checks.activityCalendar = { ok: calendarCells.length === 365 && new Set(calendarCells.map(cell => cell.dataset.date)).size === 365 && navigated && calendarCells[0].getAttribute('aria-pressed') === 'true' && calendarCells.every(cell => cell.getAttribute('aria-label').includes(`新建 ${created.get(cell.dataset.date) || 0} 条需求`)) };
-    const rangeButton = [...statsPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
+    const rangeButton = [...restoredPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
     if (rangeButton) await click(rangeButton);
-    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && statsPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
+    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
     await click(button('返回项目'));
     await waitFor(() => !document.querySelector('.stats-panel'));
     await click(button('浏览项目'));
@@ -488,11 +501,10 @@
     }
     await click(button('记录新需求'));
     const modalBar = document.querySelector('.modal-window-bar');
-    const modalControls = modalBar?.querySelector('.window-controls');
+    // 记录需求弹窗只保留透明拖动层，不再重复渲染窗口按钮。
     checks.modalDragStrip = {
-      ok: !!modalBar && !!modalControls
+      ok: !!modalBar && !modalBar.querySelector('.window-controls')
         && getComputedStyle(modalBar).getPropertyValue('--app-region').trim() === 'drag'
-        && getComputedStyle(modalControls).getPropertyValue('--app-region').trim() === 'no-drag'
         && Math.abs(modalBar.getBoundingClientRect().width - innerWidth) < 1
         && modalBar.getBoundingClientRect().bottom <= document.querySelector('.requirement-dialog').getBoundingClientRect().top + 1
     };
@@ -553,6 +565,9 @@
     const guideDialog = document.querySelector('.project-guide-dialog');
     const guideTabs = [...guideDialog.querySelectorAll('.settings-tabs button')];
     checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
+    const guideBody = guideDialog.querySelector('.settings-body');
+    checks.guideNoScrollbar = { ok: guideBody.scrollHeight <= guideBody.clientHeight + 1, scrollHeight: guideBody.scrollHeight, clientHeight: guideBody.clientHeight };
+    checks.guideExpandedFits = { ok: true };
     const rulesLimitInput = guideDialog.querySelector('input[type="number"]');
     checks.rulesLimitField = { ok: !!rulesLimitInput && rulesLimitInput.value === '500' && rulesLimitInput.min === '50' && rulesLimitInput.max === '5000' };
     // 引导词默认只读文本块，点击进入编辑框；点另一个字段时前一个自动收起
@@ -565,6 +580,7 @@
       const available = field.querySelector('.guidance-input-wrap').getBoundingClientRect().width;
       checks.guideFullWidth.widths.push({ inputWidth, available });
       checks.guideFullWidth.ok &&= Math.abs(inputWidth - available) < 1 && inputWidth > 400;
+      checks.guideExpandedFits.ok &&= guideBody.scrollHeight <= guideBody.clientHeight + 1;
       await click([...field.querySelectorAll('button')].find(el => el.textContent.trim() === '收起'));
     }
     if (linkedDir) {

@@ -863,10 +863,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .guide-flag.on svg { color: var(--accent); }
 @media (max-width: 1250px) { .gen-top { flex-wrap: wrap; } .gen-filter { flex-wrap: wrap; } }
 
-/* REQ-151：编辑设置浮层按功能分 tab（复用 settings-dialog 的固定高度与滚动结构） */
-.project-guide-dialog { width: min(720px, 100%); clip-path: inset(0 round 14px); }
+/* REQ-151：编辑设置浮层按功能分 tab（复用 settings-dialog 的固定高度与滚动结构）
+   REQ-189：默认桌面尺寸下不出现滚动条，按钮与输入同高对齐。 */
+.project-guide-dialog { width: min(720px, 100%); height: min(720px, calc(100vh - 40px)); clip-path: inset(0 round 14px); }
 .project-guide-dialog .settings-body { padding-right: 6px; }
+.project-guide-dialog .settings-tabs { flex-shrink: 0; }
+.project-guide-dialog .settings-footer { justify-content: flex-end; gap: 12px; }
 .project-guide-dialog .settings-footer .guide-footer-note { margin-right: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
+.guide-rules-row { min-height: 36px; flex-wrap: nowrap; gap: 14px; margin: 2px 0 6px; }
+.guide-rules-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.guide-rules-limit { gap: 8px; font-size: 12.5px; font-weight: 400 !important; color: var(--muted); white-space: nowrap; }
+.guide-rules-limit > span { font-weight: 400 !important; }
+.guide-rules-limit input { width: 88px; height: 32px; padding: 4px 8px; text-align: right; }
+.guide-rules-row .btn { flex-shrink: 0; white-space: nowrap; }
+.guide-rules-row .btn svg { flex-shrink: 0; }
 /* REQ-150：引导词输入框头部（标题 + AI 优化按钮）与 @ 补全下拉 */
 .guidance-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .guidance-field-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -938,6 +948,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .content-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; line-height: 1.7; }
 .content-dialog { max-height: calc(100vh - 48px); overflow-y: auto; }
 .content-dialog textarea { resize: vertical; }
+/* REQ-188：上下文管理显示 Git 版本管理状态，未安装 Git 时提示安装 */
+.context-git-bar { display: flex; align-items: center; gap: 12px; margin: 0 28px 18px; padding: 12px 16px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
+.context-git-bar > svg { flex-shrink: 0; color: var(--accent); }
+.context-git-bar > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.context-git-bar strong { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.context-git-bar span { line-height: 1.55; overflow-wrap: anywhere; }
+.context-git-bar code { padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: 12px; }
+.context-git-bar .btn { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+.context-git-bar.off { border-color: var(--accent); background: var(--accent-soft); }
+.context-git-bar.off strong { color: var(--accent-dark); }
+.context-card .content-link, .content-link { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px dashed var(--line-2); border-radius: 6px; font-size: 12px; color: var(--muted); }
+.content-files { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.content-files svg { flex-shrink: 0; }
+.content-code { margin-top: 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); }
+.content-code summary { display: flex; align-items: center; gap: 6px; padding: 8px 12px; cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
+.content-code summary svg { margin-left: auto; color: var(--muted); }
+.content-code pre { margin: 0; padding: 0 12px 12px; max-height: 220px; overflow: auto; font: 12px/1.65 Consolas, 'Courier New', monospace; white-space: pre; }
 .data-archive-actions { align-items: center; }
 .data-archive-actions .archive-date { flex: 0 0 170px; width: 170px; margin: 0; }
 .data-archive-actions .archive-date input { height: 40px; }
@@ -955,6 +982,54 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .stats-page .stats-chart { max-width: 100%; }
 .stats-page .stats-plot { max-width: 100%; }
 .stats-page .stats-plot svg { max-width: 100%; height: 100%; }
+/* REQ-190：项目里程碑 —— 把 Git 提交历史呈现为带 commit log 文案的时间轴 */
+.milestone-view { display: flex; flex-direction: column; gap: 18px; padding-bottom: 8px; }
+.milestone-hero { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px 24px; padding: 22px 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.milestone-hero-main { flex: 1; min-width: 260px; }
+.milestone-back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.milestone-back svg { transform: rotate(180deg); }
+.milestone-hero-main .eyebrow { margin-bottom: 6px; }
+.milestone-hero-main h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+.milestone-hero-path { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.milestone-hero-path svg { flex-shrink: 0; }
+.milestone-hero-path code { min-width: 0; max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+.milestone-stats { display: grid; grid-template-columns: repeat(4, minmax(96px, 1fr)); gap: 10px; width: 100%; }
+.milestone-stat { padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.milestone-stat strong { display: block; font-size: 19px; line-height: 1.3; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.milestone-stat strong.milestone-span { font-size: 13px; font-weight: 600; line-height: 1.6; }
+.milestone-stat span { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+.milestone-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.milestone-toolbar h3 { margin: 0; font-size: 16px; }
+.milestone-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
+.milestone-timeline { display: flex; flex-direction: column; gap: 18px; }
+.milestone-month > h3 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+.milestone-month > h3 span { color: var(--muted); font-size: 12px; font-weight: 400; }
+.milestone-list { display: flex; flex-direction: column; }
+.milestone-item { display: grid; grid-template-columns: 58px 26px minmax(0, 1fr); gap: 0 12px; }
+.milestone-date { padding-top: 13px; text-align: right; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.milestone-date strong { display: block; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.milestone-rail { position: relative; display: flex; justify-content: center; }
+.milestone-rail::before { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--line-2); }
+.milestone-item:last-child .milestone-rail::before { height: 21px; bottom: auto; }
+.milestone-dot { position: relative; z-index: 1; width: 10px; height: 10px; margin-top: 16px; border: 2px solid var(--accent); border-radius: 50%; background: var(--panel); }
+.milestone-item.head .milestone-dot { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.milestone-card { min-width: 0; margin: 6px 0 8px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; transition: border-color .12s, box-shadow .12s; }
+.milestone-item:hover .milestone-card { border-color: var(--line-2); box-shadow: 0 4px 16px rgba(28, 25, 23, .06); }
+.milestone-card-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.milestone-card-head strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.milestone-refs { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.milestone-ref { padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; white-space: nowrap; }
+.milestone-body { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.milestone-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+.milestone-meta code { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: 11px; }
+.milestone-meta time { margin-left: auto; }
+.milestone-avatar { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; font-weight: 600; }
+.milestone-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 28px 24px; background: var(--panel); border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 13px; }
+.milestone-empty strong { color: var(--ink-2); font-size: 15px; }
+.milestone-empty code { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+.milestone-legend { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12px; }
+.milestone-legend .milestone-dot { margin-top: 0; flex-shrink: 0; }
+@media (max-width: 900px) { .milestone-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .activity-calendar { --activity-0: #ebedf0; --activity-1: #9be9a8; --activity-2: #40c463; --activity-3: #30a14e; --activity-4: #216e39; margin: 16px 0 24px; }
 .activity-calendar-header, .activity-calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
 .activity-calendar-header h4 { margin: 0; font-size: 13px; color: var(--ink-2); font-weight: 500; }

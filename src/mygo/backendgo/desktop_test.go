@@ -234,6 +234,58 @@ func TestDesktopArchiveDurabilityAndInFlightReferences(t *testing.T) {
 		t.Fatal("archive removed live requirements")
 	}
 }
+func TestGitMilestonesFeed(t *testing.T) {
+	if _, e := exec.LookPath("git"); e != nil {
+		t.Skip("git unavailable")
+	}
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("git %v: %s: %v", args, out, e)
+		}
+	}
+	git("init")
+	write := func(name, text string) {
+		t.Helper()
+		if e := os.WriteFile(filepath.Join(root, name), []byte(text), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	write("a.txt", "first")
+	git("add", ".")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "feat: 初始化项目")
+	write("b.txt", "second")
+	git("add", ".")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "fix: 修复里程碑", "-m", "详细说明第二行")
+
+	r := desktopTestCall(t, b, "git:milestones", root, 120)
+	if r["repo"] != true || coreNum(r["total"]) != 2 || len(desktopList(r["commits"])) != 2 {
+		t.Fatalf("unexpected milestone feed: %v", r)
+	}
+	newest := desktopMap(desktopList(r["commits"])[0])
+	if newest["subject"] != "fix: 修复里程碑" || newest["short"] == "" || !strings.Contains(desktopString(newest["body"]), "详细说明") {
+		t.Fatalf("newest commit fields missing: %v", newest)
+	}
+	hasHead := false
+	for _, ref := range desktopList(newest["refs"]) {
+		if strings.Contains(desktopString(ref), "HEAD") {
+			hasHead = true
+		}
+	}
+	if !hasHead {
+		t.Fatalf("HEAD decoration missing: %v", newest["refs"])
+	}
+	plain := t.TempDir()
+	r = desktopTestCall(t, b, "git:milestones", plain, 120)
+	if r["repo"] != false || len(desktopList(r["commits"])) != 0 {
+		t.Fatalf("non-repository should return an empty feed: %v", r)
+	}
+}
+
 func TestDesktopInstallerVerification(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "setup.exe")
 	raw := []byte("MZfixture Go installer")

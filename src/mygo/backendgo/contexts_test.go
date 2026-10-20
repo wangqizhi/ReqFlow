@@ -122,6 +122,55 @@ func TestContextRulesAreConciseAndLimited(t *testing.T) {
 	}
 }
 
+func TestContextCodeExcerptsAreVersionedAndRemovable(t *testing.T) {
+	dir := t.TempDir()
+	s := NewWorkspaceService(dir)
+	state := coreMap(coreTestGet(t, s)["state"])
+	pid := coreString(coreMap(coreList(state["projects"])[0])["id"])
+	codeFile := filepath.Join(t.TempDir(), "code.md")
+	code := "### src/core/domain.ts\n\n```ts\nexport function apply() {}\n```"
+	if e := os.WriteFile(codeFile, []byte(code), 0600); e != nil {
+		t.Fatal(e)
+	}
+	r := coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "排期功能", "--body", "上下文说明",
+		"--code", codeFile, "--files", "src/renderer/App.tsx, ./src/core/domain.ts")
+	prompt := coreMap(coreList(coreMap(r["state"])["contextPrompts"])[0])
+	if !strings.Contains(coreString(prompt["code"]), "export function apply") {
+		t.Fatal("code excerpt was not stored")
+	}
+	if files := coreList(prompt["files"]); len(files) != 2 || files[0] != "src/renderer/App.tsx" || files[1] != "src/core/domain.ts" {
+		t.Fatalf("related files were not normalized: %v", files)
+	}
+	source := filepath.Join(dir, "contexts")
+	raw, e := os.ReadFile(filepath.Join(source, "contexts.md"))
+	if e != nil || !strings.Contains(string(raw), "### 相关代码") || !strings.Contains(string(raw), "src/core/domain.ts") {
+		t.Fatal("contexts.md did not include code excerpts", e)
+	}
+	codePath := filepath.Join(source, "code", coreString(prompt["id"])+".md")
+	if snapshot, e := os.ReadFile(codePath); e != nil || !strings.Contains(string(snapshot), "export function apply") {
+		t.Fatal("code snapshot file missing", e)
+	}
+	index, _ := os.ReadFile(filepath.Join(source, "index.json"))
+	if !strings.Contains(string(index), "export function apply") {
+		t.Fatal("index.json did not include the code excerpt")
+	}
+	if _, e := exec.LookPath("git"); e == nil {
+		cmd := exec.Command("git", "-C", source, "log", "--oneline")
+		if out, e := cmd.CombinedOutput(); e != nil || strings.TrimSpace(string(out)) == "" {
+			t.Fatal("code update was not committed", e, string(out))
+		}
+	}
+	// Clearing the excerpt removes the managed snapshot instead of leaving stale code behind.
+	coreTestCLI(t, dir, "context", "put", "--id", coreString(prompt["id"]), "--title", "排期功能", "--body", "上下文说明", "--code", "", "--files", "")
+	if _, e := os.Stat(codePath); !os.IsNotExist(e) {
+		t.Fatal("cleared code left a stale snapshot", e)
+	}
+	raw, _ = os.ReadFile(filepath.Join(source, "contexts.md"))
+	if strings.Contains(string(raw), "### 相关代码") {
+		t.Fatal("cleared code remained in contexts.md")
+	}
+}
+
 func TestTerminalSettingSurvivesRestartAndSeparateTestData(t *testing.T) {
 	dir := t.TempDir()
 	app := NewBackend(dir, t.TempDir(), "test")
