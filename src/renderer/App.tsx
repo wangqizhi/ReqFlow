@@ -83,6 +83,7 @@ export default function App() {
   const [verifyKind, setVerifyKind] = useState<'none' | 'exe' | 'url'>('none'); // 验证源类型（REQ-060）
   const [verifyValue, setVerifyValue] = useState('');
   const [baselineTpl, setBaselineTpl] = useState(''); // 基线需求模板（REQ-064），空串表示使用默认模板
+  const [deleteRulesConfirm, setDeleteRulesConfirm] = useState(false);
   const [rulesLimit, setRulesLimit] = useState(DEFAULT_CONTEXT_RULES_LIMIT); // 守则字数上限（REQ-185）
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
   const [publishMode, setPublishMode] = useState('auto');
@@ -332,13 +333,14 @@ export default function App() {
     if (!modal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (deleteRulesConfirm) { if (!busy) setDeleteRulesConfirm(false); return; }
       if (bodyExpanded) { setBodyExpanded(false); return; }
       void closeModal();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal, editing, bodyExpanded]);
+  }, [modal, editing, bodyExpanded, deleteRulesConfirm, busy]);
 
   // REQ-074：需求说明超出输入框高度时，在「展开更多设置」旁显示「放大编辑」按钮
   useEffect(() => {
@@ -693,6 +695,7 @@ export default function App() {
   }
 
   async function closeModal() {
+    setDeleteRulesConfirm(false);
     if (busyRef.current) return;
     clearTimeout(autoRef.current);
     if (modal === 'item' && !editing && dirtyRef.current) {
@@ -1242,13 +1245,11 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* REQ-186：记录新需求弹窗打开时，顶部仍保留可拖动窗口的区域与窗口按钮。 */}
+      {/* 弹窗上方仅保留透明窗口拖动层。 */}
       {modal === 'item' && bridge.windowControl && (
-        <div className="modal-window-bar">
-          <span>ReqFlow · {editing ? '编辑需求' : '记录新需求'}</span>
-          {windowControls()}
-        </div>
+        <div className="modal-window-bar" aria-hidden="true" />
       )}
+      {deleteRulesConfirm && modal === 'guide' && p && <div className="overlay" style={{ zIndex: 70 }}><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-rules-title"><div className="dialog-head"><h3 id="delete-rules-title">删除项目守则？</h3></div><p>删除后，守则将不再加入后续排期 Prompt。关联的上下文文档保留，可在此重新生成守则。</p><div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setDeleteRulesConfirm(false)}>取消</button><button className="btn danger" disabled={busy} onClick={async () => { if (await act({ op: 'guidance', text: p.guidance, contextRulesDisabled: true }, true)) setDeleteRulesConfirm(false); }}>确认删除</button></div></div></div>}
       {modal && (
         <div className="overlay" role="dialog" onClick={(e) => { if (e.target === e.currentTarget) void closeModal(); }}>
           <div className={'dialog' + (modal === 'item' ? ' requirement-dialog' : modal === 'guide' ? ' settings-dialog project-guide-dialog' : '')}>
@@ -1382,6 +1383,7 @@ export default function App() {
                   {guideTab === 'guide' && <>
                     <GuidanceField label="项目引导词" value={guide} onChange={setGuide} root={p!.dir || ''} projectId={p!.id} kind="guidance" rows={8} disabled={busy} />
                     <GuidanceField label="默认交付引导" value={delivery} onChange={setDelivery} root={p!.dir || ''} projectId={p!.id} kind="delivery" rows={6} placeholder="填写希望 AI 交付时提供的内容" disabled={busy} />
+                    <div className="settings-actions"><span>项目守则{p!.contextRulesDisabled ? ' · 已删除' : ''}</span>{p!.contextRulesDisabled ? <button className="btn" disabled={busy} onClick={() => void act({ op: 'guidance', text: p!.guidance, contextRulesDisabled: false }, true)}>重新生成</button> : <button className="btn" disabled={busy || !p!.contextRules} onClick={() => setDeleteRulesConfirm(true)}><Trash />删除守则</button>}</div>
                     <label className="field">守则字数上限（{MIN_CONTEXT_RULES_LIMIT}–{MAX_CONTEXT_RULES_LIMIT}）
                       <input type="number" min={MIN_CONTEXT_RULES_LIMIT} max={MAX_CONTEXT_RULES_LIMIT} step={50} value={rulesLimit} disabled={busy}
                         onChange={e => setRulesLimit(Number(e.target.value))} />

@@ -24,7 +24,7 @@ export function registerUpdater() {
   const fail = (error: unknown, retry: 'check' | 'download') => { state = { ...state, phase: 'error', error: errorText(error), retry }; };
   const request = async (url: string, timeout = 10 * 60 * 1000) => {
     // Chromium 的网络栈遵循 Windows 系统代理；Node fetch 不使用该配置。
-    const response = await net.fetch(url, { headers: { 'User-Agent': 'ReqFlow', Accept: url.includes('api.github.com') ? 'application/vnd.github+json' : '*/*' }, cache: 'no-store', signal: AbortSignal.timeout(timeout) });
+    const response = await net.fetch(url, { headers: { 'User-Agent': 'ReqFlow', Accept: '*/*' }, cache: 'no-store', signal: AbortSignal.timeout(timeout) });
     if (!response.ok) throw Error(`GitHub 请求失败（HTTP ${response.status}），请稍后重试`);
     return response;
   };
@@ -62,18 +62,26 @@ export function registerUpdater() {
       if (process.platform !== 'win32' || process.arch !== 'x64') throw Error('在线安装目前支持 Windows x64');
       // 优先恢复已校验的本地安装包，网络中断也可继续安装。
       if (await restoreDownload()) return state;
-      const response = await request(`https://api.github.com/repos/${repository}/releases/latest`, 30000);
-      const release = await response.json();
-      if (typeof release.tag_name !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(release.tag_name) || release.draft || release.prerelease) throw Error('发布版本信息无效');
-      const version = release.tag_name.replace(/^v/, '');
+      const response = await request(`https://github.com/${repository}/releases/latest`, 30000);
+      await response.body?.cancel();
+      const prefix = `https://github.com/${repository}/releases/tag/`;
+      if (!response.url.startsWith(prefix)) throw Error('发布版本地址无效');
+      const tag = response.url.slice(prefix.length);
+      if (!/^v?\d+\.\d+\.\d+$/.test(tag)) throw Error('发布版本信息无效');
+      const version = tag.replace(/^v/, '');
       if (!newerVersion(version, app.getVersion())) { state = { phase: 'latest', version: app.getVersion() }; return state; }
-      asset = release.assets?.find((entry: Asset) => entry.name === `ReqFlow-Setup-${version}.exe`);
-      const checksum: Asset | undefined = release.assets?.find((entry: Asset) => entry.name === `SHA256SUMS-${version}.txt`);
-      if (!validAsset(asset, version)) throw Error('新版本缺少有效的 Windows 安装包');
-      checksumUrl = checksum && trustedUrl(checksum.browser_download_url) ? checksum.browser_download_url : '';
-      if (!/^sha256:[a-f0-9]{64}$/i.test(asset!.digest || '') && !checksumUrl) throw Error('新版本缺少 SHA256 校验信息');
+      const base = `https://github.com/${repository}/releases/download/${tag}/`;
+      const name = `ReqFlow-Setup-${version}.exe`;
+      checksumUrl = `${base}SHA256SUMS-${version}.txt`;
+      const manifest = await (await request(checksumUrl, 30000)).text();
+      expectedHash = manifest.split(/\r?\n/).map(line => /^([a-f0-9]{64})\s+\*?(.+)$/i.exec(line)).find(match => match?.[2] === name)?.[1] || '';
+      if (!expectedHash) throw Error('新版本缺少 SHA256 校验信息');
+      const download = await request(base + name, 30000);
+      const size = Number(download.headers.get('content-length'));
+      await download.body?.cancel();
+      asset = { name, browser_download_url: base + name, size, digest: 'sha256:' + expectedHash };
+      if (!validAsset(asset, version)) throw Error('新版本安装包大小无效');
       state = { phase: 'available', version };
-      expectedHash = asset!.digest?.replace(/^sha256:/i, '') || '';
       const target = path.join(directory, asset!.name);
       // 兼容旧版本已经下载完、但尚未保存元数据的安装包。
       if (await validInstaller(target, asset!, expectedHash)) {

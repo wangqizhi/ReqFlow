@@ -60,7 +60,7 @@ func refreshContextRules(s map[string]any) {
 			}
 		}
 		delete(p, "contextRules")
-		if len(linked) == 0 {
+		if coreTruthy(p["contextRulesDisabled"]) || len(linked) == 0 {
 			continue
 		}
 		// 守则只保留上下文与功能的简短联系，并按项目设置的字数上限截断，避免把完整架构带进排期 Prompt。

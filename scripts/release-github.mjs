@@ -68,7 +68,7 @@ export async function releaseNotes(version, filename, directory = root) {
 export function checkReleasePublished(version) {
   const repo = releaseRepository();
   const tag = `v${version}`;
-  const expected = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`, `SHA256SUMS-${version}.txt`];
+  const expected = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`, `SHA256SUMS-${version}.txt`, 'update.json'];
   const result = gh(['release', 'view', tag, '--repo', repo, '--json', 'isDraft,assets'], { capture: true, allowFailure: true });
   if (result.status !== 0 && !/release not found/i.test(result.stderr)) {
     throw Error(`无法查询 GitHub Release：${result.stderr.trim() || `退出码 ${result.status}`}。请检查 gh auth login 与网络后重试`);
@@ -119,8 +119,14 @@ async function main() {
   console.log(`版本一致性检查通过：源码、锁文件、Go 程序、安装版、绿色版均为 ${version}；Go 构建/打包清单 SHA256 已核验`);
   const sums = (await traceStep('计算安装包 SHA256', () => Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`)))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
+  // Public static metadata lets desktop clients update without GitHub API or credentials.
+  const updateFile = path.join(root, 'release', 'update.json');
+  const updateManifest = { tag_name: tag, draft: false, prerelease: version.includes('-'),
+    assets: await Promise.all(assets.map(async (file, i) => ({ name: names[i],
+      size: (await stat(file)).size, digest: 'sha256:' + sums.split('\n')[i].split(' ')[0],
+      browser_download_url: `https://github.com/${repo}/releases/download/${tag}/${names[i]}` }))) };
   console.log(`目标：https://github.com/${repo}/releases/tag/${tag}`);
-  console.log(`附件：${[...names, path.basename(sumsFile)].join(', ')}`);
+  console.log(`附件：${[...names, path.basename(sumsFile), path.basename(updateFile)].join(', ')}`);
   console.log(`说明：${notes.file}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
   if (options['dry-run']) { console.log(notes.body); console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
   traceStep('检查 GitHub 登录', () => gh(['auth', 'status', '--hostname', 'github.com'], { capture: true }));
@@ -131,15 +137,16 @@ async function main() {
   if (existing.status !== 0 && !/release not found/i.test(existing.stderr)) throw Error(`无法查询 Release：${existing.stderr.trim()}`);
   if (existing.status === 0 && !options.clobber) {
     const remoteNames = new Set(JSON.parse(existing.stdout).assets.map(asset => asset.name));
-    const conflicts = [...names, path.basename(sumsFile)].filter(name => remoteNames.has(name));
+    const conflicts = [...names, path.basename(sumsFile), path.basename(updateFile)].filter(name => remoteNames.has(name));
     if (conflicts.length) throw Error(`附件已存在：${conflicts.join(', ')}。确认需要替换后使用 --clobber。`);
   }
   await writeFile(sumsFile, sums, 'utf8');
+  await writeFile(updateFile, JSON.stringify(updateManifest, null, 2) + '\n', 'utf8');
   if (existing.status === 0) {
-    traceStep('上传安装包到 GitHub', () => gh(['release', 'upload', tag, ...assets, sumsFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]));
+    traceStep('上传安装包到 GitHub', () => gh(['release', 'upload', tag, ...assets, sumsFile, updateFile, '--repo', repo, ...(options.clobber ? ['--clobber'] : [])]));
     traceStep('更新 Release 版本说明', () => gh(['release', 'edit', tag, '--repo', repo, '--notes-file', notes.file]));
   } else {
-    traceStep('创建 Release 并上传安装包到 GitHub', () => gh(['release', 'create', tag, ...assets, sumsFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
+    traceStep('创建 Release 并上传安装包到 GitHub', () => gh(['release', 'create', tag, ...assets, sumsFile, updateFile, '--repo', repo, '--verify-tag', '--title', `ReqFlow ${version}`,
       '--notes-file', notes.file,
       ...(options.draft ? ['--draft'] : []), ...(version.includes('-') ? ['--prerelease'] : [])]));
   }

@@ -134,3 +134,30 @@ func TestTerminalSettingSurvivesRestartAndSeparateTestData(t *testing.T) {
 		t.Fatal("isolated test or restart changed user's setting")
 	}
 }
+
+func TestDeleteContextRulesPersistsAndCanRegenerate(t *testing.T) {
+	dir := t.TempDir()
+	s := NewWorkspaceService(dir)
+	state := coreMap(coreTestGet(t, s)["state"])
+	pid := coreString(coreMap(coreList(state["projects"])[0])["id"])
+	coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "保留文档", "--body", "关联上下文")
+	for _, disabled := range []bool{true, false} {
+		state = coreMap(coreTestGet(t, s)["state"])
+		p := coreFind(coreList(state["projects"]), pid)
+		if _, err := s.Mutate(map[string]any{"op": "guidance", "project": pid, "text": p["guidance"], "contextRulesDisabled": disabled}, nil); err != nil {
+			t.Fatal(err)
+		}
+		s = NewWorkspaceService(dir)
+		state = coreMap(coreTestGet(t, s)["state"])
+		p = coreFind(coreList(state["projects"]), pid)
+		if (coreString(p["contextRules"]) == "") != disabled {
+			t.Fatalf("rules disabled=%v did not survive reload", disabled)
+		}
+		if strings.Contains(BuildPrompt(p, []any{}), "## 项目守则（自动生成）") == disabled {
+			t.Fatal("prompt did not respect rule deletion")
+		}
+		if len(coreList(state["contextPrompts"])) != 1 {
+			t.Fatal("deleting rules changed context documents")
+		}
+	}
+}

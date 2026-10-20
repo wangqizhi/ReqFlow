@@ -1048,6 +1048,10 @@ func coreApplyOperation(s, a map[string]any) error {
 				return errors.New("守则字数上限需在 50 到 5000 字之间")
 			}
 		}
+		if disabled, ok := a["contextRulesDisabled"].(bool); ok {
+			p["contextRulesDisabled"] = disabled
+			refreshContextRules(s)
+		}
 		guideChanged := text != p["guidance"] || delivery != p["deliveryGuidance"]
 		limitChanged := limit != ProjectContextRulesLimit(p)
 		if !guideChanged && !limitChanged {

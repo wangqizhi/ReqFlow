@@ -816,11 +816,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .window-controls button:hover { background: var(--bg); }
 .window-controls .window-close:hover { background: var(--danger); color: white; }
 .window-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-/* REQ-186：记录新需求弹窗覆盖应用顶部时，保留一条可拖动窗口的标题区；
-   高度与弹窗遮罩的上内边距一致，不挤压弹窗内容。 */
-.modal-window-bar { position: fixed; top: 0; left: 0; right: 0; height: 24px; z-index: 60; display: flex; align-items: center; justify-content: space-between; padding-left: 16px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; -webkit-app-region: drag; user-select: none; }
-.modal-window-bar .window-controls { height: 100%; -webkit-app-region: no-drag; }
-.modal-window-bar .window-controls button { min-height: 24px; }
+/* 弹窗打开时不改变顶部外观，透明浮层接收窗口拖动。 */
+.modal-window-bar { position: fixed; top: 0; left: 0; right: 0; height: 24px; z-index: 60; background: transparent; -webkit-app-region: drag; user-select: none; }
 /* REQ-131：归档日期改为竖排「年 → 月 → 日」文件夹树，展开浏览、点击日期文件夹筛选 */
 .archive-folders { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; padding: 10px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); max-height: 336px; overflow-y: auto; }
 .archive-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid transparent; background: transparent; border-radius: 8px; font: inherit; color: var(--ink); text-align: left; white-space: nowrap; }

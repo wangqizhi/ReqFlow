@@ -30,10 +30,17 @@ const bytes = Buffer.from('MZ updater integration fixture');
 const digest = createHash('sha256').update(bytes).digest('hex');
 net.fetch = async url => {
  if(offline) throw TypeError('fetch failed');
- if(String(url).endsWith('/releases/latest')) return new Response(JSON.stringify({tag_name: latest ? 'v'+app.getVersion() : 'v99.0.0', assets:[{name:'ReqFlow-Setup-99.0.0.exe',size:bytes.length,digest:'sha256:'+digest,browser_download_url:'https://github.com/wangqizhi/ReqFlow/releases/download/v99.0.0/ReqFlow-Setup-99.0.0.exe'}]}));
+ if(String(url).endsWith('/releases/latest')) {
+  const response = new Response('');
+  Object.defineProperty(response, 'url', {value: 'https://github.com/wangqizhi/ReqFlow/releases/tag/' + (latest ? 'v'+app.getVersion() : 'v99.0.0')});
+  return response;
+ }
+ if(String(url).endsWith('.txt')) return new Response(digest + '  ReqFlow-Setup-99.0.0.exe');
+
  requestCount++;
+ let canceled = false;
  const payload = bad ? Buffer.alloc(bytes.length, 1) : bytes;
- return new Response(new ReadableStream({start(controller){controller.enqueue(payload.subarray(0,10));setTimeout(()=>{controller.enqueue(payload.subarray(10));controller.close();},1200);}}));
+ return new Response(new ReadableStream({start(controller){controller.enqueue(payload.subarray(0,10));setTimeout(()=>{if(canceled)return;controller.enqueue(payload.subarray(10));controller.close();},1200);},cancel(){canceled=true;}}), {headers:{'content-length':String(bytes.length)}});
 };
 global.fetch = ()=>{throw Error('Updater must use Electron net.fetch');};
 app.whenReady().then(async()=>{

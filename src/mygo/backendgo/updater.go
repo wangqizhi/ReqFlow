@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -81,7 +80,7 @@ func desktopUpdateRequest(ctx context.Context, raw string, timeout time.Duration
 		return nil, e
 	}
 	req.Header.Set("User-Agent", "ReqFlow/2.0 Go")
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", "*/*")
 	response, e := DesktopHTTPClient(timeout).Do(req)
 	if e != nil {
 		return nil, e
@@ -163,43 +162,58 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 				return b.desktopUpdateState(), nil
 			}
 		}
-		response, e := desktopUpdateRequest(ctx, "https://api.github.com/repos/"+desktopUpdateRepository+"/releases/latest", 30*time.Second)
+		// Resolve the public latest page first; existing releases need no update.json.
+		response, e := desktopUpdateRequest(ctx, "https://github.com/"+desktopUpdateRepository+"/releases/latest", 30*time.Second)
 		if e != nil {
 			return fail(e, "check"), nil
 		}
-		defer response.Body.Close()
-		var release map[string]any
-		if e = json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&release); e != nil {
-			return fail(e, "check"), nil
+		response.Body.Close()
+		prefix := "https://github.com/" + desktopUpdateRepository + "/releases/tag/"
+		resolved := response.Request.URL.String()
+		if !strings.HasPrefix(resolved, prefix) {
+			return fail(errors.New("发布版本地址无效"), "check"), nil
 		}
-		version := strings.TrimPrefix(desktopString(release["tag_name"]), "v")
-		if !desktopVersion.MatchString(version) || desktopBool(release["draft"]) || desktopBool(release["prerelease"]) {
+		tag := strings.TrimPrefix(resolved, prefix)
+		version := strings.TrimPrefix(tag, "v")
+		if !desktopVersion.MatchString(tag) {
 			return fail(errors.New("发布版本信息无效"), "check"), nil
 		}
 		if !desktopNewer(version, b.Version) {
 			b.desktopUpdateSet(map[string]any{"phase": "latest", "version": b.Version})
 			return b.desktopUpdateState(), nil
 		}
-		var asset, checksum map[string]any
-		for _, v := range desktopList(release["assets"]) {
-			m := desktopMap(v)
-			if desktopString(m["name"]) == "ReqFlow-Setup-"+version+".exe" {
-				asset = m
+		base := "https://github.com/" + desktopUpdateRepository + "/releases/download/" + tag + "/"
+		name := "ReqFlow-Setup-" + version + ".exe"
+		checksumURL := base + "SHA256SUMS-" + version + ".txt"
+		response, e = desktopUpdateRequest(ctx, checksumURL, 30*time.Second)
+		if e != nil {
+			return fail(e, "check"), nil
+		}
+		raw, e := io.ReadAll(io.LimitReader(response.Body, 256*1024))
+		response.Body.Close()
+		if e != nil {
+			return fail(e, "check"), nil
+		}
+		expected := ""
+		for _, line := range strings.Split(string(raw), "\n") {
+			parts := strings.Fields(line)
+			if len(parts) == 2 && strings.TrimPrefix(parts[1], "*") == name && desktopHashPattern.MatchString(parts[0]) {
+				expected = parts[0]
+				break
 			}
-			if desktopString(m["name"]) == "SHA256SUMS-"+version+".txt" {
-				checksum = m
-			}
 		}
-		if !desktopValidAsset(asset, version) {
-			return fail(errors.New("新版本缺少有效的 Windows Go 安装包"), "check"), nil
-		}
-		expected := strings.TrimPrefix(desktopString(asset["digest"]), "sha256:")
-		checksumURL := desktopString(checksum["browser_download_url"])
-		if !desktopTrustedDownload(checksumURL) {
-			checksumURL = ""
-		}
-		if !desktopHashPattern.MatchString(expected) && checksumURL == "" {
+		if expected == "" {
 			return fail(errors.New("新版本缺少 SHA256 校验信息"), "check"), nil
+		}
+		response, e = desktopUpdateRequest(ctx, base+name, 30*time.Second)
+		if e != nil {
+			return fail(e, "check"), nil
+		}
+		size := response.ContentLength
+		response.Body.Close()
+		asset := map[string]any{"name": name, "browser_download_url": base + name, "size": size, "digest": "sha256:" + expected}
+		if !desktopValidAsset(asset, version) {
+			return fail(errors.New("新版本安装包大小无效"), "check"), nil
 		}
 		b.desktopAsset, b.desktopExpectedHash, b.desktopChecksum = asset, expected, checksumURL
 		b.desktopUpdateSet(map[string]any{"phase": "available", "version": version})

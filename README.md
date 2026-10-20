@@ -8,6 +8,12 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 [2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
+## 2.9.2 更新
+
+- 记录或编辑需求时，顶部使用透明拖动浮层，移除新增标题栏，保留原界面外观。
+- 项目设置支持删除守则，删除前弹窗确认；保留上下文文档，停止自动加入后续 Prompt，并可重新生成。
+- Agent 插件无变动，版本保持不变。
+
 ## 下载与安装
 
 前往 [GitHub Releases](https://github.com/wangqizhi/ReqFlow/releases) 下载已发布的 Windows x64 安装包：

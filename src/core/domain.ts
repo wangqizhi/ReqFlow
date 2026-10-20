@@ -100,6 +100,7 @@ export type Project = {
   hidden?: boolean;
   revision?: number;
   contextRules?: string;
+  contextRulesDisabled?: boolean;
   contextRulesLimit?: number; // 守则字数上限，默认 500
   requirementDraft?: Record<string, any>;
 };
@@ -554,6 +555,10 @@ async function applyOperation(s: Workspace, a: any) {
         throw new Error('守则字数上限需在 50 到 5000 字之间');
       limit = a.contextRulesLimit;
     }
+    if (typeof a.contextRulesDisabled === 'boolean') {
+      p.contextRulesDisabled = a.contextRulesDisabled;
+      refreshContextRules(s);
+    }
     const guideChanged = text !== p.guidance || delivery !== p.deliveryGuidance;
     const limitChanged = limit !== contextRulesLimit(p);
     if (!guideChanged && !limitChanged) return;
@@ -955,7 +960,7 @@ function truncateContextText(text: string, limit: number): string {
 export function refreshContextRules(s: Workspace) {
   for (const project of s.projects || []) {
     const linked = (s.contextPrompts || []).filter(c => c.projectId === project.id && c.feature);
-    if (!linked.length) { delete project.contextRules; continue; }
+    if (project.contextRulesDisabled || !linked.length) { delete project.contextRules; continue; }
     const limit = contextRulesLimit(project);
     const header = '# ' + project.name + ' · 项目守则';
     const overhead = Array.from(header).length + linked.reduce((total, c) =>
