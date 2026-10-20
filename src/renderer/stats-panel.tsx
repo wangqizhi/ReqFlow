@@ -228,22 +228,22 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const [reload, setReload] = useState(0);
 
   const projects = workspace?.projects || [];
+  const milestoneDir = projects.find(p => p.id === milestoneId)?.dir || '';
 
   // REQ-190：点击项目后读取该项目目录的 Git 历史（只读，最多 120 条）。
   useEffect(() => {
     if (!milestoneId) return;
-    const project = (workspace?.projects || []).find(p => p.id === milestoneId);
-    if (!project?.dir) { setMilestones({ loading: false, error: '', data: null, missing: 'dir' }); return; }
+    if (!milestoneDir) { setMilestones({ loading: false, error: '', data: null, missing: 'dir' }); return; }
     if (!bridge.gitMilestones) { setMilestones({ loading: false, error: '', data: null, missing: 'desktop' }); return; }
     let cancelled = false;
     setMilestones({ loading: true, error: '', data: null });
-    bridge.gitMilestones(project.dir, 120).then(r => {
+    bridge.gitMilestones(milestoneDir, 120).then(r => {
       if (cancelled) return;
       if (!r.ok) setMilestones({ loading: false, error: r.error || '读取 Git 历史失败', data: null });
       else setMilestones({ loading: false, error: '', data: r });
     }).catch((e: any) => { if (!cancelled) setMilestones({ loading: false, error: e?.message || '读取 Git 历史失败', data: null }); });
     return () => { cancelled = true; };
-  }, [milestoneId, reload, workspace]);
+  }, [milestoneId, milestoneDir, reload]);
 
   // 全量事件流：创建（按项目）、AI 领取（按客户端）、已完成执行的时长（按领取日归组）
   const events = useMemo(() => {

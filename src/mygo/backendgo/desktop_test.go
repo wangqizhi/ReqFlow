@@ -260,14 +260,14 @@ func TestGitMilestonesFeed(t *testing.T) {
 	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "feat: 初始化项目")
 	write("b.txt", "second")
 	git("add", ".")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "fix: 修复里程碑", "-m", "详细说明第二行")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "fix: 修复里程碑\n详细说明第二行\n第三行\n\n下一段说明\n  缩进内容")
 
 	r := desktopTestCall(t, b, "git:milestones", root, 120)
 	if r["repo"] != true || coreNum(r["total"]) != 2 || len(desktopList(r["commits"])) != 2 {
 		t.Fatalf("unexpected milestone feed: %v", r)
 	}
 	newest := desktopMap(desktopList(r["commits"])[0])
-	if newest["subject"] != "fix: 修复里程碑" || newest["short"] == "" || !strings.Contains(desktopString(newest["body"]), "详细说明") {
+	if newest["subject"] != "fix: 修复里程碑" || newest["short"] == "" || newest["body"] != "详细说明第二行\n第三行\n\n下一段说明\n  缩进内容" {
 		t.Fatalf("newest commit fields missing: %v", newest)
 	}
 	hasHead := false

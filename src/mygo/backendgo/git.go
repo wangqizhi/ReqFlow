@@ -276,14 +276,16 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		if count, e := git("rev-list", "--count", "HEAD"); e == nil {
 			total, _ = strconv.Atoi(strings.TrimSpace(count))
 		}
-		history, e := git("log", "-n", strconv.Itoa(limit), "--format=%H%x00%h%x00%an%x00%aI%x00%D%x00%s%x00%b%x1e")
+		// %s folds the first paragraph's newlines. Read %B and split only the
+		// first line so multiline messages remain intact, even without a blank line.
+		history, e := git("log", "-n", strconv.Itoa(limit), "--format=%H%x00%h%x00%an%x00%aI%x00%D%x00%B%x1e")
 		if e != nil {
 			return nil, e
 		}
 		commits := []any{}
 		for _, record := range strings.Split(history, "\x1e") {
 			fields := strings.Split(strings.Trim(record, "\r\n"), "\x00")
-			if len(fields) < 7 || fields[0] == "" {
+			if len(fields) < 6 || fields[0] == "" {
 				continue
 			}
 			refs := []any{}
@@ -292,7 +294,10 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 					refs = append(refs, ref)
 				}
 			}
-			commits = append(commits, map[string]any{"hash": fields[0], "short": fields[1], "author": fields[2], "date": fields[3], "refs": refs, "subject": strings.TrimSpace(fields[5]), "body": strings.TrimSpace(fields[6])})
+			message := strings.TrimRight(strings.ReplaceAll(fields[5], "\r\n", "\n"), "\n")
+			subject, body, _ := strings.Cut(message, "\n")
+			body = strings.TrimPrefix(body, "\n")
+			commits = append(commits, map[string]any{"hash": fields[0], "short": fields[1], "author": fields[2], "date": fields[3], "refs": refs, "subject": subject, "body": body})
 		}
 		return desktopOK(map[string]any{"repo": true, "branch": strings.TrimSpace(branch), "total": total, "commits": commits}), nil
 	case "git:status":
