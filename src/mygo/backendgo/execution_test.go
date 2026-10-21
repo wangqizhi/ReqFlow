@@ -81,11 +81,19 @@ func TestAIExecutionExclusiveClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An open new-requirement draft must not block the owning Agent's completion.
+	_, err = s.Mutate(map[string]any{"op": "requirementDraft", "project": pid, "draft": map[string]any{"body": "用户仍在记录新需求"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = s.Mutate(map[string]any{"op": "complete", "project": pid, "id": iid, "batch": b["id"], "version": i["version"], "run": wrongRun, "summary": "完成"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r = coreTestGet(t, s)
+	if coreMap(coreMap(coreList(coreMap(r["state"])["projects"])[0])["requirementDraft"])["body"] != "用户仍在记录新需求" {
+		t.Fatal("Agent completion lost the draft")
+	}
 	item = coreMap(coreList(coreMap(coreList(coreMap(r["state"])["projects"])[0])["items"])[0])
 	if ActiveAIExecution(item) != nil || item["status"] != "pending_verification" || coreMap(item["aiExecution"])["outcome"] != "completed" || !coreHas(coreMap(item["aiExecution"]), "durationMs") {
 		t.Fatal(item)

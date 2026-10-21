@@ -250,3 +250,39 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
   }
   return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载终端…'}</span></div>}</div>;
 }
+
+// Interactive agent sessions use the same dock as publish output, but remain
+// alive in the backend while the user switches projects or collapses the dock.
+export function AgentTerminal({ runId, project, onClose }: { runId: string; project: string; onClose(done: boolean): void }) {
+  const container = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    let disposed = false, offset = 0, timer: ReturnType<typeof setTimeout>;
+    let inputQueue = Promise.resolve();
+    const terminal = new Terminal({ cursorBlink: true, scrollback: 5000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
+    const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
+    const report = (message: string) => { if (!disposed) setError(message); };
+    const size = () => { if (!container.current?.clientWidth || !container.current.clientHeight) return; fit.fit(); void bridge.resizeAgent?.(runId, terminal.cols, terminal.rows).then(r => { if (!r.ok) report(r.error || '终端尺寸同步失败'); }).catch(e => report(e.message)); };
+    const observer = new ResizeObserver(size); observer.observe(container.current!); size();
+    const input = terminal.onData(data => {
+      inputQueue = inputQueue.then(async () => { if (disposed) return; const r = await bridge.writeAgent?.(runId, data); if (!r?.ok) throw Error(r?.error || '终端输入失败'); }).catch(e => report(e.message));
+    });
+    const poll = async () => {
+      try {
+        const r = await bridge.readAgent!(runId, offset);
+        if (disposed) return;
+        if (!r.ok) throw Error(r.error || '读取终端失败');
+        if (r.data) terminal.write(Uint8Array.from(atob(r.data), c => c.charCodeAt(0)));
+        offset = r.offset || 0;
+        setDone(!!r.done);
+        if (r.done) { terminal.options.disableStdin = true; terminal.options.cursorBlink = false; return; }
+      } catch (e: any) { report(e.message); }
+      if (!disposed) timer = setTimeout(() => void poll(), 100);
+    };
+    terminal.focus(); void poll();
+    return () => { disposed = true; clearTimeout(timer); observer.disconnect(); input.dispose(); terminal.dispose(); };
+  }, [runId]);
+  return <section className="publish-terminal" aria-label="Codex 交互终端" data-run-id={runId}><header><strong>Terminal · {project} · Codex</strong><span className="terminal-status" role="status">{error || (done ? '会话已结束' : '可在终端输入，与 Codex 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button><button className="icon-btn" aria-label={done ? "关闭 Codex 终端" : "收起 Codex 终端"} title={done ? "关闭终端" : "收起后继续运行"} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /></div></section>;
+}

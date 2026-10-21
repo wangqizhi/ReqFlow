@@ -8,7 +8,7 @@ import {
 } from '../core/domain';
 import { bridge, type PublishSession } from './api';
 import { publishProject } from './publish';
-import { PublishTerminal, useTerminalSetting } from './publish-terminal';
+import { AgentTerminal, PublishTerminal, useTerminalSetting } from './publish-terminal';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
   Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff, BarChart
@@ -52,7 +52,20 @@ export default function App() {
   const [version, setVersion] = useState(0);
   const [appVersion, setAppVersion] = useState('');
   const [pid, setPid] = useState('');
-  const [tab, setTab] = useState('feature');
+  const [tab, setTabState] = useState('feature');
+  const projectTabs = useRef<Record<string, string>>({});
+  function savedTab(id: string) {
+    try { return projectTabs.current[id] || localStorage.getItem('reqflow-flow-tab:' + id) || 'feature'; } catch { return projectTabs.current[id] || 'feature'; }
+  }
+  function setTab(next: string | ((previous: string) => string)) {
+    setTabState(previous => {
+      const value = typeof next === 'function' ? next(previous) : next;
+      if (p) { projectTabs.current[p.id] = value; try { localStorage.setItem('reqflow-flow-tab:' + p.id, value); } catch {} }
+      return value;
+    });
+  }
+  const [assignItem, setAssignItem] = useState<Item | null>(null);
+  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean }>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
   const [releaseItem, setReleaseItem] = useState<Item | null>(null);
   const [archiveView, setArchiveView] = useState('items');
@@ -249,7 +262,7 @@ export default function App() {
     setMode('FLOW');
     setNewMenu(false);
     setBackgroundEditing(false);
-    setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTab('feature');
+    setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTabState(savedTab(id));
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate(''); setArchiveBatchId('');
     setPublishConfirm(false); setPublishScript('');
     void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
@@ -281,7 +294,7 @@ export default function App() {
     try {
       const r = await bridge.getWorkspace();
       if (!r.ok) throw Error(r.error);
-      setData(r.state); workspaceRef.current = r.state; setVersion(r.version); versionRef.current = r.version; setError('');
+      if (r.version >= versionRef.current) { setData(r.state); workspaceRef.current = r.state; setVersion(r.version); versionRef.current = r.version; setError(''); }
     } catch (e: any) {
       if (opts.quiet) return; // 后台自动刷新失败时保持现状，不打扰用户（手动刷新仍会提示）
       setError(e.message);
@@ -294,13 +307,13 @@ export default function App() {
 
   // REQ-076：flow 状态自动更新 —— 每 15 秒静默轮询，窗口重获焦点时也刷新；
   // 切换模块（changeTab）与切换项目（switchProject）会各自立即刷新。
-  // 弹窗打开或保存进行中时跳过，避免打断编辑或引发版本冲突
+  // 新需求表单独立于工作区快照，弹窗打开时仍可刷新 Agent 状态；已有需求编辑期间暂停。
   useEffect(() => {
-    const refresh = () => { if (!busyRef.current && !modal) void load({ quiet: true }); };
+    const refresh = () => { if (!busyRef.current && (!modal || (modal === 'item' && !editing))) void load({ quiet: true }); };
     const timer = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
-  }, [modal]);
+  }, [modal, editing]);
 
   // REQ-029：首次数据加载后恢复上次使用的项目（项目已被删除时回退第一个）
   const restoredRef = useRef(false);
@@ -309,7 +322,7 @@ export default function App() {
     restoredRef.current = true;
     try {
       const last = localStorage.getItem(LAST_PROJECT_KEY);
-      if (last && data.projects.some((x) => x.id === last)) setPid(last);
+      if (last && data.projects.some((x) => x.id === last)) { setPid(last); setTabState(savedTab(last)); }
     } catch { /* localStorage 不可用时保持默认项目 */ }
   }, [data]);
   useEffect(() => {
@@ -519,6 +532,20 @@ export default function App() {
       update({ running: false, step: '', endedAt: Date.now() });
       void load({ quiet: true });
     }
+  }
+
+  async function assignAgent(item: Item) {
+    if (!p || codexBusy) return;
+    const projectId = p.id;
+    setCodexBusy(true);
+    try {
+      const result = await bridge.startAgent?.(projectId, 'codex', [item.id]);
+      if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
+      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true } }));
+      setAssignItem(null);
+      notify('已在终端启动 Codex');
+    } catch (e: any) { notify(e.message, 'err'); }
+    finally { setCodexBusy(false); }
   }
 
   async function dispatchCodex(item: Item) {
@@ -1099,7 +1126,7 @@ export default function App() {
                         {activeAIExecution(i) && <button className="btn" disabled={busy} onClick={() => setReleaseItem(i)}>释放任务</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
                         {/* 实验室开关开启后，在「查看详情」后面显示 Codex 派发按钮 */}
-                        {tab === 'generate' && !activeAIExecution(i) && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="发送给 Codex" onClick={() => void dispatchCodex(i)}>Codex</button>}
+                        {tab === 'generate' && !activeAIExecution(i) && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="选择 Agent 并在终端执行" onClick={() => setAssignItem(i)}>指派</button>}
                       </div>
                     </div>
                   </article>
@@ -1153,8 +1180,11 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
-      {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
+      {assignItem && <div className="overlay" onClick={e => { if (e.target === e.currentTarget && !codexBusy) setAssignItem(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-label="指派 Agent" onKeyDown={e => { if (e.key === 'Escape' && !codexBusy) setAssignItem(null); }}><div className="dialog-head"><h2>指派 Agent · {assignItem.number}</h2><button className="icon-btn" aria-label="关闭指派" disabled={codexBusy} onClick={() => setAssignItem(null)}><X /></button></div><p>在项目目录启动交互终端，仅执行这条需求。</p><button autoFocus className="btn primary" disabled={codexBusy || !bridge.startAgent} onClick={() => void assignAgent(assignItem)}>{codexBusy ? '启动中…' : 'Codex'}</button></section></div>}
+      {p && agentSessions[p.id]?.open && <AgentTerminal key={agentSessions[p.id].runId} runId={agentSessions[p.id].runId} project={p.name} onClose={done => setAgentSessions(s => { const next = { ...s }; if (done) delete next[p.id]; else next[p.id] = { ...s[p.id], open: false }; return next; })} />}
+      {p && agentSessions[p.id] && !agentSessions[p.id].open && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 Codex 终端</button>}
+      {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
+      {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>

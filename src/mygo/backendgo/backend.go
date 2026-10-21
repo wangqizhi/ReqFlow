@@ -16,6 +16,9 @@ import (
 // Backend owns all desktop business operations. No external JavaScript runtime
 // participates in requests; the frontend calls this Go service directly.
 type Backend struct {
+	agentMu   sync.Mutex
+	agentRuns map[string]*agentRun
+
 	DataDir, AppDir, Version                               string
 	Workspace                                              *WorkspaceService
 	Native                                                 func(string, []any) (any, error)
@@ -195,6 +198,9 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 	}
 	if strings.HasPrefix(channel, "fs:") {
 		return b.desktopFiles(channel, args)
+	}
+	if strings.HasPrefix(channel, "agent:") {
+		return b.desktopAgent(channel, args)
 	}
 	if strings.HasPrefix(channel, "publish:") {
 		return b.desktopPublish(ctx, channel, args)

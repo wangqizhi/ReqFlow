@@ -81,7 +81,10 @@ func (s *workspaceStore) commit(operation func() (map[string]any, error)) (resul
 			}
 			break
 		}
-		if !errors.Is(e, os.ErrExist) {
+		// Windows can report ACCESS_DENIED while another writer's lock
+		// directory is being removed (delete-pending), rather than EEXIST.
+		// Treat this as bounded lock contention, preserving CAS below.
+		if !errors.Is(e, os.ErrExist) && !errors.Is(e, os.ErrPermission) {
 			return nil, e
 		}
 		if time.Since(started) > s.lockTimeout {

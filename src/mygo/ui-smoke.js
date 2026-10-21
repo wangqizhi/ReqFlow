@@ -42,6 +42,13 @@
   if (__REQFLOW_INTERACTIONS__) {
     const footer = document.querySelector('.side-foot');
     const originalProject = document.querySelector('.main h1').textContent;
+    const initialProject = document.querySelector('.side-project[role="button"].active') || document.querySelector('.side-project[role="button"]');
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
+    const otherProject = [...document.querySelectorAll('.side-project[role="button"]')].find(el => el !== initialProject);
+    if (otherProject) { await click(otherProject); await click(initialProject); }
+    checks.rememberFlowTab = { ok: document.querySelector('.navtab.active')?.textContent.startsWith('待验证') };
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('需求池')));
+
     // REQ-153: exercise the actual persisted project controls on the isolated copy.
     const sidebarFirst = document.querySelector('.side-project[role="button"]');
     const firstName = sidebarFirst.querySelector('.project-name').textContent;
@@ -572,6 +579,11 @@
     const concurrentItem = concurrent.items.find(item => item.title === '并发完成测试');
     await invokeAction({ op: 'generate', project: concurrentPid, ids: [concurrentItem.id] });
     await invokeAction({ op: 'complete', project: concurrentPid, id: concurrentItem.id, summary: '模拟 Agent 回写' });
+    const expectedPending = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state.projects.find(project => project.id === concurrentPid).items.filter(i => !i.archived && i.status === 'pending_verification').length;
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => [...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证'))?.textContent.includes(String(expectedPending)));
+    checks.liveFlowWhileDraftOpen = { ok: !!document.querySelector('.requirement-dialog') };
+
     const concurrentInput = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(concurrentInput, 'Agent 回写后仍可保存新需求');
     concurrentInput.dispatchEvent(new Event('input', { bubbles: true }));

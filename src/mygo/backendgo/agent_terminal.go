@@ -1,0 +1,173 @@
+package backendgo
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+type agentPTY interface {
+	io.ReadWriteCloser
+	Resize(int, int) error
+	Wait(context.Context) (uint32, error)
+}
+type agentRun struct {
+	mu        sync.Mutex
+	control   sync.Mutex
+	pty       agentPTY
+	project   string
+	item      string
+	output    []byte
+	total     int64
+	done      bool
+	closeOnce sync.Once
+}
+
+func (r *agentRun) close() { r.closeOnce.Do(func() { _ = r.pty.Close() }) }
+func (r *agentRun) collect() {
+	buffer := make([]byte, 8192)
+	for {
+		n, err := r.pty.Read(buffer)
+		if n > 0 {
+			r.mu.Lock()
+			r.output = append(r.output, buffer[:n]...)
+			r.total += int64(n)
+			if len(r.output) > 2*1024*1024 {
+				r.output = append([]byte(nil), r.output[len(r.output)-2*1024*1024:]...)
+			}
+			r.mu.Unlock()
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// ids is an array so a future batch assignment can reuse the same contract.
+// This experiment deliberately accepts one requirement per interactive session.
+func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
+	if channel == "agent:start" {
+		project, agent := desktopText(args, 0), desktopText(args, 1)
+		ids := desktopList(desktopArg(args, 2))
+		if agent != "codex" || len(ids) != 1 {
+			return nil, errors.New("目前仅支持指派单条需求给 Codex")
+		}
+		settings, err := desktopReadJSON(filepath.Join(b.DataDir, "local-agents.json"), map[string]any{})
+		if err != nil {
+			return nil, err
+		}
+		enabled := false
+		for _, value := range desktopList(settings) {
+			if value == "codex" {
+				enabled = true
+			}
+		}
+		if !enabled {
+			return nil, errors.New("请先在实验室开启 Codex")
+		}
+		p, err := b.desktopProject(project)
+		if err != nil {
+			return nil, err
+		}
+		root := coreString(p["dir"])
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() || !filepath.IsAbs(root) {
+			return nil, errors.New("请关联有效的本地项目目录")
+		}
+		item := coreFind(coreList(p["items"]), ids[0])
+		if item == nil || coreExecutor(item) != "ai" || ActiveAIExecution(item) != nil || ScheduledBatch(p, item) == nil || coreTruthy(item["archived"]) || !coreIn(coreString(item["status"]), "ready", "in_progress") {
+			return nil, errors.New("需求不可指派，请刷新排期状态")
+		}
+		b.agentMu.Lock()
+		defer b.agentMu.Unlock()
+		if b.agentRuns == nil {
+			b.agentRuns = map[string]*agentRun{}
+		}
+		for id, r := range b.agentRuns {
+			r.mu.Lock()
+			done := r.done
+			r.mu.Unlock()
+			if r.project == project && !done {
+				if r.item == coreString(ids[0]) {
+					return desktopOK(map[string]any{"runId": id}), nil
+				}
+				return nil, errors.New("此项目已有 Codex 会话，请先完成或停止当前会话")
+			}
+		}
+		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行 %s（需求 ID：%s），其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", coreString(item["number"]), coreString(item["id"]), BuildPrompt(p, []any{item}))
+		pty, err := startAgentPTY(root, prompt)
+		if err != nil {
+			return nil, err
+		}
+		id := coreUUID()
+		r := &agentRun{pty: pty, project: project, item: coreString(ids[0])}
+		b.agentRuns[id] = r
+		drained := make(chan struct{})
+		go func() { defer close(drained); r.collect() }()
+		go func() {
+			code, err := pty.Wait(context.Background())
+			r.close()
+			<-drained
+			r.mu.Lock()
+			message := fmt.Sprintf("\r\n[Codex 已退出，退出码 %d]\r\n", code)
+			if err != nil {
+				message = fmt.Sprintf("\r\n[Codex 会话结束：%v]\r\n", err)
+			}
+			r.output = append(r.output, []byte(message)...)
+			r.total += int64(len(message))
+			r.done = true
+			r.mu.Unlock()
+		}()
+		return desktopOK(map[string]any{"runId": id}), nil
+	}
+	b.agentMu.Lock()
+	r := b.agentRuns[desktopText(args, 0)]
+	b.agentMu.Unlock()
+	if r == nil {
+		return nil, errors.New("终端会话不存在")
+	}
+	if channel == "agent:read" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		offset := desktopInt(desktopArg(args, 1))
+		base := r.total - int64(len(r.output))
+		truncated := offset < base
+		if offset < base || offset > r.total {
+			offset = base
+		}
+		return desktopOK(map[string]any{"data": base64.StdEncoding.EncodeToString(r.output[offset-base:]), "offset": r.total, "done": r.done, "truncated": truncated}), nil
+	}
+	if channel == "agent:stop" {
+		go r.close()
+		return desktopOK(nil), nil
+	}
+	r.control.Lock()
+	defer r.control.Unlock()
+	r.mu.Lock()
+	done := r.done
+	r.mu.Unlock()
+	if done {
+		return nil, errors.New("Codex 会话已结束")
+	}
+	switch channel {
+	case "agent:write":
+		input := desktopText(args, 1)
+		if len(input) > 64*1024 {
+			return nil, errors.New("终端输入过长")
+		}
+		_, err := r.pty.Write([]byte(input))
+		return desktopOK(nil), err
+	case "agent:resize":
+		cols, rows := int(desktopInt(desktopArg(args, 1))), int(desktopInt(desktopArg(args, 2)))
+		if cols < 2 || cols > 500 || rows < 2 || rows > 200 {
+			return nil, errors.New("终端尺寸无效")
+		}
+		return desktopOK(nil), r.pty.Resize(cols, rows)
+	}
+	return nil, errors.New("未知终端操作")
+}

@@ -41,6 +41,11 @@ export type LocalAgent = { id: string; name: string; command: string; package: s
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
 export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
 export interface ReqFlowBridge {
+  startAgent?(project: string, agent: string, ids: string[]): Promise<{ ok: boolean; runId?: string; error?: string }>;
+  readAgent?(runId: string, offset: number): Promise<{ ok: boolean; data?: string; offset?: number; done?: boolean; error?: string }>;
+  writeAgent?(runId: string, input: string): Promise<{ ok: boolean; error?: string }>;
+  resizeAgent?(runId: string, cols: number, rows: number): Promise<{ ok: boolean; error?: string }>;
+  stopAgent?(runId: string): Promise<{ ok: boolean; error?: string }>;
   getTerminalSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveTerminalSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
   getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
