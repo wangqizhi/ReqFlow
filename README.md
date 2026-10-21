@@ -8,6 +8,10 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 [2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
+## 2.11.4 更新
+
+- 指派 pi 的交互终端以 `--approve` 启动，自动信任项目目录，不再停在「Trust / 信任目录」确认提示上；信任仅对本次会话生效。
+
 ## 2.11.3 更新
 
 - 指派 Codex 的交互终端改为完全控制模式启动（`--sandbox danger-full-access`），不再受沙箱权限限制。

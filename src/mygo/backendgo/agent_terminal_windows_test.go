@@ -120,6 +120,7 @@ func TestInteractiveCodexTerminal(t *testing.T) {
 }
 
 func TestInteractivePiTerminal(t *testing.T) {
-	// REQ-206：pi 与 Codex 使用同样的交互终端指派。
-	runInteractiveAgentTerminal(t, "pi", nil)
+	// REQ-206：pi 与 Codex 使用同样的交互终端指派；--approve 自动信任项目目录，
+	// 启动不再停在文件夹信任确认上。
+	runInteractiveAgentTerminal(t, "pi", []string{"--approve"})
 }

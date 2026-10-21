@@ -19,9 +19,11 @@ func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 	// invokes npm's .ps1 shim without interpolating any requirement into code.
 	// Codex starts with danger-full-access so the assigned session keeps full
 	// machine control instead of hitting sandbox permission denials.
+	// pi starts with --approve so the project directory is trusted for the run
+	// and startup never blocks on the interactive folder-trust prompt.
 	invocations := map[string]string{
 		"codex": "& codex --no-alt-screen --sandbox danger-full-access $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
-		"pi":    "& pi -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"pi":    "& pi --approve -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 	}
 	invocation, ok := invocations[agent]
 	if !ok {
