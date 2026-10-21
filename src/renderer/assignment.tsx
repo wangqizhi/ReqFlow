@@ -12,7 +12,7 @@ export function useLocalAgents(active: boolean) {
     const refresh = () => bridge.getLocalAgents!().then(r => {
       if (cancelled) return;
       setError(r.ok ? '' : r.error || '读取配置失败');
-      setAgents((r.enabled || []).filter(id => id !== 'zcode'));
+      setAgents(r.enabled || []);
     }).catch(e => { if (!cancelled) setError(e.message); });
     void refresh();
     window.addEventListener('reqflow-agents-changed', refresh);
@@ -59,11 +59,11 @@ export function useAssignSetting(): [boolean, (enabled: boolean) => Promise<void
 }
 
 export function agentName(id: string) {
-  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id;
+  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id === 'zcode' ? 'ZCode' : id;
 }
 
 // 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持）
-export const TERMINAL_AGENTS = ['codex', 'pi'];
+export const TERMINAL_AGENTS = ['codex', 'pi', 'zcode'];
 
 // Codex 版插件引用（与 docs/reqflow-codex-plugin.md、mods.tsx 同源使用）
 export const AGENT_MENTION = '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)';

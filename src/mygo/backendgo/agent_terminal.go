@@ -25,6 +25,9 @@ func agentTerminalLabel(agent string) string {
 	if agent == "codex" {
 		return "Codex"
 	}
+	if agent == "zcode" {
+		return "ZCode"
+	}
 	if agent == "pi" {
 		return "Pi"
 	}
@@ -81,8 +84,8 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
-		if agent != "codex" && agent != "pi" {
-			return nil, errors.New("目前仅支持指派给 Codex 或 pi")
+		if agent != "codex" && agent != "pi" && agent != "zcode" {
+			return nil, errors.New("目前支持指派给 Codex、Pi 或 ZCode")
 		}
 		if len(ids) == 0 {
 			return nil, errors.New("请至少选择一条需求")
@@ -91,14 +94,14 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		enabled := false
+		enabled := agent == "codex"
 		for _, value := range desktopList(settings) {
 			if value == agent {
 				enabled = true
 			}
 		}
 		if !enabled {
-			return nil, errors.New("请先在实验室开启 " + agentTerminalLabel(agent))
+			return nil, errors.New("请先在 Local Agent 配置中开启 " + agentTerminalLabel(agent))
 		}
 		p, err := b.desktopProject(project)
 		if err != nil {
@@ -132,7 +135,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			done := r.done
 			r.mu.Unlock()
 			if r.project == project && !done {
-				if len(r.items) == len(itemIDs) && func() bool {
+				if r.agent == agent && len(r.items) == len(itemIDs) && func() bool {
 					for _, id := range itemIDs {
 						if !slices.Contains(r.items, id) {
 							return false
@@ -146,7 +149,12 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			}
 		}
 		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 %d 条需求：%s，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", len(items), strings.Join(labels, "、"), BuildPrompt(p, items))
-		pty, err := startAgentPTY(root, agent, prompt)
+		var pty agentPTY
+		if agent == "zcode" {
+			pty, err = startZCodeTask(root, prompt)
+		} else {
+			pty, err = startAgentPTY(root, agent, prompt)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -207,6 +215,9 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	}
 	switch channel {
 	case "agent:write":
+		if r.agent == "zcode" {
+			return nil, errors.New("ZCode 为任务日志模式，不支持继续输入")
+		}
 		input := desktopText(args, 1)
 		if len(input) > 64*1024 {
 			return nil, errors.New("终端输入过长")

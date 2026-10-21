@@ -510,7 +510,7 @@ func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 	case "backup:get", "backup:save", "backup:sync", "backup:import", "remote:test", "remote:apply":
 		result, err := b.invokeRemote(channel, args)
 		return result, true, err
-	case "agents:get", "agents:save", "agents:detect":
+	case "agents:get", "agents:save", "agents:detect", "agents:install":
 		result, err := b.invokeAgents(channel, args)
 		return result, true, err
 	}

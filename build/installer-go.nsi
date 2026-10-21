@@ -25,6 +25,7 @@ Var DataDir
 Var DataEdit
 Var DataChanged
 !define MUI_ABORTWARNING
+!define MUI_CUSTOMFUNCTION_GUIINIT CenterOnCursorMonitor
 ; REQ-130：安装完成后默认勾选「运行 ReqFlow」
 !define MUI_FINISHPAGE_RUN "$INSTDIR\ReqFlow.exe"
 !insertmacro MUI_PAGE_WELCOME
@@ -36,6 +37,49 @@ Page custom DataPage DataLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
+
+; Place the wizard once, on the monitor under the pointer, inside its work area.
+Function CenterOnCursorMonitor
+  System::Call '*(i 0, i 0) p .r0'
+  System::Call 'user32::GetCursorPos(p r0) i .r1'
+  ${If} $1 != 0
+    System::Call '*$0(i .r1, i .r2)'
+    ; MonitorFromRect avoids passing a POINT by value on different architectures.
+    IntOp $3 $1 + 1
+    IntOp $4 $2 + 1
+    System::Call '*(i r1, i r2, i r3, i r4) p .r5'
+    System::Call 'user32::MonitorFromRect(p r5, i 2) p .r6'
+    System::Free $5
+    System::Call '*(i 40, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0) p .r5'
+    System::Call 'user32::GetMonitorInfoW(p r6, p r5) i .r6'
+    ${If} $6 != 0
+      System::Call '*$5(i, i, i, i, i, i .r1, i .r2, i .r3, i .r4)'
+      System::Call '*(i 0, i 0, i 0, i 0) p .r6'
+      System::Call 'user32::GetWindowRect(p $HWNDPARENT, p r6)'
+      System::Call '*$6(i .r7, i .r8, i .r9, i .R0)'
+      System::Free $6
+      IntOp $9 $9 - $7
+      IntOp $R0 $R0 - $8
+      IntOp $3 $3 - $1
+      IntOp $3 $3 - $9
+      IntOp $3 $3 / 2
+      ${If} $3 < 0
+        StrCpy $3 0
+      ${EndIf}
+      IntOp $3 $3 + $1
+      IntOp $4 $4 - $2
+      IntOp $4 $4 - $R0
+      IntOp $4 $4 / 2
+      ${If} $4 < 0
+        StrCpy $4 0
+      ${EndIf}
+      IntOp $4 $4 + $2
+      System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i r3, i r4, i 0, i 0, i 0x15)'
+    ${EndIf}
+    System::Free $5
+  ${EndIf}
+  System::Free $0
+FunctionEnd
 
 Function .onInit
   SetShellVarContext current

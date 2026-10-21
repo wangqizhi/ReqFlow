@@ -548,7 +548,7 @@ export default function App() {
       setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
       setCompleteConfirm(null);
       setTab('executing');
-      notify('已在终端启动 ' + agentName(actual) + '，需求进入执行中');
+      notify(actual === 'zcode' ? '已启动 ZCode 任务日志，等待插件领取需求' : '已在终端启动 ' + agentName(actual) + '，需求进入执行中');
     } catch (e: any) { notify(e.message, 'err'); }
     finally { setCodexBusy(false); }
   }
@@ -1235,7 +1235,7 @@ export default function App() {
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
-        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? (completeConfirm.bulk ? '，或合并 Prompt 统一指派 Agent 执行。' : '，或在下方指派 Agent 在交互终端执行。') : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
+        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? (completeConfirm.bulk ? '，或合并 Prompt 统一指派 Agent 执行。' : '，或在下方指派 Agent 执行。') : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
             {completeConfirm.items.map((item) => {
               const fresh = p?.items.find((i) => i.id === item.id);
@@ -1251,8 +1251,8 @@ export default function App() {
                     {/* REQ-206/207：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中）；仅在实验室开启「指派」后显示 */}
                     {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
                       <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
-                        title={'在项目目录启动 ' + agentName(id) + ' 交互终端执行这条需求，指派后立即进入「执行中」'}
-                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} 终端执行</button>
+                        title={'在项目目录启动 ' + agentName(id) + (id === 'zcode' ? ' 任务执行日志；通过插件领取后执行' : ' 交互终端执行这条需求')}
+                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} {id === 'zcode' ? '任务执行' : '终端执行'}</button>
                     ))}
                     {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
@@ -1270,12 +1270,12 @@ export default function App() {
           </div>
           {assignEnabled && completeConfirm.bulk && <div className="settings-actions">
             {TERMINAL_AGENTS.filter(id => localAgents?.includes(id)).map(id => <button key={id} className="btn" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || completeConfirm.items.some(item => { const fresh = p?.items.find(i => i.id === item.id); return !fresh || (fresh.executor || 'ai') !== 'ai' || executing(fresh); })}
-              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} 终端执行</button>)}
+              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} {id === 'zcode' ? '任务执行' : '终端执行'}</button>)}
             {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>全部指派给 {agentName(id)}</button>)}
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {assignEnabled && !!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi 使用交互终端；ZCode 使用只读任务日志，以 build 权限运行，不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
         </div></div>}

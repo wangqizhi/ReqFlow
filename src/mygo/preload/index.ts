@@ -14,6 +14,7 @@ const channels = {
   getLocalAgents: 'agents:get',
   saveLocalAgents: 'agents:save',
   detectLocalAgents: 'agents:detect',
+  installLocalAgent: 'agents:install',
   updateState: 'update:state',
   checkUpdate: 'update:check',
   downloadUpdate: 'update:download',

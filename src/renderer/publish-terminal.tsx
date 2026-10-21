@@ -270,13 +270,13 @@ export function AgentTerminal({ runId, project, agent, onClose, onState }: { run
     let disposed = false, offset = 0, timer: ReturnType<typeof setTimeout>;
     let inputQueue = Promise.resolve();
     let reportedNeedsInput: boolean | undefined, reportedDone: boolean | undefined;
-    const terminal = new Terminal({ cursorBlink: true, scrollback: 5000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
+    const terminal = new Terminal({ disableStdin: agent === 'ZCode', cursorBlink: agent !== 'ZCode', scrollback: 5000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
     const report = (message: string) => { if (!disposed) setError(message); };
     const size = () => { if (!container.current?.clientWidth || !container.current.clientHeight) return; fit.fit(); void bridge.resizeAgent?.(runId, terminal.cols, terminal.rows).then(r => { if (!r.ok) report(r.error || '终端尺寸同步失败'); }).catch(e => report(e.message)); };
     const observer = new ResizeObserver(size); observer.observe(container.current!); size();
     const input = terminal.onData(data => {
-      inputQueue = inputQueue.then(async () => { if (disposed) return; const r = await bridge.writeAgent?.(runId, data); if (!r?.ok) throw Error(r?.error || '终端输入失败'); }).catch(e => report(e.message));
+      inputQueue = inputQueue.then(async () => { if (disposed || agent === 'ZCode') return; const r = await bridge.writeAgent?.(runId, data); if (!r?.ok) throw Error(r?.error || '终端输入失败'); }).catch(e => report(e.message));
     });
     const poll = async () => {
       try {
@@ -286,7 +286,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onState }: { run
         if (r.data) terminal.write(Uint8Array.from(atob(r.data), c => c.charCodeAt(0)));
         offset = r.offset || 0;
         const finished = !!r.done;
-        const needsInput = agentNeedsInput(finished, r.idleMs);
+        const needsInput = agent !== 'ZCode' && agentNeedsInput(finished, r.idleMs);
         setDone(previous => previous === finished ? previous : finished);
         setWaiting(previous => previous === needsInput ? previous : needsInput);
         // 仅在状态变化时上报，避免高频轮询触发整页重渲染
@@ -301,5 +301,5 @@ export function AgentTerminal({ runId, project, agent, onClose, onState }: { run
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); input.dispose(); terminal.dispose(); };
   }, [runId]);
-  return <section className="publish-terminal" aria-label={agent + ' 交互终端'} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button><button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /></div></section>;
+  return <section className="publish-terminal" aria-label={agent + (agent === 'ZCode' ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : agent === 'ZCode' ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button><button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /></div></section>;
 }

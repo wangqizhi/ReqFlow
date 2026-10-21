@@ -17,9 +17,10 @@ import (
 	"time"
 )
 
-var aiAgentDefinitions = []map[string]any{{"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}}
+var aiAgentDefinitions = []map[string]any{{"id": "codex", "name": "Codex", "command": "codex", "package": "@openai/codex"}, {"id": "zcode", "name": "ZCode", "command": "zcode", "package": ""}, {"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}}
 var aiAgentVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+(?:-[\w.-]+)?\b`)
 var aiSimpleVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+var agentInstallMu sync.Mutex
 
 func aiValidAgent(id string) bool {
 	return id == "codex" || id == "zcode" || id == "opencode" || id == "pi"
@@ -28,6 +29,9 @@ func aiValidAgent(id string) bool {
 func ProbeAgent(command string) map[string]any {
 	if !aiValidAgent(command) {
 		return map[string]any{"installed": false, "error": "Agent 命令无效"}
+	}
+	if command == "zcode" {
+		return probeZCode()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -107,9 +111,9 @@ func (b *Backend) invokeAgents(channel string, args []any) (any, error) {
 		if err != nil && !os.IsNotExist(err) {
 			return nil, errors.New("读取 Agent 配置失败")
 		}
-		enabled := []any{}
+		enabled := []any{"codex"}
 		for _, value := range aiArray(stored) {
-			if id, ok := value.(string); ok && aiValidAgent(id) {
+			if id, ok := value.(string); ok && aiValidAgent(id) && id != "codex" {
 				enabled = append(enabled, id)
 			}
 		}
@@ -137,6 +141,32 @@ func (b *Backend) invokeAgents(channel string, args []any) (any, error) {
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
+	case "agents:install":
+		id := aiString(aiArg(args, 0))
+		pkg := ""
+		for _, d := range aiAgentDefinitions {
+			if d["id"] == id {
+				pkg = aiString(d["package"])
+			}
+		}
+		if pkg == "" {
+			return nil, errors.New("此 Agent 不支持自动安装，请使用官方安装程序")
+		}
+		agentInstallMu.Lock()
+		defer agentInstallMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "npm", "install", "-g", pkg+"@latest")
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd.exe", "/d", "/s", "/c", "npm install -g "+pkg+"@latest")
+		}
+		aiHideCommand(cmd)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		if err := cmd.Run(); err != nil {
+			return nil, errors.New("安装 / 更新失败，请检查 Node.js、npm、网络与安装权限后重试")
+		}
+		return map[string]any{"ok": true}, nil
 	case "agents:detect":
 		results := make([]any, len(aiAgentDefinitions))
 		var wait sync.WaitGroup
@@ -147,6 +177,10 @@ func (b *Backend) invokeAgents(channel string, args []any) (any, error) {
 				result := aiCloneMap(d)
 				for k, v := range ProbeAgent(aiString(d["command"])) {
 					result[k] = v
+				}
+				if aiString(d["package"]) == "" {
+					results[index] = result
+					return
 				}
 				latest, err := aiLatestAgentVersion(aiString(d["package"]))
 				if err != nil {

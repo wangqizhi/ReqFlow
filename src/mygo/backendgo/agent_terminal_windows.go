@@ -10,9 +10,48 @@ import (
 
 	"encoding/binary"
 	"github.com/UserExistsError/conpty"
+	"golang.org/x/sys/windows"
+	"sync"
 	"syscall"
 	"unicode/utf16"
+	"unsafe"
 )
+
+// Closing this job kills the full descendant tree, including on ReqFlow exit.
+func containAgentProcess(cmd *exec.Cmd) (func(), error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	_, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)))
+	if err != nil {
+		windows.CloseHandle(job)
+		return nil, err
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		windows.CloseHandle(job)
+		return nil, err
+	}
+	err = windows.AssignProcessToJobObject(job, process)
+	if err != nil {
+		windows.CloseHandle(process)
+		windows.CloseHandle(job)
+		return nil, err
+	}
+	var once sync.Once
+	cleanup := func() { once.Do(func() { windows.CloseHandle(job) }) }
+	// Kill descendants as soon as the parent exits, before exec.Cmd waits for
+	// inherited stdout handles held by background children to close.
+	go func() {
+		windows.WaitForSingleObject(process, windows.INFINITE)
+		cleanup()
+		windows.CloseHandle(process)
+	}()
+	return cleanup, nil
+}
 
 func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 	// An encoded script passes the prompt as data, including quotes/newlines, and

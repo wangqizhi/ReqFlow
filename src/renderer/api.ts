@@ -61,6 +61,7 @@ export interface ReqFlowBridge {
   migrateStorage?(): Promise<{ ok: boolean; backend?: string; error?: string }>;
   getLocalAgents?(): Promise<{ ok: boolean; enabled?: string[]; error?: string }>;
   saveLocalAgents?(enabled: string[]): Promise<{ ok: boolean; error?: string }>;
+  installLocalAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
   detectLocalAgents?(): Promise<{ ok: boolean; agents?: LocalAgent[]; error?: string }>;
   updateState?(): Promise<UpdateState>;
   checkUpdate?(): Promise<UpdateState>;

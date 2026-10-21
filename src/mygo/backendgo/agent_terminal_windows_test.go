@@ -54,7 +54,7 @@ $value=Read-Host 'message'
 		mutate(map[string]any{"op": "generate", "ids": ids})
 	}
 	args := []any{pid, agent, ids}
-	if _, err := b.desktopAgent("agent:start", args); err == nil {
+	if _, err := b.desktopAgent("agent:start", args); agent != "codex" && err == nil {
 		t.Fatal("disabled lab allowed")
 	}
 	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"codex", "pi"}); err != nil {
@@ -72,6 +72,13 @@ $value=Read-Host 'message'
 	}
 	id := coreString(desktopMap(value)["runId"])
 	defer b.agentRuns[id].close()
+	other := "pi"
+	if agent == "pi" {
+		other = "codex"
+	}
+	if _, err := b.desktopAgent("agent:start", []any{pid, other, ids}); err == nil {
+		t.Fatal("same requirements reused across different agents")
+	}
 	again, err := b.desktopAgent("agent:start", args)
 	if err != nil || desktopMap(again)["runId"] != id {
 		t.Fatal("duplicate launch", again, err)

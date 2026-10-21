@@ -8,6 +8,14 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 [2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
+## 2.11.7 更新
+
+- Codex 默认出现在已开启的指派入口中，实验室保留调起 Codex 桌面窗口功能。
+- Local Agent 集中配置 Pi、OpenCode、ZCode；Codex / Pi / OpenCode 支持版本检测和点击安装、更新，ZCode 仅检测官方安装。
+- ZCode 可执行单条或合并需求，显示只读流式任务日志，以插件领取与待验证回写为准；采用显式 build 权限、任务文件、超时与进程树取消。
+- ZCode 需要完整官方 CLI 资源、Node.js 及有效模型 / 登录配置。自定义入口可设置 `REQFLOW_ZCODE_CLI`，时限可设置 `REQFLOW_ZCODE_TIMEOUT`（默认 2h，1m–24h）。当前机器官方 bundle 缺少 provider 配置资源，真实模型执行仍需修复官方安装后验收。
+- 安装向导首次显示在鼠标所在屏幕的工作区中央。
+
 ## 2.11.6 更新
 
 - 排期表右下角「提交验证」支持将当前列表合并为一份 Prompt，一次指派给 Codex / pi；单条入口仍独立指派。
