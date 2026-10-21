@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -195,6 +196,25 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			offset = base
 		}
 		return desktopOK(map[string]any{"data": base64.StdEncoding.EncodeToString(r.output[offset-base:]), "offset": r.total, "done": r.done, "truncated": truncated, "idleMs": r.idleMilliseconds(time.Now().UnixMilli())}), nil
+	}
+	// 指派的交互终端与发布终端共用窗口机制：最大化后在独立窗口继续同一个会话。
+	if channel == "agent:terminal:status" {
+		status, err := desktopNative(b, "terminal.status", desktopText(args, 0))
+		return desktopOK(map[string]any{"detached": status == true}), err
+	}
+	if channel == "agent:terminal:open" || channel == "agent:terminal:close" {
+		id := desktopText(args, 0)
+		if channel == "agent:terminal:close" {
+			_, err := desktopNative(b, "terminal.close", id)
+			return desktopOK(nil), err
+		}
+		name := r.project
+		if p, err := b.desktopProject(r.project); err == nil {
+			name = coreString(p["name"])
+		}
+		query := "&agent=" + url.QueryEscape(r.agent) + "&project=" + url.QueryEscape(name)
+		_, err := desktopNative(b, "terminal.open", id, name+" · "+agentTerminalLabel(r.agent), query)
+		return desktopOK(nil), err
 	}
 	if channel == "agent:status" {
 		r.mu.Lock()

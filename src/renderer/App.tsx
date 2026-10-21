@@ -66,6 +66,8 @@ export default function App() {
   }
   // REQ-205：指派 Agent 的交互终端会话；item 为正在执行的需求，needsInput 表示终端可能在等待输入
   const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean; items: string[]; agent: string; startedAt: number; needsInput?: boolean; done?: boolean }>>({});
+  // REQ-212：指派终端在独立窗口打开时隐藏停靠终端，窗口关闭后恢复
+  const [agentDetached, setAgentDetached] = useState<Record<string, boolean>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
   const [releaseItem, setReleaseItem] = useState<Item | null>(null);
   const [archiveView, setArchiveView] = useState('items');
@@ -644,9 +646,32 @@ export default function App() {
     if (remaining.length) return;
     agentClosedRef.current.add(session.runId);
     void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
+    void bridge.closeAgentTerminal?.(session.runId).catch(() => { /* 独立窗口可能已关闭 */ });
     setAgentSessions(s => { const next = { ...s }; delete next[p.id]; return next; });
     notify('本次指派需求已全部完成或移除，' + agentName(session.agent) + ' 终端已自动关闭');
   }, [data, agentSessions, p?.id]);
+  // REQ-212：指派终端最大化到独立窗口后，主界面不再渲染停靠终端，并轮询窗口是否仍然打开
+  const agentTerminalRunId = agentSession?.runId;
+  useEffect(() => {
+    if (!agentTerminalRunId || !bridge.agentTerminalStatus) return;
+    let cancelled = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const result = await bridge.agentTerminalStatus!(agentTerminalRunId);
+        if (!cancelled && result.ok) setAgentDetached(previous => previous[agentTerminalRunId] === !!result.detached ? previous : { ...previous, [agentTerminalRunId]: !!result.detached });
+      } catch { /* 状态轮询失败时保持现状，下一轮重试 */ }
+      if (!cancelled) timer = setTimeout(() => void poll(), 1500);
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [agentTerminalRunId]);
+  const agentTerminalDetached = !!agentTerminalRunId && !!agentDetached[agentTerminalRunId];
+  async function detachAgentTerminal() {
+    if (!agentSession || !bridge.openAgentTerminal) throw Error('独立终端仅桌面版支持');
+    const opened = await bridge.openAgentTerminal(agentSession.runId);
+    if (!opened.ok) throw Error(opened.error || '无法打开独立终端');
+    setAgentDetached(previous => ({ ...previous, [agentSession.runId]: true }));
+  }
   const shownPhases: [string, string][] = executingItems.length ? [...phases.slice(0, 2), ['executing', '执行中'], ...phases.slice(2)] : phases;
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
@@ -936,6 +961,7 @@ export default function App() {
               </button>
             )}
             {terminalDetached && <button className="btn" onClick={() => void detachTerminal().catch(e => notify(e.message, 'err'))}>终端</button>}
+            {agentTerminalDetached && agentSession && <button className="btn" onClick={() => void detachAgentTerminal().catch(e => notify(e.message, 'err'))} title={'把 ' + agentName(agentSession.agent) + ' 指派终端切回前台'}>{agentName(agentSession.agent)} 终端</button>}
             {!!p?.verifySource && (
               <button className="btn run" onClick={runVerifySource} title={'运行验证源：' + p.verifySource.value}>
                 <Play size={16} />运行
@@ -1216,10 +1242,11 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {p && agentSession?.open && <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)}
+      {p && agentSession?.open && !agentTerminalDetached && <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)}
+        onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
         onClose={done => setAgentSessions(s => { const next = { ...s }; if (done) delete next[p.id]; else next[p.id] = { ...s[p.id], open: false }; return next; })}
         onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />}
-      {p && agentSession && !agentSession.open && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+      {p && agentSession && !agentSession.open && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
       {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
       {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
       </div>

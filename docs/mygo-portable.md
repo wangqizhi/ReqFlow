@@ -1,5 +1,7 @@
 # ReqFlow 2.0 Go/MyGO 安装版与绿色版
 
+当前发布流程仅生成和上传 Setup 安装版、SHA256 校验文件及 update.json，不再生成 Portable 绿色版。下文的绿色版内容保留为历史版本与已有用户的数据迁移参考。
+
 2.0 使用完整 Go 后端。Go 宿主直接处理工作区、SQLite/JSON、CLI、AI、Git、备份、文件、发布、归档和更新；React 界面通过 MyGO 调用 Go 方法。产品运行时不启动 Node 或 Electron，也不携带 Chromium。
 
 ## 生成和运行
@@ -57,6 +59,6 @@ $env:REQFLOW_DATA_DIR = 'E:\Program Files\reqflow-data\AppData\Roaming\ReqFlow'
 
 `check:mygo:ui` 将原 SQLite 以只读连接备份到随机临时目录，再测试真实 WebView 与 Go 桥；报告只记录版本、数量与成功状态，不保存 AI 密钥。测试结束清理副本。`installer-check` 编译真实 NSIS 分支，并在隔离安装沙盒验证旧组件清理、数据保留、junction 避让和运行中进程保护；不触碰真实安装目录或注册表。
 
-`node scripts/publish.mjs` 仍使用当前 package.json 版本，现只构建并上传 Go 安装版、Go 绿色版和 SHA256。版本校验读取 Go 构建标记/打包清单/PE 版本和哈希，拒绝旧 Electron 包。可以先运行 `npm run release:github -- --dry-run`；本轮未执行 Git 提交、推送或 GitHub 上传。
+`node scripts/publish.mjs` 仍使用当前 package.json 版本，现只打包并上传 Go 安装版、SHA256 和 update.json。版本校验读取 Go 构建标记/打包清单/PE 版本和哈希，拒绝旧 Electron 包。可以先运行 `npm run release:github -- --dry-run`；本轮未执行 Git 提交、推送或 GitHub 上传。
 
 源码：`src/mygo/backendgo/` 为完整 Go 后端，`src/mygo/main.go`/`native.go` 为桌面宿主；`src/renderer/` 保留 React 界面。旧 `src/main/` 仅作迁移参照，不参与新版运行包。

@@ -930,6 +930,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .local-agent-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
 .local-agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
 .local-agent-card code { overflow-wrap: anywhere; }
+/* REQ-213：Local Agent 主动检测的状态行与可用更新数提示 */
+.local-agent-card .agent-status { margin: 0 0 6px; font-size: 13px; color: var(--ink); line-height: 1.5; }
+.agent-detect-status { margin-bottom: 12px; }
+.settings-tabs button .tab-badge { margin-left: 6px; padding: 0 7px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; line-height: 17px; display: inline-block; vertical-align: 1px; }
+.settings-tabs button.on .tab-badge { background: var(--accent-dark); }
 
 .help-panel > .settings-tabs { margin: 0 24px; padding-top: 16px; padding-bottom: 16px; gap: 12px; flex-shrink: 0; }
 .local-agent-body > .settings-actions { margin-bottom: 16px; }

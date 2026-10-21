@@ -242,7 +242,9 @@ func maximizeTerminalCheck(ctx context.Context, child *mygo.Window) any {
 }
 
 func smokeUI(w *mygo.Window, path string, native *nativeHost) {
-	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	// The smoke script grew with the terminal checks; keep one deadline for all stages
+	// so slower machines still reach the compact and surface layouts.
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	versionJSON, _ := json.Marshal(appVersion)
 	script := strings.ReplaceAll(uiSmokeScript, "__REQFLOW_VERSION__", string(versionJSON))

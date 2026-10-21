@@ -48,6 +48,10 @@ export interface ReqFlowBridge {
   writeAgent?(runId: string, input: string): Promise<{ ok: boolean; error?: string }>;
   resizeAgent?(runId: string, cols: number, rows: number): Promise<{ ok: boolean; error?: string }>;
   stopAgent?(runId: string): Promise<{ ok: boolean; error?: string }>;
+  /** 指派终端最大化：在独立窗口打开同一个交互会话，与发布终端一致。 */
+  openAgentTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
+  closeAgentTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
+  agentTerminalStatus?(runId: string): Promise<{ ok: boolean; detached?: boolean; error?: string }>;
   getTerminalSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveTerminalSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
   /** 实验室「指派」开关（REQ-207）：开启后「提交验证」弹窗才会显示指派浮层。 */

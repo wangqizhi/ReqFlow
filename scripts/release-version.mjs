@@ -45,7 +45,7 @@ export async function verifyReleaseVersion(root, version) {
   const manifestFile = path.join(root, 'release', `packaging-manifest-${version}.json`);
   if (!existsSync(manifestFile)) throw Error('缺少 Go 打包清单，请运行 npm run dist');
   const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
-  const names = ['Setup', 'Portable'].map(kind => `ReqFlow-${kind}-${version}.exe`);
+  const names = [`ReqFlow-Setup-${version}.exe`];
   if (manifest.version !== version || manifest.backend !== 'go' || manifest.runtime !== 'mygo' ||
       manifest.executable?.path !== 'win-unpacked/ReqFlow.exe' || manifest.executable?.sha256 !== executableHash ||
       JSON.stringify(Object.keys(manifest.assets || {}).sort()) !== JSON.stringify([...names].sort()) ||
@@ -56,7 +56,6 @@ export async function verifyReleaseVersion(root, version) {
     const file = path.join(root, 'release', name);
     if (digest(file) !== manifest.assets[name].sha256 || readFileSync(file).length !== manifest.assets[name].size) throw Error(`Go 产物与打包清单不一致：${name}`);
   }
-  if (manifest.assets[names[1]].sha256 !== executableHash) throw Error('绿色版必须与 Go 程序完全一致');
   if (process.platform === 'win32') {
     const executables = [executable, ...names.map(name => path.join(root, 'release', name))];
     const literals = executables.map(file => `'${file.replaceAll("'", "''")}'`).join(',');
@@ -64,8 +63,8 @@ export async function verifyReleaseVersion(root, version) {
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true });
     if (result.error || result.status !== 0) throw Error(`无法读取安装包内部版本：${result.error?.message || result.stderr.trim()}`);
     const versions = JSON.parse(result.stdout.trim());
-    if (!Array.isArray(versions) || versions.length !== 3 || versions.some(value => value !== version && value !== `${version}.0`)) {
-      throw Error(`安装版/便携版内部版本 ${JSON.stringify(versions)} 与发布版本 ${version} 不一致`);
+    if (!Array.isArray(versions) || versions.length !== executables.length || versions.some(value => value !== version && value !== `${version}.0`)) {
+      throw Error(`安装版内部版本 ${JSON.stringify(versions)} 与发布版本 ${version} 不一致`);
     }
   }
   return version;

@@ -8,8 +8,9 @@
 //
 // 依赖：Node >= 22；项目根目录已执行 npm install；GitHub CLI 已通过 gh auth login 登录。
 // 打包后自动提交工作区变更、推送当前分支及版本标签，再上传 GitHub Release。
-// 产物：安装包与便携版输出到 release/；上传仓库读取 Git origin。
+// 产物：安装包输出到 release/；上传仓库读取 Git origin。
 import { prepareReleaseVersion } from './release-version.mjs';
+import { backupPreviousReleases } from './release-backup.mjs';
 import { startStep, traceStep } from './release-trace.mjs';
 import { checkReleasePublished, releaseNotes } from './release-github.mjs';
 import { spawnSync } from 'node:child_process';
@@ -59,11 +60,14 @@ const run = (stage, cmd, args) => {
   }
 };
 
+const archived = traceStep('归档前两个版本产物', () => backupPreviousReleases(root, version));
+console.log(`已归档 ${archived.files.length} 个文件到 release/backup（前两个版本：${archived.versions.join(', ') || '无'}）`);
+
 run('构建代码', 'npm', ['run', 'build']);
-run('打包 Windows 安装版与便携版', 'npm', ['run', 'dist']);
+run('打包 Windows 安装版', 'npm', ['run', 'dist']);
 
 const release = path.join(root, 'release');
-const artifacts = ['Setup', 'Portable'].map(kind => `ReqFlow-${kind}-${version}.exe`);
+const artifacts = [`ReqFlow-Setup-${version}.exe`];
 console.log(`\n打包完成，产物位于 release/（ReqFlow v${version}）：`);
 for (const file of artifacts) console.log('  ' + path.join(release, file));
 

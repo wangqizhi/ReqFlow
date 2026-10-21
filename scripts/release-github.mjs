@@ -68,7 +68,7 @@ export async function releaseNotes(version, filename, directory = root) {
 export function checkReleasePublished(version) {
   const repo = releaseRepository();
   const tag = `v${version}`;
-  const expected = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`, `SHA256SUMS-${version}.txt`, 'update.json'];
+  const expected = [`ReqFlow-Setup-${version}.exe`, `SHA256SUMS-${version}.txt`, 'update.json'];
   const result = gh(['release', 'view', tag, '--repo', repo, '--json', 'isDraft,assets'], { capture: true, allowFailure: true });
   if (result.status !== 0 && !/release not found/i.test(result.stderr)) {
     throw Error(`无法查询 GitHub Release：${result.stderr.trim() || `退出码 ${result.status}`}。请检查 gh auth login 与网络后重试`);
@@ -103,7 +103,7 @@ async function main() {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw Error('仓库格式应为 owner/repo');
   if (repo.toLowerCase() !== originRepo.toLowerCase()) throw Error('--repo 必须与 Git origin 仓库一致，以确保标签与源码匹配');
   const tag = `v${version}`;
-  const names = [`ReqFlow-Setup-${version}.exe`, `ReqFlow-Portable-${version}.exe`];
+  const names = [`ReqFlow-Setup-${version}.exe`];
   const assets = names.map(name => path.join(root, 'release', name));
   for (const file of assets) {
     const info = await stat(file).catch(() => null);
@@ -116,7 +116,7 @@ async function main() {
     } finally { await handle.close(); }
   }
   await traceStep('检查发布版本一致性', () => verifyReleaseVersion(root, version));
-  console.log(`版本一致性检查通过：源码、锁文件、Go 程序、安装版、绿色版均为 ${version}；Go 构建/打包清单 SHA256 已核验`);
+  console.log(`版本一致性检查通过：源码、锁文件、Go 程序、安装版均为 ${version}；Go 构建/打包清单 SHA256 已核验`);
   const sums = (await traceStep('计算安装包 SHA256', () => Promise.all(assets.map(async (file, i) => `${await hash(file)}  ${names[i]}`)))).join('\n') + '\n';
   const sumsFile = path.join(root, 'release', `SHA256SUMS-${version}.txt`);
   // Public static metadata lets desktop clients update without GitHub API or credentials.

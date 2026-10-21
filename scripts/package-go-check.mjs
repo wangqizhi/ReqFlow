@@ -149,17 +149,19 @@ SectionEnd
   await copyFile(app, path.join(releaseDir, 'win-unpacked/ReqFlow.exe'));
   await copyFile(infoFile, path.join(releaseDir, 'win-unpacked/build-info.json'));
   await copyFile(setup, path.join(releaseDir, `ReqFlow-Setup-${version}.exe`));
-  await copyFile(app, path.join(releaseDir, `ReqFlow-Portable-${version}.exe`));
   const assets = {};
-  for (const kind of ['Setup', 'Portable']) {
+  for (const kind of ['Setup']) {
     const name = `ReqFlow-${kind}-${version}.exe`;
     assets[name] = { sha256: await sha256(path.join(releaseDir, name)), size: (await stat(path.join(releaseDir, name))).size };
   }
   await put(releaseDir, `packaging-manifest-${version}.json`, JSON.stringify({ version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: appHash }, assets, cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true } }));
   assert.equal(await verifyReleaseVersion(fixtureRoot, version), version);
-  await put(releaseDir, `ReqFlow-Portable-${version}.exe`, 'MZ OLD ELECTRON ARTIFACT');
+  // A stale portable file is ignored; only the installer is a release asset.
+  await put(releaseDir, `ReqFlow-Portable-${version}.exe`, 'stale portable');
+  assert.equal(await verifyReleaseVersion(fixtureRoot, version), version);
+  await put(releaseDir, `ReqFlow-Setup-${version}.exe`, 'MZ OLD ELECTRON ARTIFACT');
   await assert.rejects(verifyReleaseVersion(fixtureRoot, version), /产物与打包清单不一致/);
-  await copyFile(app, path.join(releaseDir, `ReqFlow-Portable-${version}.exe`));
+  await copyFile(setup, path.join(releaseDir, `ReqFlow-Setup-${version}.exe`));
   await put(releaseDir, 'win-unpacked/resources/app.asar', 'old Electron');
   await assert.rejects(verifyReleaseVersion(fixtureRoot, version), /多余运行库/);
   console.log('PASS: PE product versions match 2.0.0; Go manifest/hash checks reject substituted Electron assets and stale runtime directories');

@@ -281,8 +281,18 @@
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
     // REQ-169：统计移到侧栏，实验室不再显示；检查日历筛选和键盘导航。
+    // REQ-213：打开面板即主动检测 Agent 安装状态与版本，不点击检测按钮。
+    const probe = { calls: 0 };
+    const detectApi = window.reqflow?.detectLocalAgents;
+    if (typeof detectApi === 'function') window.reqflow.detectLocalAgents = (...args) => { probe.calls += 1; return detectApi.apply(window.reqflow, args); };
     await click(button('插件/MOD/AGENT'));
     await waitFor(() => !!document.querySelector('[aria-label="插件/MOD/AGENT"]'));
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent.startsWith('Local Agent')));
+    const detectStatus = document.querySelector('[role="status"].agent-detect-status')?.textContent || '';
+    const detectAlert = [...document.querySelectorAll('.local-agent-body [role="alert"]')].map(el => el.textContent).join(' · ');
+    checks.localAgentAutoDetect = { ok: probe.calls > 0 && detectStatus !== '' && (detectStatus !== '尚未检测' || detectAlert !== ''), calls: probe.calls, status: detectStatus, alert: detectAlert };
+    if (typeof detectApi === 'function') window.reqflow.detectLocalAgents = detectApi;
     await click([...document.querySelectorAll('.settings-tabs button')].find(el => el.textContent === '实验室'));
     checks.statsMoved = { ok: !document.querySelector('.stats-panel') };
     await click(document.querySelector('[aria-label="关闭插件/MOD/AGENT"]'));

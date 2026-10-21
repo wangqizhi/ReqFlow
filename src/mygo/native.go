@@ -99,10 +99,16 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 					if len(args) > 1 {
 						project, _ = args[1].(string)
 					}
+					// Extra query is already URL-encoded by the backend; interactive
+					// Agent sessions use it to tell the window which terminal to render.
+					extra := ""
+					if len(args) > 2 {
+						extra, _ = args[2].(string)
+					}
 					area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
 					target = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal · " + project, Width: 1000, Height: 500, MinWidth: 480, MinHeight: 240,
 						X: area.X + (area.Width-1000)/2, Y: area.Y + (area.Height-500)/2,
-						URL: "/?terminal=" + url.QueryEscape(id), BackgroundColor: "#1c1917", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+						URL: "/?terminal=" + url.QueryEscape(id) + extra, BackgroundColor: "#1c1917", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
 					n.terminals[id] = target
 					ready := make(chan struct{})
 					n.terminalReady[id] = ready

@@ -1,4 +1,4 @@
-// Validate the actual shipped Go PE and portable PE in isolated data folders.
+// Validate the actual shipped Go PE in isolated data folders.
 import { mkdtemp, readFile, stat, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -11,7 +11,7 @@ const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8
 await verifyReleaseVersion(root, version);
 const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-cli-'));
 try {
-  const executables = [path.join(root, 'release/win-unpacked/ReqFlow.exe'), path.join(root, 'release', `ReqFlow-Portable-${version}.exe`)];
+  const executables = [path.join(root, 'release/win-unpacked/ReqFlow.exe')];
   for (const [index, executable] of executables.entries()) {
     const data = path.join(temp, `data-${index}`);
     const invoke = async args => {
@@ -34,7 +34,14 @@ try {
   assert.equal(preview.status, 0, preview.stderr || preview.stdout);
   assert.match(preview.stdout, /Go 构建\/打包清单 SHA256 已核验/);
   assert.match(preview.stdout, /预览完成；未上传/);
-  console.log('PASS: release dry-run verifies only Go Setup/Portable/hash assets, without uploads or Git writes');
+  const attachments = preview.stdout.split('\n').find(line => line.startsWith('附件：'));
+  assert.ok(attachments, 'release preview lists attachments');
+  assert.ok(!attachments.includes('Portable'), 'stale portable files must not be uploaded');
+  const manifest = JSON.parse(await readFile(path.join(root, 'release', `packaging-manifest-${version}.json`), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.assets), [`ReqFlow-Setup-${version}.exe`]);
+  const sums = await readFile(path.join(root, 'release', `SHA256SUMS-${version}.txt`), 'utf8');
+  assert.ok(!sums.includes('Portable'), 'checksums only describe published artifacts');
+  console.log('PASS: release dry-run verifies only Go Setup/hash assets, without uploads or Git writes');
 } finally {
   assert.ok(path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep));
   await rm(temp, { recursive: true, force: true });

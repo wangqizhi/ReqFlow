@@ -1,5 +1,5 @@
 // Ship only the verified Go executable. NSIS is a packaging tool, never a runtime.
-import { readFile, writeFile, copyFile, mkdir, stat, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, stat, mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -52,7 +52,6 @@ export async function packageMyGO() {
   if (info.version !== version || info.backend !== 'go' || info.runtime !== 'mygo' || info.sha256 !== sourceHash) throw Error('Go 构建信息或哈希不匹配，请先 npm run build');
   const release = path.join(root, 'release');
   const setupName = `ReqFlow-Setup-${version}.exe`;
-  const portableName = `ReqFlow-Portable-${version}.exe`;
   const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-'));
   try {
     const include = path.join(temp, 'legacy-cleanup.nsh');
@@ -62,18 +61,14 @@ export async function packageMyGO() {
       `/DAPP_SOURCE=${source}`, `/DAPP_BUILD_INFO=${path.join(release, 'win-unpacked/build-info.json')}`,
       `/DAPP_ICON=${path.join(root, 'build/icon.ico')}`, `/DAPP_OUTPUT=${path.join(release, setupName)}`,
       `/DLEGACY_CLEANUP_INCLUDE=${include}`, path.join(root, 'build/installer-go.nsi')]);
-    // A portable app is the same Go PE; no extraction directory or bundled runtime.
-    await copyFile(source, path.join(release, portableName));
     const assets = {};
-    for (const name of [setupName, portableName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };
+    for (const name of [setupName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };
     await writeFile(path.join(release, `packaging-manifest-${version}.json`), JSON.stringify({
       version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: sourceHash }, assets,
       cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true, files: legacyRuntimeFiles }
     }, null, 2) + '\n');
     await writeFile(path.join(release, `SHA256SUMS-${version}.txt`), Object.entries(assets).map(([name, value]) => `${value.sha256}  ${name}`).join('\n') + '\n');
-    await writeFile(path.join(release, `README-Portable-${version}.txt`),
-      `ReqFlow ${version} — Windows x64\r\n\r\n运行 ${portableName}。程序不包含 Node 或 Electron，需系统 WebView2 Runtime。\r\n便携版默认数据为 EXE 同级 data 文件夹；可用 REQFLOW_DATA_DIR 或 --data-dir 显式指定旧数据目录。\r\n安装版升级会保留 data-dir.cfg、注册表 DataDir、用户配置与数据，仅清理明确的旧运行库组件。\r\n`, 'utf8');
-    console.log(`已生成 Go 安装版与绿色版：\n${path.join(release, setupName)}\n${path.join(release, portableName)}`);
+    console.log(`已生成 Go 安装版：\n${path.join(release, setupName)}`);
   } finally {
     if (!path.resolve(temp).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw Error('Invalid packaging temp directory');
     await rm(temp, { recursive: true, force: true });
