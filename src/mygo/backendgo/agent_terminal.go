@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,7 +36,7 @@ type agentRun struct {
 	control   sync.Mutex
 	pty       agentPTY
 	project   string
-	item      string
+	items     []string
 	agent     string
 	output    []byte
 	total     int64
@@ -74,17 +76,16 @@ func (r *agentRun) collect() {
 	}
 }
 
-// ids is an array so a future batch assignment can reuse the same contract.
-// This experiment deliberately accepts one requirement per interactive session.
+// One interactive session receives a combined prompt for all selected requirements.
 func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
 		if agent != "codex" && agent != "pi" {
-			return nil, errors.New("目前仅支持指派单条需求给 Codex 或 pi")
+			return nil, errors.New("目前仅支持指派给 Codex 或 pi")
 		}
-		if len(ids) != 1 {
-			return nil, errors.New("一次仅支持指派一条需求")
+		if len(ids) == 0 {
+			return nil, errors.New("请至少选择一条需求")
 		}
 		settings, err := desktopReadJSON(filepath.Join(b.DataDir, "local-agents.json"), map[string]any{})
 		if err != nil {
@@ -108,9 +109,18 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		if err != nil || !info.IsDir() || !filepath.IsAbs(root) {
 			return nil, errors.New("请关联有效的本地项目目录")
 		}
-		item := coreFind(coreList(p["items"]), ids[0])
-		if item == nil || coreExecutor(item) != "ai" || ActiveAIExecution(item) != nil || ScheduledBatch(p, item) == nil || coreTruthy(item["archived"]) || !coreIn(coreString(item["status"]), "ready", "in_progress") {
-			return nil, errors.New("需求不可指派，请刷新排期状态")
+		items := []any{}
+		itemIDs := []string{}
+		labels := []string{}
+		for _, value := range ids {
+			id := coreString(value)
+			item := coreFind(coreList(p["items"]), value)
+			if slices.Contains(itemIDs, id) || item == nil || coreExecutor(item) != "ai" || ActiveAIExecution(item) != nil || ScheduledBatch(p, item) == nil || coreTruthy(item["archived"]) || !coreIn(coreString(item["status"]), "ready", "in_progress") {
+				return nil, errors.New("需求不可指派，请刷新排期状态")
+			}
+			items = append(items, item)
+			itemIDs = append(itemIDs, id)
+			labels = append(labels, coreString(item["number"])+"（需求 ID："+id+"）")
 		}
 		b.agentMu.Lock()
 		defer b.agentMu.Unlock()
@@ -122,19 +132,26 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			done := r.done
 			r.mu.Unlock()
 			if r.project == project && !done {
-				if r.item == coreString(ids[0]) {
+				if len(r.items) == len(itemIDs) && func() bool {
+					for _, id := range itemIDs {
+						if !slices.Contains(r.items, id) {
+							return false
+						}
+					}
+					return true
+				}() {
 					return desktopOK(map[string]any{"runId": id, "agent": r.agent}), nil
 				}
 				return nil, errors.New("此项目已有 " + agentTerminalLabel(r.agent) + " 会话，请先完成或停止当前会话")
 			}
 		}
-		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行 %s（需求 ID：%s），其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", coreString(item["number"]), coreString(item["id"]), BuildPrompt(p, []any{item}))
+		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 %d 条需求：%s，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", len(items), strings.Join(labels, "、"), BuildPrompt(p, items))
 		pty, err := startAgentPTY(root, agent, prompt)
 		if err != nil {
 			return nil, err
 		}
 		id := coreUUID()
-		r := &agentRun{pty: pty, project: project, item: coreString(ids[0]), agent: agent}
+		r := &agentRun{pty: pty, project: project, items: itemIDs, agent: agent}
 		b.agentRuns[id] = r
 		drained := make(chan struct{})
 		go func() { defer close(drained); r.collect() }()

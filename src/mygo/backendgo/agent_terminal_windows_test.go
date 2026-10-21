@@ -13,7 +13,7 @@ import (
 
 // Exercise the real ConPTY + PowerShell bridge with a local CLI fixture. This
 // never contacts Codex or pi and starts no other Agent against the repository.
-func runInteractiveAgentTerminal(t *testing.T, agent string, wantArgs []string) {
+func runInteractiveAgentTerminal(t *testing.T, agent string, wantArgs []string, batch bool) {
 	root, bin := t.TempDir(), t.TempDir()
 	script := `[Console]::WriteLine('cwd:'+(Get-Location).Path)
 [Console]::WriteLine('args:'+($args -join '|'))
@@ -42,7 +42,18 @@ $value=Read-Host 'message'
 	item := coreMap(coreList(p["items"])[0])
 	mutate(map[string]any{"op": "item", "body": "excluded-task", "title": "other"})
 	mutate(map[string]any{"op": "generate", "ids": []any{item["id"]}})
-	args := []any{pid, agent, []any{item["id"]}}
+	ids := []any{item["id"]}
+	if batch {
+		p = mutate(map[string]any{"op": "item", "body": "second-selected-task", "title": "second"})
+		for _, value := range coreList(p["items"]) {
+			second := coreMap(value)
+			if coreString(second["title"]) == "second" {
+				ids = append(ids, second["id"])
+			}
+		}
+		mutate(map[string]any{"op": "generate", "ids": ids})
+	}
+	args := []any{pid, agent, ids}
 	if _, err := b.desktopAgent("agent:start", args); err == nil {
 		t.Fatal("disabled lab allowed")
 	}
@@ -53,7 +64,7 @@ $value=Read-Host 'message'
 		t.Fatal("unsupported agent accepted")
 	}
 	if _, err := b.desktopAgent("agent:start", []any{pid, agent, []any{item["id"], item["id"]}}); err == nil {
-		t.Fatal("batch experiment accepted")
+		t.Fatal("duplicate requirement accepted")
 	}
 	value, err := b.desktopAgent("agent:start", args)
 	if err != nil {
@@ -94,6 +105,9 @@ $value=Read-Host 'message'
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
 	}
+	if batch && !strings.Contains(output, "second-selected-task") {
+		t.Fatal("combined prompt missing second requirement", output)
+	}
 	if strings.Contains(output, "excluded-task") {
 		t.Fatal(output)
 	}
@@ -116,11 +130,17 @@ $value=Read-Host 'message'
 
 func TestInteractiveCodexTerminal(t *testing.T) {
 	// REQ-205：指派 Codex 以完全控制模式启动，绕过沙箱权限限制。
-	runInteractiveAgentTerminal(t, "codex", []string{"--no-alt-screen", "--sandbox", "danger-full-access"})
+	runInteractiveAgentTerminal(t, "codex", []string{"--no-alt-screen", "--sandbox", "danger-full-access"}, false)
 }
 
 func TestInteractivePiTerminal(t *testing.T) {
 	// REQ-206：pi 与 Codex 使用同样的交互终端指派；--approve 自动信任项目目录，
 	// 启动不再停在文件夹信任确认上。
-	runInteractiveAgentTerminal(t, "pi", []string{"--approve"})
+	runInteractiveAgentTerminal(t, "pi", []string{"--approve"}, false)
+}
+
+func TestInteractiveBatchAgentTerminal(t *testing.T) {
+	for _, agent := range []string{"codex", "pi"} {
+		t.Run(agent, func(t *testing.T) { runInteractiveAgentTerminal(t, agent, nil, true) })
+	}
 }

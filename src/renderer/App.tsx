@@ -65,7 +65,7 @@ export default function App() {
     });
   }
   // REQ-205：指派 Agent 的交互终端会话；item 为正在执行的需求，needsInput 表示终端可能在等待输入
-  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean; item: string; agent: string; startedAt: number; needsInput?: boolean; done?: boolean }>>({});
+  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean; items: string[]; agent: string; startedAt: number; needsInput?: boolean; done?: boolean }>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
   const [releaseItem, setReleaseItem] = useState<Item | null>(null);
   const [archiveView, setArchiveView] = useState('items');
@@ -219,7 +219,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [publishConfirm, publishing]);
-  const [completeConfirm, setCompleteConfirm] = useState<{ project: string; items: { id: string; version: number; number: string }[] } | null>(null);
+  const [completeConfirm, setCompleteConfirm] = useState<{ project: string; bulk?: boolean; items: { id: string; version: number; number: string }[] } | null>(null);
   const completingRef = useRef(false);
   const [completing, setCompleting] = useState(false);
   useEffect(() => {
@@ -536,16 +536,16 @@ export default function App() {
   }
 
   // REQ-205/206：在提交验证弹窗指派 Codex / pi，交互终端立即执行这条需求并进入「执行中」
-  async function startAgentSession(item: Item, agent: string) {
+  async function startAgentSession(items: { id: string }[], agent: string) {
     if (!p || codexBusy) return;
     const projectId = p.id;
     setCodexBusy(true);
     try {
-      const result = await bridge.startAgent?.(projectId, agent, [item.id]);
+      const result = await bridge.startAgent?.(projectId, agent, items.map(item => item.id));
       if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
       // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
       const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
-      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, item: item.id, agent: actual, startedAt: Date.now() } }));
+      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
       setCompleteConfirm(null);
       setTab('executing');
       notify('已在终端启动 ' + agentName(actual) + '，需求进入执行中');
@@ -600,7 +600,7 @@ export default function App() {
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
   // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
   const agentSession = agentSessions[p?.id || ''];
-  const executing = (i: Item) => !!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.item === i.id);
+  const executing = (i: Item) => !!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.items.includes(i.id));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
@@ -640,12 +640,12 @@ export default function App() {
     if (!p) return;
     const session = agentSessions[p.id];
     if (!session || session.done || agentClosedRef.current.has(session.runId)) return;
-    const item = p.items.find(i => i.id === session.item);
-    if (item && !item.archived && item.status !== 'pending_verification') return;
+    const remaining = p.items.filter(i => session.items.includes(i.id) && !i.archived && i.status !== 'pending_verification');
+    if (remaining.length) return;
     agentClosedRef.current.add(session.runId);
     void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
     setAgentSessions(s => { const next = { ...s }; delete next[p.id]; return next; });
-    notify(item ? item.number + ' 已完成，' + agentName(session.agent) + ' 终端已自动关闭' : '需求已移除，' + agentName(session.agent) + ' 终端已自动关闭');
+    notify('本次指派需求已全部完成或移除，' + agentName(session.agent) + ' 终端已自动关闭');
   }, [data, agentSessions, p?.id]);
   const shownPhases: [string, string][] = executingItems.length ? [...phases.slice(0, 2), ['executing', '执行中'], ...phases.slice(2)] : phases;
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
@@ -708,7 +708,7 @@ export default function App() {
   }
 
   async function completeBatch() {
-    if (inProgress.length) setCompleteConfirm({ project: p!.id, items: inProgress.map(({ id, version, number }) => ({ id, version, number })) });
+    if (inProgress.length) setCompleteConfirm({ project: p!.id, bulk: true, items: inProgress.map(({ id, version, number }) => ({ id, version, number })) });
   }
   // 指派 / 取消指派（恢复默认 AI 执行）都在提交验证弹窗内完成，不关闭弹窗
   async function assignItems(ids: string[], executor: string) {
@@ -1120,7 +1120,7 @@ export default function App() {
                         <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
                         <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, executionClock) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
                       </div>}
-                      {!activeAIExecution(i) && !!agentSession && !agentSession.done && agentSession.item === i.id && <div className="execution-info">
+                      {!activeAIExecution(i) && !!agentSession && !agentSession.done && agentSession.items.includes(i.id) && <div className="execution-info">
                         <strong>{agentName(agentSession.agent)} 终端执行中{agentSession.needsInput ? ' · 可能等待输入' : ''}</strong>
                         <span>开始 {new Date(agentSession.startedAt).toLocaleString('zh-CN')}</span>
                         <span>已执行 {executionDuration(new Date(agentSession.startedAt).toISOString(), executionClock)}</span>
@@ -1235,7 +1235,7 @@ export default function App() {
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
-        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? '，或在下方逐条指派 Agent 在交互终端执行。' : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
+        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? (completeConfirm.bulk ? '，或合并 Prompt 统一指派 Agent 执行。' : '，或在下方指派 Agent 在交互终端执行。') : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
             {completeConfirm.items.map((item) => {
               const fresh = p?.items.find((i) => i.id === item.id);
@@ -1247,12 +1247,12 @@ export default function App() {
                     {fresh?.title && <span className="assign-title" title={fresh.title}>{fresh.title}</span>}
                     <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
                   </div>
-                  {assignEnabled && <div className="assign-row-actions">
+                  {assignEnabled && !completeConfirm.bulk && <div className="assign-row-actions">
                     {/* REQ-206/207：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中）；仅在实验室开启「指派」后显示 */}
                     {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
                       <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
                         title={'在项目目录启动 ' + agentName(id) + ' 交互终端执行这条需求，指派后立即进入「执行中」'}
-                        onClick={() => { if (fresh) void startAgentSession(fresh, id); }}>指派 {agentName(id)} 终端执行</button>
+                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} 终端执行</button>
                     ))}
                     {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
@@ -1268,8 +1268,14 @@ export default function App() {
               );
             })}
           </div>
+          {assignEnabled && completeConfirm.bulk && <div className="settings-actions">
+            {TERMINAL_AGENTS.filter(id => localAgents?.includes(id)).map(id => <button key={id} className="btn" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || completeConfirm.items.some(item => { const fresh = p?.items.find(i => i.id === item.id); return !fresh || (fresh.executor || 'ai') !== 'ai' || executing(fresh); })}
+              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} 终端执行</button>)}
+            {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>全部指派给 {agentName(id)}</button>)}
+            {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
+          </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {assignEnabled && !!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行这条需求；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
         </div></div>}

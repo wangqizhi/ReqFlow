@@ -63,7 +63,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         </section>
         <section>
           <div className="validation-setting"><h3>指派</h3><label className="switch"><input type="checkbox" aria-label="启用指派" checked={assignEnabled} onChange={async e => { try { await setAssignEnabled(e.target.checked); } catch { setLabError('无法保存指派设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{assignEnabled ? '已开启' : '已关闭'}</span></label></div>
-          <p className="settings-hint">开启后，排期表单条与整个列表的「提交验证」弹窗才会出现指派浮层，可逐条选择 Codex / pi 在交互终端执行；关闭时弹窗只有是否确认完成。</p>
+          <p className="settings-hint">开启后，排期表单条与整个列表的「提交验证」弹窗才会出现指派浮层，单条入口可独立指派，列表入口合并 Prompt 统一指派 Codex / pi 在交互终端执行；关闭时弹窗只有是否确认完成。</p>
         </section>
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
           <div className="validation-setting"><h3>{agent.name}</h3><label className="switch"><input type="checkbox" aria-label={'启用 ' + agent.name} checked={enabled.includes(agent.id)} disabled={busy || !loaded} onChange={e => void configure(agent.id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(agent.id) ? '已开启' : '已关闭'}</span></label></div>
