@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { bridge } from './api';
 
 // 已配置的 Local Agent（提交验证弹窗指派用）；每次 active 变为 true 时重新拉取，agents 为 null 表示尚未加载
@@ -20,6 +20,42 @@ export function useLocalAgents(active: boolean) {
     return () => { cancelled = true; window.removeEventListener('reqflow-agents-changed', refresh); window.removeEventListener('focus', refresh); };
   }, [active]);
   return { agents, error };
+}
+
+// 实验室「指派」开关（REQ-207）：关闭时「提交验证」弹窗只保留是否确认完成，不显示指派浮层。
+// 与 Terminal 开关一样保存在应用数据目录，重启后保持；浏览器预览退回 localStorage。
+const assignKey = 'reqflow-lab-assign';
+const assignEvent = 'reqflow-assign-changed';
+function readAssign() { try { return localStorage.getItem(assignKey) === 'true'; } catch { return false; } }
+function subscribeAssign(listener: () => void) {
+  window.addEventListener(assignEvent, listener);
+  window.addEventListener('storage', listener);
+  return () => { window.removeEventListener(assignEvent, listener); window.removeEventListener('storage', listener); };
+}
+let assignLoaded = false;
+let assignSaving = false;
+async function loadAssignSetting() {
+  if (assignLoaded || !bridge.getAssignSetting) return;
+  assignLoaded = true;
+  try {
+    const r = await bridge.getAssignSetting();
+    if (!r.ok) throw Error('读取指派设置失败');
+    if (assignSaving) return;
+    if (r.settings) localStorage.setItem(assignKey, String(r.settings.enabled));
+    else await bridge.saveAssignSetting?.(readAssign());
+    window.dispatchEvent(new Event(assignEvent));
+  } catch { assignLoaded = false; }
+}
+export function useAssignSetting(): [boolean, (enabled: boolean) => Promise<void>] {
+  useEffect(() => { void loadAssignSetting(); }, []);
+  const enabled = useSyncExternalStore(subscribeAssign, readAssign);
+  return [enabled, async value => {
+    assignSaving = true;
+    const result = await bridge.saveAssignSetting?.(value);
+    if (result && !result.ok) throw Error(result.error || '无法保存指派设置');
+    localStorage.setItem(assignKey, String(value));
+    window.dispatchEvent(new Event(assignEvent));
+  }];
 }
 
 export function agentName(id: string) {

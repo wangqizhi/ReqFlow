@@ -228,6 +228,22 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return desktopOK(map[string]any{"settings": value}), nil
+	case "lab:assign:get", "lab:assign:save":
+		file := filepath.Join(b.DataDir, "lab-assign.json")
+		if channel == "lab:assign:save" {
+			enabled, ok := desktopArg(args, 0).(bool)
+			if !ok {
+				return nil, errors.New("指派设置无效")
+			}
+			if e := desktopAtomicJSON(file, map[string]any{"enabled": enabled}); e != nil {
+				return nil, e
+			}
+		}
+		value, e := desktopReadJSON(file, nil)
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(map[string]any{"settings": value}), nil
 	case "context:settings:get":
 		return b.Workspace.contextSettings()
 	case "context:settings:save":

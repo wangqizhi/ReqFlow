@@ -50,6 +50,9 @@ export interface ReqFlowBridge {
   stopAgent?(runId: string): Promise<{ ok: boolean; error?: string }>;
   getTerminalSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveTerminalSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
+  /** 实验室「指派」开关（REQ-207）：开启后「提交验证」弹窗才会显示指派浮层。 */
+  getAssignSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
+  saveAssignSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
   getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
   saveContextSettings?(dir: string): Promise<{ ok: boolean; dir?: string; error?: string }>;
   listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;

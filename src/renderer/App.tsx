@@ -25,7 +25,7 @@ import { SSHDirectory, isSSH } from './ssh-directory';
 import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
 import { renderMarkdown } from './markdown';
 import { ContentWorkspace } from './content';
-import { executorLabel, useLocalAgents, agentName, TERMINAL_AGENTS } from './assignment';
+import { executorLabel, useLocalAgents, useAssignSetting, agentName, TERMINAL_AGENTS } from './assignment';
 import { ModsOverlay } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
@@ -228,8 +228,9 @@ export default function App() {
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [completeConfirm]);
-  // REQ-101/206：指派入口在提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
-  const { agents: localAgents } = useLocalAgents(!!completeConfirm);
+  // REQ-101/206/207：指派入口在提交验证弹窗，仅在弹窗打开且实验室开启「指派」时加载已配置的 Agent
+  const [assignEnabled] = useAssignSetting();
+  const { agents: localAgents } = useLocalAgents(!!completeConfirm && assignEnabled);
   const [codexBusy, setCodexBusy] = useState(false);
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
@@ -1234,7 +1235,7 @@ export default function App() {
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
-        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证。</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
+        <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? '，或在下方逐条指派 Agent 在交互终端执行。' : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
             {completeConfirm.items.map((item) => {
               const fresh = p?.items.find((i) => i.id === item.id);
@@ -1246,8 +1247,8 @@ export default function App() {
                     {fresh?.title && <span className="assign-title" title={fresh.title}>{fresh.title}</span>}
                     <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
                   </div>
-                  <div className="assign-row-actions">
-                    {/* REQ-206：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中） */}
+                  {assignEnabled && <div className="assign-row-actions">
+                    {/* REQ-206/207：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中）；仅在实验室开启「指派」后显示 */}
                     {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
                       <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
                         title={'在项目目录启动 ' + agentName(id) + ' 交互终端执行这条需求，指派后立即进入「执行中」'}
@@ -1262,14 +1263,15 @@ export default function App() {
                       <button className="btn sm" disabled={busy || completing} title="取消指派，恢复默认 AI 执行"
                         onClick={() => void assignItems([item.id], 'ai')}>取消指派</button>
                     )}
-                  </div>
+                  </div>}
                 </div>
               );
             })}
           </div>
-          {localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {!!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行这条需求；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
-          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button><button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button></div>
+          {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行这条需求；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi。</p>}
+          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="还有未验证的功能"

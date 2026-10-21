@@ -3,6 +3,8 @@ declare global { interface Window { mygo: { call<T = unknown>(method: string, ..
 const channels = {
   getTerminalSetting: 'lab:terminal:get',
   saveTerminalSetting: 'lab:terminal:save',
+  getAssignSetting: 'lab:assign:get',
+  saveAssignSetting: 'lab:assign:save',
   getContextSettings: 'context:settings:get',
   saveContextSettings: 'context:settings:save',
   listSSH: 'ssh:list',

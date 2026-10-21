@@ -3,7 +3,7 @@ import { bridge, type LocalAgent } from './api';
 import { useEffect, useState } from 'react';
 import { renderMarkdown } from './markdown';
 import { X, Layers, ExternalLink, Copy } from './icons';
-import { AGENT_MENTION } from './assignment';
+import { AGENT_MENTION, useAssignSetting } from './assignment';
 import { useTerminalSetting } from './publish-terminal';
 
 // 实验室：通过深链调起 Codex 窗口
@@ -13,6 +13,8 @@ const LAB_AGENTS = [
 
 export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { onClose(): void; initialTab?: string; projectDir?: string }) {
   const [terminalEnabled, setTerminalEnabled] = useTerminalSetting();
+  // REQ-207：实验室「指派」开关，控制「提交验证」弹窗是否显示指派浮层
+  const [assignEnabled, setAssignEnabled] = useAssignSetting();
   const [tab, setTab] = useState(initialTab), [enabled, setEnabled] = useState<string[]>([]), [agents, setAgents] = useState<LocalAgent[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
   const [labBusyId, setLabBusyId] = useState(''), [labStatus, setLabStatus] = useState(''), [labError, setLabError] = useState('');
   const [backend, setBackend] = useState(''), [migrating, setMigrating] = useState(false);
@@ -53,15 +55,19 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
     <section className="help-panel" role="dialog" aria-modal="true" aria-label="插件/MOD/AGENT">
       <header className="help-header"><div><h2><Layers /> 插件 / MOD / AGENT</h2><p>对接规范草案 · 尚未开放插件安装与运行功能</p></div><button className="icon-btn" aria-label="关闭插件/MOD/AGENT" onClick={onClose}><X /></button></header>
       <div className="settings-tabs" role="tablist">{[['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']].map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
-      {tab === 'agents' ? <div className="local-agent-body"><p className="settings-hint">配置后可以在「提交验证」弹窗中指派。当前只保存配置、检测安装与版本，执行接口预留。</p><div className="settings-actions"><button className="btn" disabled={busy || !bridge.detectLocalAgents} onClick={detect}>{busy ? '处理中…' : '检测安装 / 检查更新'}</button></div>{error && <p role="alert">{error}</p>}{[['opencode', 'OpenCode', 'opencode-ai'], ['pi', 'pi', '@earendil-works/pi-coding-agent']].map(([id, name, pkg]) => { const agent = agents.find(a => a.id === id); return <section className="local-agent-card" key={id}><div className="validation-setting"><h3>{name}</h3><label className="switch"><input type="checkbox" aria-label={'配置 ' + name} disabled={busy || !loaded} checked={enabled.includes(id)} onChange={e => configure(id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(id) ? '已配置' : '未配置'}</span></label></div><p>{agent ? (agent.installed ? '已安装 · ' + (agent.version || '版本未知') : '未检测到可用安装') : '尚未检测'}</p>{agent && <p className="settings-hint">{agent.latest ? '最新版本 ' + agent.latest + ' · ' + (agent.update === undefined ? '版本比较未知' : agent.update ? '有可用更新' : '无需更新') : agent.registryError}{agent.error && ' · ' + agent.error}</p>}<p className="settings-hint">安装 / 更新命令：<code>npm install -g {pkg}</code></p><p className="settings-hint">执行器标识：agent:{id} · 通过本机 PATH 检测 {id} --version</p></section>; })}<p className="settings-hint">接口约定：输入项目目录、需求 ID / 版本、批次 Prompt；输出执行状态、摘要与验证结果。pi 与 Codex 相同，可在「提交验证」弹窗指派到交互终端执行；OpenCode 预留 CLI / SDK 适配，任务启动、结果回写与取消尚未开放。</p><p className="settings-hint">插件可沿用说明页的协议；这里暂只支持 OpenCode、pi 本机配置。</p></div> : tab === 'lab' ? <div className="local-agent-body lab-body">
+      {tab === 'agents' ? <div className="local-agent-body"><p className="settings-hint">配置后可以在「提交验证」弹窗中指派（需先在实验室打开「指派」）。当前只保存配置、检测安装与版本，执行接口预留。</p><div className="settings-actions"><button className="btn" disabled={busy || !bridge.detectLocalAgents} onClick={detect}>{busy ? '处理中…' : '检测安装 / 检查更新'}</button></div>{error && <p role="alert">{error}</p>}{[['opencode', 'OpenCode', 'opencode-ai'], ['pi', 'pi', '@earendil-works/pi-coding-agent']].map(([id, name, pkg]) => { const agent = agents.find(a => a.id === id); return <section className="local-agent-card" key={id}><div className="validation-setting"><h3>{name}</h3><label className="switch"><input type="checkbox" aria-label={'配置 ' + name} disabled={busy || !loaded} checked={enabled.includes(id)} onChange={e => configure(id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(id) ? '已配置' : '未配置'}</span></label></div><p>{agent ? (agent.installed ? '已安装 · ' + (agent.version || '版本未知') : '未检测到可用安装') : '尚未检测'}</p>{agent && <p className="settings-hint">{agent.latest ? '最新版本 ' + agent.latest + ' · ' + (agent.update === undefined ? '版本比较未知' : agent.update ? '有可用更新' : '无需更新') : agent.registryError}{agent.error && ' · ' + agent.error}</p>}<p className="settings-hint">安装 / 更新命令：<code>npm install -g {pkg}</code></p><p className="settings-hint">执行器标识：agent:{id} · 通过本机 PATH 检测 {id} --version</p></section>; })}<p className="settings-hint">接口约定：输入项目目录、需求 ID / 版本、批次 Prompt；输出执行状态、摘要与验证结果。pi 与 Codex 相同，可在「提交验证」弹窗指派到交互终端执行（实验室打开「指派」后可用）；OpenCode 预留 CLI / SDK 适配，任务启动、结果回写与取消尚未开放。</p><p className="settings-hint">插件可沿用说明页的协议；这里暂只支持 OpenCode、pi 本机配置。</p></div> : tab === 'lab' ? <div className="local-agent-body lab-body">
         <div className="lab-target"><span>项目目录</span><code title={projectDir}>{projectDir || '当前项目未关联本地目录，请先在首页「浏览项目 / 关联目录」绑定'}</code></div>
         <section>
           <div className="validation-setting"><h3>Terminal</h3><label className="switch"><input type="checkbox" aria-label="启用 Terminal" checked={terminalEnabled} disabled={!bridge.getPublishOutput} onChange={async e => { try { await setTerminalEnabled(e.target.checked); } catch { setLabError('无法保存 Terminal 设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{terminalEnabled ? '已开启' : '已关闭'}</span></label></div>
             <p className="settings-hint">开启后立即显示终端，发布时实时显示脚本日志；可收起、重新打开或在独立窗口查看。指派 Codex / pi 时使用可交互的独立会话。</p>
         </section>
+        <section>
+          <div className="validation-setting"><h3>指派</h3><label className="switch"><input type="checkbox" aria-label="启用指派" checked={assignEnabled} onChange={async e => { try { await setAssignEnabled(e.target.checked); } catch { setLabError('无法保存指派设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{assignEnabled ? '已开启' : '已关闭'}</span></label></div>
+          <p className="settings-hint">开启后，排期表单条与整个列表的「提交验证」弹窗才会出现指派浮层，可逐条选择 Codex / pi 在交互终端执行；关闭时弹窗只有是否确认完成。</p>
+        </section>
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
           <div className="validation-setting"><h3>{agent.name}</h3><label className="switch"><input type="checkbox" aria-label={'启用 ' + agent.name} checked={enabled.includes(agent.id)} disabled={busy || !loaded} onChange={e => void configure(agent.id, e.target.checked)} /><span className="slider" /><span className="switch-state">{enabled.includes(agent.id) ? '已开启' : '已关闭'}</span></label></div>
-          <p className="settings-hint">开启后，「提交验证」弹窗可指派 Codex，在 Terminal 中以完全控制模式（--sandbox danger-full-access）执行单条需求并继续沟通。</p>
+          <p className="settings-hint">开启「指派」后，「提交验证」弹窗可指派 Codex，在 Terminal 中以完全控制模式（--sandbox danger-full-access）执行单条需求并继续沟通。</p>
           <div className="settings-actions">
             <button className="btn primary" disabled={labBusyId !== '' || !enabled.includes(agent.id) || !projectDir || !bridge.openCodexDeepLink}
               onClick={() => void openAgent(agent.id)}

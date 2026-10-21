@@ -208,6 +208,19 @@ func TestTerminalSettingSurvivesRestartAndSeparateTestData(t *testing.T) {
 	}
 }
 
+func TestAssignSettingSurvivesRestartAndSeparateTestData(t *testing.T) {
+	dir := t.TempDir()
+	app := NewBackend(dir, t.TempDir(), "test")
+	desktopTestCall(t, app, "lab:assign:save", true)
+	isolated := NewBackend(t.TempDir(), t.TempDir(), "test")
+	desktopTestCall(t, isolated, "lab:assign:save", false)
+	restarted := NewBackend(dir, t.TempDir(), "test")
+	r := desktopTestCall(t, restarted, "lab:assign:get")
+	if desktopMap(r["settings"])["enabled"] != true {
+		t.Fatal("isolated test or restart changed user's assign setting")
+	}
+}
+
 func TestDeleteContextRulesPersistsAndCanRegenerate(t *testing.T) {
 	dir := t.TempDir()
 	s := NewWorkspaceService(dir)
