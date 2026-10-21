@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type agentPTY interface {
@@ -16,19 +17,43 @@ type agentPTY interface {
 	Resize(int, int) error
 	Wait(context.Context) (uint32, error)
 }
+
+// agentTerminalLabel 是终端会话里展示的 Agent 名称；新增交互 Agent 时同步登记。
+func agentTerminalLabel(agent string) string {
+	if agent == "codex" {
+		return "Codex"
+	}
+	if agent == "pi" {
+		return "Pi"
+	}
+	return agent
+}
+
 type agentRun struct {
 	mu        sync.Mutex
 	control   sync.Mutex
 	pty       agentPTY
 	project   string
 	item      string
+	agent     string
 	output    []byte
 	total     int64
+	lastWrite int64 // 最近一次 PTY 输出的 Unix 毫秒；total 为 0 时无效
 	done      bool
 	closeOnce sync.Once
 }
 
 func (r *agentRun) close() { r.closeOnce.Do(func() { _ = r.pty.Close() }) }
+func (r *agentRun) idleMilliseconds(now int64) int64 {
+	if r.total <= 0 || r.lastWrite <= 0 {
+		return 0
+	}
+	idle := now - r.lastWrite
+	if idle < 0 {
+		return 0
+	}
+	return idle
+}
 func (r *agentRun) collect() {
 	buffer := make([]byte, 8192)
 	for {
@@ -37,6 +62,7 @@ func (r *agentRun) collect() {
 			r.mu.Lock()
 			r.output = append(r.output, buffer[:n]...)
 			r.total += int64(n)
+			r.lastWrite = time.Now().UnixMilli()
 			if len(r.output) > 2*1024*1024 {
 				r.output = append([]byte(nil), r.output[len(r.output)-2*1024*1024:]...)
 			}
@@ -54,8 +80,11 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
-		if agent != "codex" || len(ids) != 1 {
-			return nil, errors.New("目前仅支持指派单条需求给 Codex")
+		if agent != "codex" && agent != "pi" {
+			return nil, errors.New("目前仅支持指派单条需求给 Codex 或 pi")
+		}
+		if len(ids) != 1 {
+			return nil, errors.New("一次仅支持指派一条需求")
 		}
 		settings, err := desktopReadJSON(filepath.Join(b.DataDir, "local-agents.json"), map[string]any{})
 		if err != nil {
@@ -63,12 +92,12 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		}
 		enabled := false
 		for _, value := range desktopList(settings) {
-			if value == "codex" {
+			if value == agent {
 				enabled = true
 			}
 		}
 		if !enabled {
-			return nil, errors.New("请先在实验室开启 Codex")
+			return nil, errors.New("请先在实验室开启 " + agentTerminalLabel(agent))
 		}
 		p, err := b.desktopProject(project)
 		if err != nil {
@@ -94,18 +123,18 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			r.mu.Unlock()
 			if r.project == project && !done {
 				if r.item == coreString(ids[0]) {
-					return desktopOK(map[string]any{"runId": id}), nil
+					return desktopOK(map[string]any{"runId": id, "agent": r.agent}), nil
 				}
-				return nil, errors.New("此项目已有 Codex 会话，请先完成或停止当前会话")
+				return nil, errors.New("此项目已有 " + agentTerminalLabel(r.agent) + " 会话，请先完成或停止当前会话")
 			}
 		}
 		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行 %s（需求 ID：%s），其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", coreString(item["number"]), coreString(item["id"]), BuildPrompt(p, []any{item}))
-		pty, err := startAgentPTY(root, prompt)
+		pty, err := startAgentPTY(root, agent, prompt)
 		if err != nil {
 			return nil, err
 		}
 		id := coreUUID()
-		r := &agentRun{pty: pty, project: project, item: coreString(ids[0])}
+		r := &agentRun{pty: pty, project: project, item: coreString(ids[0]), agent: agent}
 		b.agentRuns[id] = r
 		drained := make(chan struct{})
 		go func() { defer close(drained); r.collect() }()
@@ -114,9 +143,9 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			r.close()
 			<-drained
 			r.mu.Lock()
-			message := fmt.Sprintf("\r\n[Codex 已退出，退出码 %d]\r\n", code)
+			message := fmt.Sprintf("\r\n[%s 已退出，退出码 %d]\r\n", agentTerminalLabel(agent), code)
 			if err != nil {
-				message = fmt.Sprintf("\r\n[Codex 会话结束：%v]\r\n", err)
+				message = fmt.Sprintf("\r\n[%s 会话结束：%v]\r\n", agentTerminalLabel(agent), err)
 			}
 			r.output = append(r.output, []byte(message)...)
 			r.total += int64(len(message))
@@ -140,7 +169,12 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		if offset < base || offset > r.total {
 			offset = base
 		}
-		return desktopOK(map[string]any{"data": base64.StdEncoding.EncodeToString(r.output[offset-base:]), "offset": r.total, "done": r.done, "truncated": truncated}), nil
+		return desktopOK(map[string]any{"data": base64.StdEncoding.EncodeToString(r.output[offset-base:]), "offset": r.total, "done": r.done, "truncated": truncated, "idleMs": r.idleMilliseconds(time.Now().UnixMilli())}), nil
+	}
+	if channel == "agent:status" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return desktopOK(map[string]any{"done": r.done, "idleMs": r.idleMilliseconds(time.Now().UnixMilli())}), nil
 	}
 	if channel == "agent:stop" {
 		go r.close()
@@ -152,7 +186,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	done := r.done
 	r.mu.Unlock()
 	if done {
-		return nil, errors.New("Codex 会话已结束")
+		return nil, errors.New(agentTerminalLabel(r.agent) + " 会话已结束")
 	}
 	switch channel {
 	case "agent:write":

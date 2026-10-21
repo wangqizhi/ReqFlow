@@ -32,6 +32,7 @@ const channels = {
   detectPublish: 'publish:detect',
   startAgent: 'agent:start',
   readAgent: 'agent:read',
+  agentStatus: 'agent:status',
   writeAgent: 'agent:write',
   resizeAgent: 'agent:resize',
   stopAgent: 'agent:stop',

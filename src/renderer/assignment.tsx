@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { bridge } from './api';
 
-// 已配置的 Local Agent（排期指派用）；每次 active 变为 true 时重新拉取，agents 为 null 表示尚未加载
+// 已配置的 Local Agent（提交验证弹窗指派用）；每次 active 变为 true 时重新拉取，agents 为 null 表示尚未加载
 export function useLocalAgents(active: boolean) {
   const [agents, setAgents] = useState<string[] | null>(null);
   const [error, setError] = useState('');
@@ -23,19 +23,14 @@ export function useLocalAgents(active: boolean) {
 }
 
 export function agentName(id: string) {
-  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id;
+  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id;
 }
+
+// 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持）
+export const TERMINAL_AGENTS = ['codex', 'pi'];
 
 // Codex 版插件引用（与 docs/reqflow-codex-plugin.md、mods.tsx 同源使用）
 export const AGENT_MENTION = '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)';
-
-export async function sendToCodex(projectDir: string, prompt: string) {
-  if (projectDir.startsWith('ssh://')) throw Error('远程项目暂不支持调起本机 Codex，请在远程环境中手动执行');
-  const url = 'codex://threads/new?path=' + encodeURIComponent(projectDir) + '&prompt=' + encodeURIComponent(prompt);
-  await navigator.clipboard.writeText(prompt);
-  const result = await bridge.openCodexDeepLink?.(url);
-  if (!result?.ok) throw Error(result?.error || '调起 Codex 仅桌面版可用');
-}
 
 // 执行方式显示名：agent:opencode → OpenCode，未知标识原样展示
 export function executorLabel(executor: string | undefined) {

@@ -8,7 +8,7 @@ import {
 } from '../core/domain';
 import { bridge, type PublishSession } from './api';
 import { publishProject } from './publish';
-import { AgentTerminal, PublishTerminal, useTerminalSetting } from './publish-terminal';
+import { AgentTerminal, PublishTerminal, useTerminalSetting, agentNeedsInput } from './publish-terminal';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
   Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff, BarChart
@@ -25,7 +25,7 @@ import { SSHDirectory, isSSH } from './ssh-directory';
 import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
 import { renderMarkdown } from './markdown';
 import { ContentWorkspace } from './content';
-import { executorLabel, useLocalAgents, agentName, sendToCodex } from './assignment';
+import { executorLabel, useLocalAgents, agentName, TERMINAL_AGENTS } from './assignment';
 import { ModsOverlay } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
@@ -64,8 +64,8 @@ export default function App() {
       return value;
     });
   }
-  const [assignItem, setAssignItem] = useState<Item | null>(null);
-  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean }>>({});
+  // REQ-205：指派 Agent 的交互终端会话；item 为正在执行的需求，needsInput 表示终端可能在等待输入
+  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean; item: string; agent: string; startedAt: number; needsInput?: boolean; done?: boolean }>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
   const [releaseItem, setReleaseItem] = useState<Item | null>(null);
   const [archiveView, setArchiveView] = useState('items');
@@ -228,8 +228,8 @@ export default function App() {
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [completeConfirm]);
-  // REQ-101：指派入口移入提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
-  const { agents: localAgents } = useLocalAgents(!!completeConfirm || tab === 'generate');
+  // REQ-101/206：指派入口在提交验证弹窗，仅在弹窗打开时加载已配置的 Agent
+  const { agents: localAgents } = useLocalAgents(!!completeConfirm);
   const [codexBusy, setCodexBusy] = useState(false);
   const [bodyOverflows, setBodyOverflows] = useState(false); // 需求说明超出输入框（REQ-074）
   const [bodyExpanded, setBodyExpanded] = useState(false); // 打开放大编辑需求说明的大输入框
@@ -534,26 +534,20 @@ export default function App() {
     }
   }
 
-  async function assignAgent(item: Item) {
+  // REQ-205/206：在提交验证弹窗指派 Codex / pi，交互终端立即执行这条需求并进入「执行中」
+  async function startAgentSession(item: Item, agent: string) {
     if (!p || codexBusy) return;
     const projectId = p.id;
     setCodexBusy(true);
     try {
-      const result = await bridge.startAgent?.(projectId, 'codex', [item.id]);
+      const result = await bridge.startAgent?.(projectId, agent, [item.id]);
       if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
-      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true } }));
-      setAssignItem(null);
-      notify('已在终端启动 Codex');
-    } catch (e: any) { notify(e.message, 'err'); }
-    finally { setCodexBusy(false); }
-  }
-
-  async function dispatchCodex(item: Item) {
-    if (!p?.dir || codexBusy) return;
-    setCodexBusy(true);
-    try {
-      await sendToCodex(p.dir, '[@ReqFlow Agent](plugin://reqflow-agent@reqflow-local)\n\n本轮只执行 ' + item.number + '（需求 ID：' + item.id + '），其他排期需求不属于本轮。');
-      notify('已调起 Codex，任务内容已复制');
+      // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
+      const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
+      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, item: item.id, agent: actual, startedAt: Date.now() } }));
+      setCompleteConfirm(null);
+      setTab('executing');
+      notify('已在终端启动 ' + agentName(actual) + '，需求进入执行中');
     } catch (e: any) { notify(e.message, 'err'); }
     finally { setCodexBusy(false); }
   }
@@ -603,12 +597,15 @@ export default function App() {
   }
 
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
-  const eligible = (i: Item) => !i.archived && !activeAIExecution(i) && (i.status === 'ready' || i.status === 'in_progress');
+  // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
+  const agentSession = agentSessions[p?.id || ''];
+  const executing = (i: Item) => !!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.item === i.id);
+  const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
-  const executingItems = (p?.items || []).filter(i => !!activeAIExecution(i));
-  const allInProgress = (p?.items || []).filter((i) => !i.archived && !activeAIExecution(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
+  const executingItems = (p?.items || []).filter(i => executing(i));
+  const allInProgress = (p?.items || []).filter((i) => !i.archived && !executing(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
   // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
   const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
   const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
@@ -619,10 +616,40 @@ export default function App() {
     const timer = window.setInterval(() => setExecutionClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [executingItems.length, tab]);
+  // REQ-205：终端收起后仍轮询会话状态；等待输入时在「执行中」页签红色提醒
+  useEffect(() => {
+    const collapsed = Object.entries(agentSessions).filter(([, s]) => !s.open && !s.done);
+    if (!collapsed.length || !bridge.agentStatus) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      for (const [projectId, session] of collapsed) {
+        void bridge.agentStatus!(session.runId).then(r => {
+          if (cancelled || !r?.ok) return;
+          setAgentSessions(previous => previous[projectId]?.runId === session.runId
+            ? { ...previous, [projectId]: { ...previous[projectId], needsInput: agentNeedsInput(r.done, r.idleMs), done: !!r.done } }
+            : previous);
+        }).catch(() => { /* 状态轮询失败时保持现状，下一轮重试 */ });
+      }
+    }, 3000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [agentSessions]);
+  // REQ-205：指派的需求转入待验证（或被归档 / 移除）后，自动停止并关闭对应终端会话
+  const agentClosedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!p) return;
+    const session = agentSessions[p.id];
+    if (!session || session.done || agentClosedRef.current.has(session.runId)) return;
+    const item = p.items.find(i => i.id === session.item);
+    if (item && !item.archived && item.status !== 'pending_verification') return;
+    agentClosedRef.current.add(session.runId);
+    void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
+    setAgentSessions(s => { const next = { ...s }; delete next[p.id]; return next; });
+    notify(item ? item.number + ' 已完成，' + agentName(session.agent) + ' 终端已自动关闭' : '需求已移除，' + agentName(session.agent) + ' 终端已自动关闭');
+  }, [data, agentSessions, p?.id]);
   const shownPhases: [string, string][] = executingItems.length ? [...phases.slice(0, 2), ['executing', '执行中'], ...phases.slice(2)] : phases;
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
-    (tab === 'executing' ? !!activeAIExecution(i) : tab === 'archived' ? !!i.archived
+    (tab === 'executing' ? executing(i) : tab === 'archived' ? !!i.archived
       : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledBatch(p!, i) : tab === 'generate' ? allInProgress.some(item => item.id === i.id) : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
     && (typeFilter === 'all' || i.type === typeFilter)
@@ -946,8 +973,11 @@ export default function App() {
           <section className="requirements">
             <div className="navtabs">
               {shownPhases.map(([v, l]) => (
-                <button key={v} className={'navtab' + (tab === v ? ' active' : '')} onClick={() => changeTab(v)}>
+                <button key={v} className={'navtab' + (tab === v ? ' active' : '')}
+                  title={v === 'executing' && agentSession?.needsInput && !agentSession.done ? 'Agent 终端可能正在等待输入，请打开终端处理交互' : undefined}
+                  onClick={() => changeTab(v)}>
                   {l}
+                  {v === 'executing' && agentSession?.needsInput && !agentSession.done && <i className="navtab-alert" role="img" aria-label="Agent 终端等待输入，请处理交互" />}
                   <span>{v === 'executing' ? executingItems.length : v === 'generate' ? allInProgress.length
                     : p!.items.filter((i) =>
                       v === 'archived' ? !!i.archived : !i.archived && (v === 'feature' ? i.status === 'ready' && !activeAIExecution(i) && !scheduledBatch(p!, i) : i.status === v)).length}</span>
@@ -1063,7 +1093,7 @@ export default function App() {
                         <code>{i.number}</code>
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
-                        <span className={'status ' + (activeAIExecution(i) ? 'executing' : i.status)}>{activeAIExecution(i) ? '执行中' : labels[i.status]}</span>
+                        <span className={'status ' + (executing(i) ? 'executing' : i.status)}>{executing(i) ? '执行中' : labels[i.status]}</span>
                         <span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement" title="全选时跳过，仍可手动勾选或单条排期">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
@@ -1089,8 +1119,15 @@ export default function App() {
                         <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
                         <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, executionClock) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
                       </div>}
+                      {!activeAIExecution(i) && !!agentSession && !agentSession.done && agentSession.item === i.id && <div className="execution-info">
+                        <strong>{agentName(agentSession.agent)} 终端执行中{agentSession.needsInput ? ' · 可能等待输入' : ''}</strong>
+                        <span>开始 {new Date(agentSession.startedAt).toLocaleString('zh-CN')}</span>
+                        <span>已执行 {executionDuration(new Date(agentSession.startedAt).toISOString(), executionClock)}</span>
+                      </div>}
                       <div className="next-step">
-                        {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。' : i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
+                        {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
+                          : executing(i) ? '已在 ' + agentName(agentSession!.agent) + ' 交互终端执行；可直接在终端输入沟通，完成后自动转入待验证并关闭终端。'
+                          : i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
                           : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回需求池重新编辑。'
                           : i.status === 'pending_verification' ? '验证完成后，直接记录通过或未通过。'
                           : '已归档，历史记录仍可查看。'}
@@ -1125,8 +1162,6 @@ export default function App() {
                         </>}
                         {activeAIExecution(i) && <button className="btn" disabled={busy} onClick={() => setReleaseItem(i)}>释放任务</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
-                        {/* 实验室开关开启后，在「查看详情」后面显示 Codex 派发按钮 */}
-                        {tab === 'generate' && !activeAIExecution(i) && localAgents?.includes('codex') && <button className="btn" disabled={codexBusy || !p?.dir || (i.executor || 'ai') !== 'ai'} title="选择 Agent 并在终端执行" onClick={() => setAssignItem(i)}>指派</button>}
                       </div>
                     </div>
                   </article>
@@ -1180,9 +1215,10 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {assignItem && <div className="overlay" onClick={e => { if (e.target === e.currentTarget && !codexBusy) setAssignItem(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-label="指派 Agent" onKeyDown={e => { if (e.key === 'Escape' && !codexBusy) setAssignItem(null); }}><div className="dialog-head"><h2>指派 Agent · {assignItem.number}</h2><button className="icon-btn" aria-label="关闭指派" disabled={codexBusy} onClick={() => setAssignItem(null)}><X /></button></div><p>在项目目录启动交互终端，仅执行这条需求。</p><button autoFocus className="btn primary" disabled={codexBusy || !bridge.startAgent} onClick={() => void assignAgent(assignItem)}>{codexBusy ? '启动中…' : 'Codex'}</button></section></div>}
-      {p && agentSessions[p.id]?.open && <AgentTerminal key={agentSessions[p.id].runId} runId={agentSessions[p.id].runId} project={p.name} onClose={done => setAgentSessions(s => { const next = { ...s }; if (done) delete next[p.id]; else next[p.id] = { ...s[p.id], open: false }; return next; })} />}
-      {p && agentSessions[p.id] && !agentSessions[p.id].open && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 Codex 终端</button>}
+      {p && agentSession?.open && <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)}
+        onClose={done => setAgentSessions(s => { const next = { ...s }; if (done) delete next[p.id]; else next[p.id] = { ...s[p.id], open: false }; return next; })}
+        onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />}
+      {p && agentSession && !agentSession.open && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
       {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
       {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
       </div>
@@ -1211,8 +1247,13 @@ export default function App() {
                     <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
                   </div>
                   <div className="assign-row-actions">
-                    {localAgents?.includes('codex') && <button className="btn sm" disabled={codexBusy || !p?.dir || executor !== 'ai'} title="发送给 Codex" onClick={() => { if (fresh) void dispatchCodex(fresh); }}>Codex</button>}
-                    {(localAgents || []).filter(id => id !== 'codex').map((id) => (
+                    {/* REQ-206：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中） */}
+                    {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
+                      <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
+                        title={'在项目目录启动 ' + agentName(id) + ' 交互终端执行这条需求，指派后立即进入「执行中」'}
+                        onClick={() => { if (fresh) void startAgentSession(fresh, id); }}>指派 {agentName(id)} 终端执行</button>
+                    ))}
+                    {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
                         title={executor === 'agent:' + id ? '当前已指派给 ' + agentName(id) : '指派给 ' + agentName(id) + ' 执行'}
                         onClick={() => void assignItems([item.id], 'agent:' + id)}>指派给 {agentName(id)}</button>
@@ -1227,7 +1268,7 @@ export default function App() {
             })}
           </div>
           {localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {!!localAgents?.length && <p className="settings-hint">指派决定需求由哪个 Agent 领取执行；取消指派恢复默认 AI 执行。</p>}
+          {!!localAgents?.length && <p className="settings-hint">「终端执行」立即在项目目录启动交互会话执行这条需求；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button><button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button></div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (

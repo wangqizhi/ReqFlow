@@ -253,14 +253,23 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
 
 // Interactive agent sessions use the same dock as publish output, but remain
 // alive in the backend while the user switches projects or collapses the dock.
-export function AgentTerminal({ runId, project, onClose }: { runId: string; project: string; onClose(done: boolean): void }) {
+// REQ-205：会话产生过输出后连续静默超过该时长且未结束，视为可能在等待用户输入。
+export const AGENT_INPUT_IDLE_MS = 45000;
+export function agentNeedsInput(done: boolean | undefined, idleMs: number | undefined) {
+  return !done && (idleMs || 0) >= AGENT_INPUT_IDLE_MS;
+}
+export function AgentTerminal({ runId, project, agent, onClose, onState }: { runId: string; project: string; agent: string; onClose(done: boolean): void; onState?(state: { needsInput: boolean; done: boolean }): void }) {
   const container = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const reportState = useRef(onState);
+  reportState.current = onState;
   useEffect(() => {
     let disposed = false, offset = 0, timer: ReturnType<typeof setTimeout>;
     let inputQueue = Promise.resolve();
+    let reportedNeedsInput: boolean | undefined, reportedDone: boolean | undefined;
     const terminal = new Terminal({ cursorBlink: true, scrollback: 5000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
     const report = (message: string) => { if (!disposed) setError(message); };
@@ -276,13 +285,21 @@ export function AgentTerminal({ runId, project, onClose }: { runId: string; proj
         if (!r.ok) throw Error(r.error || '读取终端失败');
         if (r.data) terminal.write(Uint8Array.from(atob(r.data), c => c.charCodeAt(0)));
         offset = r.offset || 0;
-        setDone(!!r.done);
-        if (r.done) { terminal.options.disableStdin = true; terminal.options.cursorBlink = false; return; }
+        const finished = !!r.done;
+        const needsInput = agentNeedsInput(finished, r.idleMs);
+        setDone(previous => previous === finished ? previous : finished);
+        setWaiting(previous => previous === needsInput ? previous : needsInput);
+        // 仅在状态变化时上报，避免高频轮询触发整页重渲染
+        if (needsInput !== reportedNeedsInput || finished !== reportedDone) {
+          reportedNeedsInput = needsInput; reportedDone = finished;
+          reportState.current?.({ needsInput, done: finished });
+        }
+        if (finished) { terminal.options.disableStdin = true; terminal.options.cursorBlink = false; return; }
       } catch (e: any) { report(e.message); }
       if (!disposed) timer = setTimeout(() => void poll(), 100);
     };
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); input.dispose(); terminal.dispose(); };
   }, [runId]);
-  return <section className="publish-terminal" aria-label="Codex 交互终端" data-run-id={runId}><header><strong>Terminal · {project} · Codex</strong><span className="terminal-status" role="status">{error || (done ? '会话已结束' : '可在终端输入，与 Codex 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button><button className="icon-btn" aria-label={done ? "关闭 Codex 终端" : "收起 Codex 终端"} title={done ? "关闭终端" : "收起后继续运行"} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /></div></section>;
+  return <section className="publish-terminal" aria-label={agent + ' 交互终端'} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button><button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /></div></section>;
 }

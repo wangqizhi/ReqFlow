@@ -159,6 +159,8 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; }
 .navtab span { background: var(--line); border-radius: 99px; font-size: 11px; padding: 0 7px; line-height: 17px; }
 .navtab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .navtab.active span { background: var(--accent-soft); color: var(--accent-dark); }
+/* REQ-205：Agent 终端可能等待输入时，「执行中」页签红色提醒 */
+.navtab-alert { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
 .list-tools-side { display: flex; align-items: center; gap: 10px; }
 /* REQ-139/140：列表上方的固定信息条（需求池排序 / 排期批次与日期筛选） */
 .list-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 2px 10px; flex-shrink: 0; }
@@ -594,6 +596,7 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .publish-terminal > header { display: flex; align-items: center; gap: 12px; padding: 4px 14px; flex-shrink: 0; font-size: 12px; }
 .publish-terminal > header strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .publish-terminal > header .terminal-status { flex: 1; min-width: 0; color: var(--side-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-terminal > header .terminal-status.waiting { color: #fca5a5; }
 .terminal-indicator { display: flex; flex-shrink: 0; }
 .terminal-indicator.running { color: #fb923c; }
 .terminal-indicator.success { color: #86efac; }
