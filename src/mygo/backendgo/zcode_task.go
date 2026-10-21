@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -67,6 +68,41 @@ func probeZCode() map[string]any {
 	return map[string]any{"installed": true, "version": aiAgentVersion.FindString(out.String())}
 }
 
+// Desktop bundles keep provider assets beside glm, rather than inside it.
+// Preserve explicit configuration, including an invalid path, for diagnostics.
+func configureZCodeCommand(cmd *exec.Cmd, prefix []string) {
+	cmd.Env = os.Environ()
+	if os.Getenv("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE") != "" || len(prefix) == 0 {
+		return
+	}
+	dir := filepath.Dir(prefix[0])
+	for _, candidate := range []string{
+		filepath.Join(dir, "provider", "zcode-builtin.json"),
+		filepath.Join(dir, "..", "config", "provider", "zcode-builtin.json"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			cmd.Env = append(cmd.Env, "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="+filepath.Clean(candidate))
+			return
+		}
+	}
+}
+
+var zcodeDiagnosticSecret = regexp.MustCompile(`(?i)(authorization|api[_-]?key|access_token|refresh_token|token|password)(["']?\s*[:=]\s*["']?)(?:Bearer\s+)?([^\s,"'}]+)`)
+
+func zcodeProbeError(ctx context.Context, err error, stderr string) error {
+	if ctx.Err() != nil {
+		return errors.New("ZCode CLI 能力检测超时，请检查安装资源或重试")
+	}
+	detail := strings.TrimSpace(zcodeDiagnosticSecret.ReplaceAllString(stderr, "$1$2[redacted]"))
+	if len(detail) > 2048 {
+		detail = string([]rune(detail)[:min(len([]rune(detail)), 512)]) + "…"
+	}
+	if detail == "" {
+		detail = err.Error()
+	}
+	return errors.New("ZCode CLI 能力检测失败：" + detail)
+}
+
 type zcodeTask struct {
 	cmd       *exec.Cmd
 	reader    *io.PipeReader
@@ -94,14 +130,18 @@ func startZCodeTask(root, prompt string) (agentPTY, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	check := exec.CommandContext(ctx, program, append(append([]string{}, prefix...), "--prompt", "/help", "--mode", "build", "--output-format", "stream-json", "--no-color")...)
 	check.Dir = root
+	configureZCodeCommand(check, prefix)
 	aiHideCommand(check)
 	check.Stdout = io.Discard
-	check.Stderr = io.Discard
+	diagnostic := &aiLimitedOutput{limit: 16384}
+	check.Stderr = diagnostic
 	err = check.Run()
-	cancel()
 	if err != nil {
-		return nil, errors.New("ZCode CLI 能力检测失败，请检查官方安装资源与参数兼容性")
+		probeErr := zcodeProbeError(ctx, err, diagnostic.String())
+		cancel()
+		return nil, probeErr
 	}
+	cancel()
 	file, err := os.CreateTemp("", "reqflow-zcode-*.txt")
 	if err != nil {
 		return nil, err
@@ -116,6 +156,7 @@ func startZCodeTask(root, prompt string) (agentPTY, error) {
 	reader, writer := io.Pipe()
 	cmd := exec.Command(program, zcodeTaskArgs(prefix, root, name)...)
 	cmd.Dir = root
+	configureZCodeCommand(cmd, prefix)
 	aiHideCommand(cmd)
 	stdout, stderr := &zcodeLogWriter{target: writer}, &zcodeLogWriter{target: writer}
 	cmd.Stdout = stdout

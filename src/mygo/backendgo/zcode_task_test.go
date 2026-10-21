@@ -5,6 +5,7 @@ package backendgo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -14,14 +15,62 @@ import (
 	"time"
 )
 
+func TestZCodeDesktopProviderEnvironment(t *testing.T) {
+	t.Setenv("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", "")
+	resources := t.TempDir()
+	config := filepath.Join(resources, "config", "provider", "zcode-builtin.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prefix := []string{filepath.Join(resources, "glm", "zcode.cjs")}
+	cmd := exec.Command("node")
+	configureZCodeCommand(cmd, prefix)
+	if !strings.Contains(strings.Join(cmd.Env, "\n"), "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="+config) {
+		t.Fatal("desktop provider config not discovered")
+	}
+	t.Setenv("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", "explicit-user-config")
+	cmd = exec.Command("node")
+	configureZCodeCommand(cmd, prefix)
+	if strings.Contains(strings.Join(cmd.Env, "\n"), config) || !strings.Contains(strings.Join(cmd.Env, "\n"), "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE=explicit-user-config") {
+		t.Fatal("explicit provider configuration overwritten")
+	}
+}
+
+func TestZCodeProbeDiagnostics(t *testing.T) {
+	err := zcodeProbeError(context.Background(), errors.New("exit status 1"), "provider config missing; Authorization: Bearer secret-value; api_key=hidden-value")
+	if !strings.Contains(err.Error(), "provider config missing") || strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "hidden-value") {
+		t.Fatal("diagnostic missing or secret exposed")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !strings.Contains(zcodeProbeError(ctx, errors.New("killed"), "").Error(), "超时") {
+		t.Fatal("timeout not identified")
+	}
+}
+
 func TestZCodeTaskFileAndLifecycle(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node fixture unavailable")
 	}
 	root := t.TempDir()
-	file := filepath.Join(root, "official fixture 中文.cjs")
+	t.Setenv("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", "")
+	file := filepath.Join(root, "glm", "official fixture 中文.cjs")
+	config := filepath.Join(root, "config", "provider", "zcode-builtin.json")
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	script := `const fs=require('node:fs'); const a=process.argv.slice(2);
 if(a.includes('--version')) { console.log('0.17.0'); process.exit(0); }
+if(!fs.existsSync(process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || '')) { console.error('provider config missing'); process.exit(1); }
 if(a[a.indexOf('--prompt')+1]==='/help') process.exit(0);
 const file=a[a.indexOf('--attach')+1];
 console.log(JSON.stringify({type:'result',sessionId:'sess_fixture',response:fs.readFileSync(file,'utf8'),args:a,api_key:'secret'}));`
