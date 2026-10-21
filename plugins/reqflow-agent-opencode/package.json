@@ -1,6 +1,6 @@
 {
   "name": "reqflow-agent-opencode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "OpenCode 插件：按当前目录读取 ReqFlow AI 排期需求，实现后回写待验证。",
   "author": {

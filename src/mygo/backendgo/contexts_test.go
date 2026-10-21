@@ -24,7 +24,7 @@ func TestLinkedContextsPromptMigrationAndGit(t *testing.T) {
 	state := coreMap(r["state"])
 	p := coreFind(coreList(state["projects"]), pid)
 	id := coreString(coreMap(coreList(state["contextPrompts"])[0])["id"])
-	if !strings.Contains(coreString(p["contextRules"]), "排期功能") || !strings.Contains(BuildPrompt(p, []any{}), "src/renderer/App.tsx") {
+	if !strings.Contains(coreString(p["contextRules"]), "排期功能") || strings.Contains(BuildPrompt(p, []any{}), "src/renderer/App.tsx") || !strings.Contains(BuildPrompt(p, []any{}), id) {
 		t.Fatal("linked context missing from rules or prompt")
 	}
 	source := filepath.Join(dir, "contexts")
@@ -97,8 +97,8 @@ func TestContextRulesAreConciseAndLimited(t *testing.T) {
 	if n := len([]rune(rules)); n > DefaultContextRulesLimit {
 		t.Fatalf("default context rules kept %d runes, want <= %d", n, DefaultContextRulesLimit)
 	}
-	if !strings.Contains(rules, "排期") || !strings.Contains(rules, "…") {
-		t.Fatalf("truncated rules lost the feature or truncation mark: %q", rules)
+	if !strings.Contains(rules, "排期") || strings.Contains(rules, body) || !strings.Contains(rules, "context show") {
+		t.Fatalf("reference rules lost feature/lookup command or included body: %q", rules)
 	}
 	prompt := BuildPrompt(p, []any{})
 	if !strings.Contains(prompt, "## 项目守则（自动生成）") || !strings.Contains(prompt, rules) {
@@ -232,5 +232,28 @@ func TestDeleteContextRulesPersistsAndCanRegenerate(t *testing.T) {
 		if len(coreList(state["contextPrompts"])) != 1 {
 			t.Fatal("deleting rules changed context documents")
 		}
+	}
+}
+
+func TestContextShowReturnsDocumentPaths(t *testing.T) {
+	dir := t.TempDir()
+	s := NewWorkspaceService(dir)
+	initial := coreMap(coreTestGet(t, s)["state"])
+	pid := coreString(coreMap(coreList(initial["projects"])[0])["id"])
+	r := coreTestCLI(t, dir, "context", "put", "--project", pid, "--feature", "排期", "--title", "说明", "--body", "# 完整正文")
+	id := coreString(coreMap(coreList(coreMap(r["state"])["contextPrompts"])[0])["id"])
+	shown := coreTestCLI(t, dir, "context", "show", "--id", id)
+	if coreString(coreMap(shown["context"])["body"]) != "# 完整正文" {
+		t.Fatal(shown)
+	}
+	raw, err := os.ReadFile(coreString(shown["summaryFile"]))
+	if err != nil || !strings.Contains(string(raw), "# 完整正文") {
+		t.Fatal(string(raw), err)
+	}
+	if coreString(shown["filesDir"]) != filepath.Join(dir, "contexts", id, "files") {
+		t.Fatal(shown)
+	}
+	if _, err = coreCLIDispatch(s, "context show", map[string]any{"id": "missing"}, "test"); err == nil {
+		t.Fatal("missing context accepted")
 	}
 }

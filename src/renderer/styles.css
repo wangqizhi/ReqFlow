@@ -945,7 +945,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .content-list { flex: 1; min-height: 0; overflow: auto; padding: 0 28px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-content: start; gap: 20px; }
 .content-card { background: var(--panel); border: 1px solid var(--line); padding: 20px; border-radius: 12px; min-width: 0; }
 .content-card h2 { margin: 0 0 14px; font-size: 18px; overflow-wrap: anywhere; }
-.content-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; line-height: 1.7; }
+.content-body { white-space: normal; overflow-wrap: anywhere; max-height: 280px; overflow: auto; line-height: 1.7; }
 .content-dialog { max-height: calc(100vh - 48px); overflow-y: auto; }
 .content-dialog textarea { resize: vertical; }
 /* REQ-188：上下文管理显示 Git 版本管理状态，未安装 Git 时提示安装 */

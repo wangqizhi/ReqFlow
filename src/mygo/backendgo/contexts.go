@@ -49,7 +49,6 @@ func refreshContextRules(s map[string]any) {
 		feature string
 		title   string
 		id      string
-		body    string
 	}
 	for _, pv := range coreList(s["projects"]) {
 		p := coreMap(pv)
@@ -61,7 +60,6 @@ func refreshContextRules(s map[string]any) {
 					feature: coreString(c["feature"]),
 					title:   coreString(c["title"]),
 					id:      coreString(c["id"]),
-					body:    strings.TrimSpace(coreString(c["body"])),
 				})
 			}
 		}
@@ -69,22 +67,21 @@ func refreshContextRules(s map[string]any) {
 		if coreTruthy(p["contextRulesDisabled"]) || len(linked) == 0 {
 			continue
 		}
-		// 守则只保留上下文与功能的简短联系，并按项目设置的字数上限截断，避免把完整架构带进排期 Prompt。
+		// Prompt only carries document references; content is loaded on demand.
 		limit := ProjectContextRulesLimit(p)
 		header := "# " + coreString(p["name"]) + " · 项目守则"
-		overhead := len([]rune(header))
+		sections := []string{"ReqFlow.exe --cli context list", header}
 		for _, c := range linked {
-			overhead += len([]rune("## " + c.feature + "\n上下文：" + c.title + "（" + c.id + "）\n\n"))
+			line := "- " + c.feature + " → " + c.title + "（" + c.id + "）"
+			if len([]rune(strings.Join(sections, "\n")+"\n"+line)) <= limit {
+				sections = append(sections, line)
+			}
 		}
-		share := (limit - overhead) / len(linked)
-		if share < 0 {
-			share = 0
+		lookup := "按需用 context show --id <ID> 获取 summary.md 与 files/。"
+		if len([]rune(strings.Join(sections, "\n")+"\n"+lookup)) <= limit {
+			sections = append(sections, lookup)
 		}
-		sections := make([]string, len(linked))
-		for n, c := range linked {
-			sections[n] = "## " + c.feature + "\n上下文：" + c.title + "（" + c.id + "）\n\n" + truncateContextRunes(c.body, share)
-		}
-		p["contextRules"] = truncateContextRunes(header+"\n\n"+strings.Join(sections, "\n\n"), limit)
+		p["contextRules"] = truncateContextRunes(strings.Join(sections, "\n"), limit)
 	}
 }
 func (s *WorkspaceService) contextDir() (string, error) {

@@ -391,14 +391,30 @@ export default function App() {
     try {
       // 默认作用于当前项目；操作显式携带 project 时（如删除其他项目）以传入值为准
       const action = { project: p?.id, ...a };
-      const scopes = mutationProjectIds(action);
-      const expectedProjectVersions = scopes ? Object.fromEntries(scopes.map(id => [id, workspaceRef.current?.projects.find(pr => pr.id === id)?.revision ?? 0])) : undefined;
-      const expectedProjectSignatures = scopes ? Object.fromEntries(await Promise.all(scopes.map(async id => {
-        const project = workspaceRef.current?.projects.find(pr => pr.id === id);
-        if (!project) throw Error('项目已不存在，请刷新后重试');
-        return [id, await projectConcurrencyToken(project)];
-      }))) : undefined;
-      const r = await bridge.apply({ ...action, expectedVersion: versionRef.current, expectedProjectVersions, expectedProjectSignatures });
+      const initialDraft = JSON.stringify(workspaceRef.current?.projects.find(pr => pr.id === action.project)?.requirementDraft);
+      const canRebase = action.op === 'requirementDraft' || (action.op === 'item' && !action.id);
+      const save = async () => {
+        const scopes = mutationProjectIds(action);
+        const expectedProjectVersions = scopes ? Object.fromEntries(scopes.map(id => [id, workspaceRef.current?.projects.find(pr => pr.id === id)?.revision ?? 0])) : undefined;
+        const expectedProjectSignatures = scopes ? Object.fromEntries(await Promise.all(scopes.map(async id => {
+          const project = workspaceRef.current?.projects.find(pr => pr.id === id);
+          if (!project) throw Error('项目已不存在，请刷新后重试');
+          return [id, await projectConcurrencyToken(project)];
+        }))) : undefined;
+        return bridge.apply({ ...action, expectedVersion: versionRef.current, expectedProjectVersions, expectedProjectSignatures });
+      };
+      let r = await save();
+      if (!r.ok && r.code === 'VERSION_CONFLICT') {
+        // Refresh concurrency metadata without touching the local form. Only a
+        // new requirement/draft can merge unrelated Agent status changes.
+        const latest = await bridge.getWorkspace();
+        if (!latest.ok) throw Error(latest.error);
+        const project = latest.state.projects.find(pr => pr.id === action.project);
+        const sameDraft = project && JSON.stringify(project.requirementDraft) === initialDraft;
+        setData(latest.state); workspaceRef.current = latest.state;
+        setVersion(latest.version); versionRef.current = latest.version;
+        if (canRebase && sameDraft) r = await save();
+      }
       if (!r.ok) throw Error(r.error);
       if (r.version >= versionRef.current) { setData(r.state); workspaceRef.current = r.state; setVersion(r.version); versionRef.current = r.version; }
       setSaved('已保存'); setError(r.warning || '');
@@ -488,8 +504,8 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    if (terminalRunId) rememberTerminal(project.id, false);
-    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: false, terminalProject: project.name });
+    if (terminalRunId) rememberTerminal(project.id, true);
+    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
@@ -561,6 +577,7 @@ export default function App() {
 
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
   const eligible = (i: Item) => !i.archived && !activeAIExecution(i) && (i.status === 'ready' || i.status === 'in_progress');
+  const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
   const executingItems = (p?.items || []).filter(i => !!activeAIExecution(i));
@@ -1020,7 +1037,7 @@ export default function App() {
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
                         <span className={'status ' + (activeAIExecution(i) ? 'executing' : i.status)}>{activeAIExecution(i) ? '执行中' : labels[i.status]}</span>
-                        <span className="revision">v{i.version}</span><span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
+                        <span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement" title="全选时跳过，仍可手动勾选或单条排期">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
                       <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
@@ -1057,6 +1074,12 @@ export default function App() {
                         {i.status === 'ready' && tab === 'generate' && <button className="btn accent" disabled={busy} onClick={async () => { const draft = scheduledBatch(p!, i); if (draft && await act({ op: 'submit', batch: draft.id }, true)) notify('已继续排期，进入待开发'); }}>继续排期</button>}
                         {i.status === 'ready' && tab !== 'generate' && <button className="btn accent" disabled={busy} onClick={() => generate([i.id])}>排期</button>}
                         {i.status === 'ready' && tab !== 'generate' && <button className="btn" disabled={busy} onClick={() => edit(i)}>编辑</button>}
+                        {tab === 'feature' && i.status === 'ready' && <button className="btn" disabled={busy} aria-pressed={!!i.deferred} title="延迟需求不会被全选选中，仍可手动勾选或单条排期" onClick={async () => {
+                          if (await act({ op: 'deferItem', id: i.id, deferred: !i.deferred }, true)) {
+                            if (!i.deferred) setSelected(ids => ids.filter(id => id !== i.id));
+                            notify(i.deferred ? '已取消延迟' : '已延迟，全选时将跳过');
+                          }
+                        }}>{i.deferred ? '取消延迟' : '延迟'}</button>}
                         {i.status === 'ready' && tab !== 'generate' && <button className="btn" disabled={busy} onClick={() => {
                           setEditing(i); setTargetProject(data.projects.find((pr) => pr.id !== p?.id)?.id || ''); setModal('moveItem');
                         }}>迁移到其他项目</button>}
@@ -1095,8 +1118,8 @@ export default function App() {
               </div>}
               <div className="workspace-actions">
                 {tab === 'feature' && <><label className="check-label"><input type="checkbox"
-                  checked={visible.filter(eligible).length > 0 && visible.filter(eligible).every(i => selected.includes(i.id))}
-                  onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(eligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
+                  checked={visible.filter(bulkEligible).length > 0 && visible.filter(bulkEligible).every(i => selected.includes(i.id))}
+                  onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(bulkEligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
                   <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
                 {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
                   <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ContextPrompt, Project } from '../core/domain';
 import { bridge } from './api';
+import { renderMarkdown } from './markdown';
 import { ExternalLink, FileText, GitBranch, Plus, Search, Trash, X } from './icons';
 
 /** 功能上下文的编辑表单：正文 + 相关文件 + 相关代码摘录。 */
@@ -67,9 +68,9 @@ export function ContentWorkspace({ prompts, projects, busy, apply, notify }: {
     <div className="content-list">{visible.length ? visible.map(prompt => <article className="content-card" key={prompt.id}>
       <h2>{prompt.title}</h2>
       <div className="content-tags">{prompt.projectId && prompt.feature && <span className="content-link">{projects.find(p => p.id === prompt.projectId)?.name || '已删除项目'} · {prompt.feature}</span>}{prompt.tags.map(value => <button className="tag-btn" key={value} onClick={() => setTag(value)}>{value}</button>)}</div>
-      <p className="content-body">{prompt.body}</p>
+      <div className="content-body md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(prompt.body) }} />
       {!!prompt.files?.length && <p className="content-files" title={prompt.files.join('\n')}><FileText size={14} />{[...prompt.files].join(' · ')}</p>}
-      {!!prompt.code?.trim() && <details className="content-code"><summary>相关代码 · {prompt.files?.length || 1} 处<ExternalLink size={13} /></summary><pre>{prompt.code.trim()}</pre></details>}
+      {!!prompt.code?.trim() && <details className="content-code"><summary>相关代码 · {prompt.files?.length || 1} 处<ExternalLink size={13} /></summary><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(prompt.code.trim()) }} /></details>}
       <div className="card-actions">{git?.dir && <button className="btn" disabled={!bridge.openProjectDir} onClick={async () => { try { const r = await bridge.openProjectDir!(git.dir + "/" + prompt.id); if (!r.ok) throw Error(r.error || "打开目录失败"); } catch (e: any) { notify(e.message, "err"); } }}><FileText size={14} />打开上下文目录</button>}<button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(contextText(prompt)); notify('提示词已复制'); } catch { notify('复制失败，请检查剪贴板权限', 'err'); } }}>复制</button><button className="btn" disabled={locked} onClick={() => setForm({ ...prompt, tags: prompt.tags.join('，'), files: (prompt.files || []).join('，'), code: prompt.code || '' })}>编辑</button><button className="btn" disabled={locked} onClick={() => setDeleting(prompt)}><Trash size={14} />删除</button></div>
     </article>) : <p className="empty">{prompts.length ? '没有符合筛选条件的提示词。' : '还没有提示词，点击「新建提示词」开始记录。'}</p>}</div>
     {(form || deleting) && <div className="overlay" role="dialog" aria-modal="true" aria-label={form ? '编辑提示词' : '删除提示词'} onClick={e => { if (e.target === e.currentTarget && !locked) { setForm(null); setDeleting(null); } }}><div className="dialog content-dialog"><div className="dialog-head"><h3>{form ? form.id ? '编辑提示词' : '新建提示词' : '删除提示词'}</h3><button className="icon-btn" aria-label="关闭提示词窗口" disabled={locked} onClick={() => { setForm(null); setDeleting(null); }}><X size={18} /></button></div>

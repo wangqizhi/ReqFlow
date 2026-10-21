@@ -50,6 +50,7 @@ export type Item = {
   completionNoteVersion?: number;
   scheduledDate?: string;
   executor?: string; // ai | human | plugin:<id> | agent:<id>；旧需求默认 ai
+  deferred?: boolean; // 需求池延迟标记：批量全选跳过，仍可手动排期
   archived?: boolean;
   aiExecution?: AIExecution;
 };
@@ -343,7 +344,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   }));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!(localOps.includes(a?.op) || ['requirementDraft', 'executionClaim', 'executionRelease'].includes(a?.op)) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -656,6 +657,16 @@ async function applyOperation(s: Workspace, a: any) {
     }
     return;
   }
+  if (a.op === 'deferItem') {
+    const i = p.items.find(i => i.id === a.id);
+    if (!i || i.archived || i.status !== 'ready' || activeAIExecution(i) || scheduledBatch(p, i)) throw Error('只能标记需求池中的需求');
+    if (typeof a.deferred !== 'boolean') throw Error('延迟标记无效');
+    if (!!i.deferred !== a.deferred) {
+      i.deferred = a.deferred;
+      i.history.unshift({ event: a.deferred ? '延迟需求' : '取消延迟', time: now });
+    }
+    return;
+  }
   if (a.op === 'item') {
     const existing = p.items.find((i) => i.id === a.id);
     // 部分编辑：未传的字段回退到已有值（新增时回退到默认值），标题选填，留空时 Prompt 中仅显示需求编号
@@ -963,10 +974,13 @@ export function refreshContextRules(s: Workspace) {
     if (project.contextRulesDisabled || !linked.length) { delete project.contextRules; continue; }
     const limit = contextRulesLimit(project);
     const header = '# ' + project.name + ' · 项目守则';
-    const overhead = Array.from(header).length + linked.reduce((total, c) =>
-      total + Array.from('## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n').length, 0);
-    const share = Math.max(0, Math.floor((limit - overhead) / linked.length));
-    const sections = linked.map(c => '## ' + c.feature + '\n上下文：' + c.title + '（' + c.id + '）\n\n' + truncateContextText(c.body.trim(), share));
-    project.contextRules = truncateContextText(header + '\n\n' + sections.join('\n\n'), limit);
+    const sections = ['ReqFlow.exe --cli context list', header];
+    for (const c of linked) {
+      const line = '- ' + c.feature + ' → ' + c.title + '（' + c.id + '）';
+      if (Array.from(sections.join('\n') + '\n' + line).length <= limit) sections.push(line);
+    }
+    const lookup = '按需用 context show --id <ID> 获取 summary.md 与 files/。';
+    if (Array.from(sections.join('\n') + '\n' + lookup).length <= limit) sections.push(lookup);
+    project.contextRules = truncateContextText(sections.join('\n'), limit);
   }
 }

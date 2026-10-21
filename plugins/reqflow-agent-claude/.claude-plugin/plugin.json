@@ -1,6 +1,6 @@
 {
   "name": "reqflow-agent-claude",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "按当前项目目录领取 ReqFlow AI 排期任务，实现后转入待验证（Claude Code 版）。",
   "author": {
     "name": "ReqFlow"

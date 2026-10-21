@@ -222,3 +222,36 @@ func TestCorePromptMatchesTypeScript(t *testing.T) {
 		t.Fatalf("TypeScript prompt mismatch: %s", hash)
 	}
 }
+
+func TestDeferPoolItem(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "延迟需求"})
+	i := coreMap(coreList(p["items"])[0])
+	a := map[string]any{"op": "deferItem", "project": p["id"], "id": i["id"], "deferred": true}
+	coreTestApply(t, s, a)
+	if i["deferred"] != true || coreNum(i["version"]) != 1 || i["status"] != "ready" {
+		t.Fatal(i)
+	}
+	if ids := MutationProjectIDs(a); len(ids) != 1 {
+		t.Fatal(ids)
+	}
+	a["deferred"] = "true"
+	if Apply(s, a) == nil {
+		t.Fatal("invalid boolean accepted")
+	}
+	a["deferred"] = false
+	coreTestApply(t, s, a)
+	if i["deferred"] != false {
+		t.Fatal(i)
+	}
+	a["deferred"] = true
+	coreTestApply(t, s, a)
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	if Apply(s, a) == nil {
+		t.Fatal("scheduled item accepted delay change")
+	}
+	coreTestApply(t, s, map[string]any{"op": "submit", "project": p["id"], "batch": coreMap(coreList(p["batches"])[0])["id"]})
+	if Apply(s, a) == nil {
+		t.Fatal("executing item accepted delay change")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -166,6 +167,21 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 			return nil, e
 		}
 		return map[string]any{"contexts": coreMap(r["state"])["contextPrompts"]}, nil
+	case "context show":
+		r, e := s.Get()
+		if e != nil {
+			return nil, e
+		}
+		c := coreFind(coreList(coreMap(r["state"])["contextPrompts"]), a["id"])
+		if c == nil {
+			return nil, errors.New("上下文不存在")
+		}
+		dir, e := s.contextDir()
+		if e != nil {
+			return nil, e
+		}
+		folder := filepath.Join(dir, coreString(c["id"]))
+		return map[string]any{"context": c, "dir": folder, "summaryFile": filepath.Join(folder, "summary.md"), "filesDir": filepath.Join(folder, "files")}, nil
 	case "context put":
 		body := coreString(a["body"])
 		if file := coreString(a["file"]); file != "" {

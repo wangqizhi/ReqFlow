@@ -8,6 +8,10 @@ allowed-tools: Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/reqflow.mjs *)
 
 使用插件内置桥接脚本 `${CLAUDE_PLUGIN_ROOT}/scripts/reqflow.mjs`（此占位符已替换为插件安装目录的绝对路径）。Node >= 22，无 npm 安装步骤。
 
+## 执行入口顺序（优先领取）
+
+用户授权执行后，读取本技能即立即运行下文的 read 命令或 reqflow_read(execute=true)。这是第一项业务操作：先原子领取，让任务进入执行中；拿到 runFile 后才阅读仓库、分析实现、规划或运行测试。不要先 inspect、doctor、读取项目源码或分析批次。read 内置版本与绑定检查，无需重复预检。仅查看/分析仍用 inspect；指定需求时只做确定 ID 所必需的 inspect，再带 --ids 领取。宿主强制要求的前置规则仍须遵守。
+
 ## 触发
 
 用户要求执行 ReqFlow / 需求流中的需求，或输入 `/reqflow-agent-claude:execute`，即授权执行当前项目的 ReqFlow AI 排期需求。直接进入下方领取、实现、验证和完成回写流程，不询问「执行还是配置」，不要求用户补充执行口令，不只介绍插件功能。

@@ -572,7 +572,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -1237,6 +1237,24 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		finishAIExecution(i, now, "released")
 		coreHistory(i, map[string]any{"event": "释放 AI 任务", "time": now, "note": coreString(a["note"]), "execution": coreClone(i["aiExecution"])})
+		return nil
+	case "deferItem":
+		i := coreFind(items, a["id"])
+		if i == nil || coreTruthy(i["archived"]) || i["status"] != "ready" || ActiveAIExecution(i) != nil || ScheduledBatch(p, i) != nil {
+			return errors.New("只能标记需求池中的需求")
+		}
+		deferred, ok := a["deferred"].(bool)
+		if !ok {
+			return errors.New("延迟标记无效")
+		}
+		if coreTruthy(i["deferred"]) != deferred {
+			i["deferred"] = deferred
+			event := "取消延迟"
+			if deferred {
+				event = "延迟需求"
+			}
+			coreHistory(i, map[string]any{"event": event, "time": now})
+		}
 		return nil
 	case "item":
 		return coreApplyItem(p, a, now)

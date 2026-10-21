@@ -259,6 +259,18 @@
     checks.contextEntry = { ok: contextButton.getBoundingClientRect().top >= document.querySelector('.side-project-section').getBoundingClientRect().bottom && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
     await click(contextButton);
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !!document.querySelector('.context-git-bar') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
+    await click(button('新建提示词'));
+    const markdownForm = document.querySelector('.content-dialog form');
+    const titleField = markdownForm.querySelector('input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(titleField, 'Markdown 预览回归');
+    titleField.dispatchEvent(new Event('input', { bubbles: true }));
+    const bodyField = markdownForm.querySelector('textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(bodyField, '# 标题\n\n**强调**\n\n- 列表\n\n```js\nconst x = 1;\n```');
+    bodyField.dispatchEvent(new Event('input', { bubbles: true }));
+    await click(button('保存提示词'));
+    await waitFor(() => !document.querySelector('.content-dialog'));
+    const markdownCard = [...document.querySelectorAll('.content-card')].find(el => el.querySelector('h2').textContent === 'Markdown 预览回归');
+    checks.contextMarkdownPreview = { ok: !!markdownCard?.querySelector('.md-preview h1') && !!markdownCard.querySelector('.md-preview strong') && !!markdownCard.querySelector('.md-preview li') && !!markdownCard.querySelector('.md-preview pre code') };
     await click(button('返回项目菜单'));
     checks.contentReturn = { ok: !document.querySelector('[aria-label="切换项目"]') && !!document.querySelector('.project-folder') && document.querySelector('.main h1').textContent === originalProject };
     // REQ-169：统计移到侧栏，实验室不再显示；检查日历筛选和键盘导航。
@@ -287,8 +299,8 @@
     await switchProject('发布终端UI检查');
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
-    checks.terminalPublishCollapsed = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
-    await click(document.querySelector('.publish-terminal-reopen'));
+    await waitFor(() => !!document.querySelector('.publish-terminal'));
+    checks.terminalPublishAutoOpen = { ok: !document.querySelector('.publish-terminal-reopen') };
     const terminalText = () => document.querySelector('.publish-terminal .xterm')?.textContent || '';
     await waitFor(() => terminalText().includes('stream-first'));
     checks.terminalLive = { ok: document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成' && !terminalText().includes('stream-last') };
@@ -378,6 +390,8 @@
     const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
     const projectTag = [...statsPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent !== '全部');
     if (projectTag) await click(projectTag);
+    const projectBars = [...statsPanel.querySelectorAll('.stats-chart-block')].find(el => el.querySelector('h4')?.textContent === '各项目需求量');
+    await click([...projectBars.querySelectorAll('button')].find(el => el.textContent.includes(projectTag.textContent)));
     await waitFor(() => !!document.querySelector('.milestone-view'));
     const milestone = document.querySelector('.milestone-view');
     checks.projectMilestones = { ok: !!milestone && !!milestone.querySelector('.milestone-hero h2') && milestone.querySelectorAll('.milestone-stat').length === 4 && (!milestone.querySelector('.milestone-timeline') || milestone.querySelectorAll('.milestone-item').length > 0) };
@@ -501,6 +515,41 @@
       checks.deleteMessage = { ok: document.querySelector('.dialog').textContent.includes('不会删除项目的源文件或目录') };
       await click(button('取消'));
     }
+    // Delay marks persist, bulk selection skips them, manual selection remains available.
+    const delayState = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    const delayPid = delayState.state.projects.find(project => project.name === originalProject).id;
+    for (const title of ['延迟回归-普通', '延迟回归-延迟']) {
+      const added = await window.mygo.call('ReqFlow.Invoke', 'workspace:apply', [{ op: 'item', project: delayPid, title, body: '延迟回归测试' }]);
+      if (!added.ok) throw Error(JSON.stringify(added));
+    }
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => [...document.querySelectorAll('.req-card')].some(el => el.textContent.includes('延迟回归-延迟')));
+    const delaySearch = document.querySelector('[aria-label="搜索需求"]');
+    const searchDelay = value => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(delaySearch, value);
+      delaySearch.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    searchDelay('延迟回归-');
+    await waitFor(() => document.querySelectorAll('.req-card').length === 2);
+    const delayedCard = () => [...document.querySelectorAll('.req-card')].find(el => el.textContent.includes('延迟回归-延迟'));
+    const delayButton = text => [...delayedCard().querySelectorAll('button')].find(el => el.textContent === text);
+    await click(delayButton('延迟'));
+    await waitFor(() => !!delayButton('取消延迟'));
+    const persistedDelay = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    checks.delayPersisted = { ok: persistedDelay.state.projects.find(project => project.id === delayPid).items.find(item => item.title === '延迟回归-延迟').deferred === true };
+    const bulkDelay = () => [...document.querySelectorAll('.check-label')].find(el => el.textContent === '全选需求').querySelector('input');
+    await click(bulkDelay());
+    checks.delayBulkSkip = { ok: !delayedCard().querySelector('input[type="checkbox"]').checked && [...document.querySelectorAll('.req-card input[type="checkbox"]')].filter(el => el.checked).length === 1 && bulkDelay().checked };
+    await click(delayedCard().querySelector('input[type="checkbox"]'));
+    checks.delayManualSelection = { ok: delayedCard().querySelector('input[type="checkbox"]').checked };
+    await click(bulkDelay());
+    await click(delayButton('取消延迟'));
+    await waitFor(() => !!delayButton('延迟'));
+    await click(bulkDelay());
+    checks.delayResume = { ok: [...document.querySelectorAll('.req-card input[type="checkbox"]')].every(el => el.checked) };
+    await click(bulkDelay());
+    searchDelay('');
+    await new Promise(resolve => setTimeout(resolve, 60));
     await click(button('记录新需求'));
     const modalBar = document.querySelector('.modal-window-bar');
     // 记录需求弹窗只保留透明拖动层，不再重复渲染窗口按钮。
@@ -510,6 +559,37 @@
         && Math.abs(modalBar.getBoundingClientRect().width - innerWidth) < 1
         && modalBar.getBoundingClientRect().bottom <= document.querySelector('.requirement-dialog').getBoundingClientRect().top + 1
     };
+    // External Agent completes work while the new-requirement modal holds
+    // stale project concurrency metadata. Saving and closing must both recover.
+    const invokeAction = async action => {
+      const result = await window.mygo.call('ReqFlow.Invoke', 'workspace:apply', [action]);
+      if (!result.ok) throw Error(JSON.stringify(result));
+      return result.state.projects.find(project => project.name === originalProject);
+    };
+    const currentState = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    const concurrentPid = currentState.state.projects.find(project => project.name === originalProject).id;
+    let concurrent = await invokeAction({ op: 'item', project: concurrentPid, title: '并发完成测试', body: 'fixture' });
+    const concurrentItem = concurrent.items.find(item => item.title === '并发完成测试');
+    await invokeAction({ op: 'generate', project: concurrentPid, ids: [concurrentItem.id] });
+    await invokeAction({ op: 'complete', project: concurrentPid, id: concurrentItem.id, summary: '模拟 Agent 回写' });
+    const concurrentInput = document.querySelector('.requirement-dialog textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(concurrentInput, 'Agent 回写后仍可保存新需求');
+    concurrentInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await click(button('保存需求'));
+    await waitFor(() => !document.querySelector('.requirement-dialog'));
+    const savedConcurrent = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    const concurrentProject = savedConcurrent.state.projects.find(project => project.id === concurrentPid);
+    checks.concurrentNewRequirement = { ok: concurrentProject.items.some(item => item.body === 'Agent 回写后仍可保存新需求') && concurrentProject.items.find(item => item.id === concurrentItem.id).status === 'pending_verification' };
+    await click(button('记录新需求'));
+    await invokeAction({ op: 'item', project: concurrentPid, title: '草稿关闭并发变化', body: 'fixture' });
+    const closeInput = document.querySelector('.requirement-dialog textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(closeInput, '关闭窗口保留草稿');
+    closeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await click(document.querySelector('.requirement-dialog [aria-label="关闭"]'));
+    await waitFor(() => !document.querySelector('.requirement-dialog'));
+    const closedState = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    checks.concurrentDraftClose = { ok: closedState.state.projects.find(project => project.id === concurrentPid).requirementDraft.body === '关闭窗口保留草稿' };
+    await click(button('记录新需求'));
     await click(button('展开更多设置 · 图片、标题、验收与交付'));
     const textarea = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, '长中文说明、附件与高级字段清空检查。'.repeat(35));

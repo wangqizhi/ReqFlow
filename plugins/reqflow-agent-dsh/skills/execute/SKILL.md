@@ -7,6 +7,10 @@ description: 从 ReqFlow 读取与当前项目目录匹配的 AI 排期任务，
 
 本技能的资源根目录是插件根目录；桥接脚本是 `scripts/reqflow.mjs`。DSH 插件的 `reqflow_read`、`reqflow_complete` 工具和 `/reqflow` 命令已经封装该脚本，优先使用工具，不要手工拼 CLI。
 
+## 执行入口顺序（优先领取）
+
+用户授权执行后，读取本技能即立即运行下文的 read 命令或 reqflow_read(execute=true)。这是第一项业务操作：先原子领取，让任务进入执行中；拿到 runFile 后才阅读仓库、分析实现、规划或运行测试。不要先 inspect、doctor、读取项目源码或分析批次。read 内置版本与绑定检查，无需重复预检。仅查看/分析仍用 inspect；指定需求时只做确定 ID 所必需的 inspect，再带 --ids 领取。宿主强制要求的前置规则仍须遵守。
+
 ## 触发与授权
 
 - 用户明确要求执行 ReqFlow 需求、或输入 `/reqflow`、`/reqflow <projectId>`：授权领取并实现。
