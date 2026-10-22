@@ -111,7 +111,7 @@ export default function App() {
   const [modsTab, setModsTab] = useState('protocol');
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS'>('FLOW');
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS' | 'EXECUTING'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -157,11 +157,13 @@ export default function App() {
   const [contextWizard, setContextWizard] = useState(false);
   const [contextFeature, setContextFeature] = useState('');
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [terminalEnabled] = useTerminalSetting();
+  const [terminalSettingEnabled] = useTerminalSetting();
   const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
+  const [terminalTabs, setTerminalTabs] = useState<Record<string, 'agent' | 'publish'>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
+  const terminalEnabled = terminalSettingEnabled || !!agentSessions[p?.id || ''];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
   const publishResult = publishStates[p?.id || '']?.resultDismissed ? null : publishStates[p?.id || '']?.result || null;
@@ -521,7 +523,7 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    if (terminalRunId) rememberTerminal(project.id, true);
+    if (terminalRunId) { rememberTerminal(project.id, true); setTerminalTabs(tabs => ({ ...tabs, [project.id]: 'publish' })); }
     update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
@@ -549,6 +551,7 @@ export default function App() {
       // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
       const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
       setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
+      setTerminalTabs(tabs => ({ ...tabs, [projectId]: 'agent' }));
       setCompleteConfirm(null);
       setTab('executing');
       notify(agentLogOnly(actual) ? '已启动 ' + agentName(actual) + ' 任务日志，等待插件完成需求' : '已在终端启动 ' + agentName(actual) + '，需求进入执行中');
@@ -604,6 +607,7 @@ export default function App() {
   // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
   const agentSession = agentSessions[p?.id || ''];
   const executing = (i: Item) => !i.archived && i.status !== 'pending_verification' && (!!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.items.includes(i.id)));
+  const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => !i.archived && i.status !== 'pending_verification' && (!!activeAIExecution(i) || (!!agentSessions[project.id] && !agentSessions[project.id].done && agentSessions[project.id].items.includes(i.id)))).map(item => ({ project, item })));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
@@ -616,13 +620,14 @@ export default function App() {
     && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
   useEffect(() => {
-    if (!executingItems.length) { setTab(current => current === 'executing' ? 'generate' : current); return; }
+    if (!executingItems.length) setTab(current => current === 'executing' ? 'generate' : current);
+    if (!globalExecuting.length) return;
     const timer = window.setInterval(() => setExecutionClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [executingItems.length, tab]);
+  }, [executingItems.length, globalExecuting.length, tab]);
   // REQ-205：终端收起后仍轮询会话状态；等待输入时在「执行中」页签红色提醒
   useEffect(() => {
-    const collapsed = Object.entries(agentSessions).filter(([, s]) => !s.open && !s.done);
+    const collapsed = Object.entries(agentSessions).filter(([, s]) => !s.done);
     if (!collapsed.length || !bridge.agentStatus) return;
     let cancelled = false;
     const timer = window.setInterval(() => {
@@ -904,6 +909,7 @@ export default function App() {
           </button>
         </section>
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
+        <button className={'side-label side-label-action' + (mode === 'EXECUTING' ? ' active' : '')} aria-current={mode === 'EXECUTING' ? 'page' : undefined} onClick={() => { setMode('EXECUTING'); setNewMenu(false); }}>执行中 <span className="small-count">{globalExecuting.length}</span></button>
         <div className="side-label">协作项目</div>
         <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
         </>}
@@ -940,7 +946,22 @@ export default function App() {
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'CONTENT' ? <ContentWorkspace projects={data.projects} prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
+        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="execution-list">
+          {!globalExecuting.length && <div className="empty">暂无执行中的任务</div>}
+          {globalExecuting.map(({ project, item: i }) => {
+            const session = agentSessions[project.id];
+            return <article className="req-card" key={project.id + ':' + i.id}><div className="card-body">
+              <div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>{project.name}</button><code>{i.number}</code><span className={'badge ' + i.type}>{labels[i.type]}</span><span className="priority">{i.priority}</span><span className="status executing">执行中</span><span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(project).some(x => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}</div>
+              {i.title && <strong className="item-title">{i.title}</strong>}<p className="body-copy">{i.body || '暂无详细说明'}</p>
+              {!!i.attachments?.length && <p className="muted">参考图片 · {i.attachments.map(a => a.label).join('、')}</p>}
+              {unresolvedFailures(i).length > 0 && <div className="failure-content"><strong>未通过的问题</strong>{unresolvedFailures(i).map((f, n) => <p key={n}>{f.note}</p>)}</div>}
+              <div className="criteria">{i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} />{c}</p>) : <p>按需求说明确认结果即可。</p>}</div>
+              <ExecutionInfo item={i} session={session} now={executionClock} />
+              <div className="next-step">{activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。' : '已在交互终端执行；可进入项目在终端输入沟通，完成后自动转入待验证。'}</div>
+              <div className="card-actions"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>进入项目</button></div>
+            </div></article>;
+          })}
+        </div></div> : mode === 'CONTENT' ? <ContentWorkspace projects={data.projects} prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -1142,16 +1163,7 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
-                      {i.aiExecution && <div className="execution-info">
-                        <strong>{clientLabels[i.aiExecution.client]} {activeAIExecution(i) ? '正在执行' : i.aiExecution.outcome === 'completed' ? '执行完成' : '任务已释放'}</strong>
-                        <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
-                        <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, executionClock) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
-                      </div>}
-                      {!activeAIExecution(i) && !!agentSession && !agentSession.done && agentSession.items.includes(i.id) && <div className="execution-info">
-                        <strong>{agentName(agentSession.agent)} 终端执行中{agentSession.needsInput ? ' · 可能等待输入' : ''}</strong>
-                        <span>开始 {new Date(agentSession.startedAt).toLocaleString('zh-CN')}</span>
-                        <span>已执行 {executionDuration(new Date(agentSession.startedAt).toISOString(), executionClock)}</span>
-                      </div>}
+                      <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
                           : executing(i) ? '已在 ' + agentName(agentSession!.agent) + ' 交互终端执行；可直接在终端输入沟通，完成后自动转入待验证，终端可继续对话至需求归档。'
@@ -1243,13 +1255,20 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {p && agentSession?.open && !agentTerminalDetached && <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)}
-        onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
-        onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
-        onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />}
-      {p && agentSession && !agentSession.open && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
-      {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
-      {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && p && <button className="publish-terminal-reopen" onClick={() => setTerminalOpen(p.id, true)}>打开终端{publishing ? ' · 执行中' : ''}</button>}
+      {p && ((agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
+        <div className="terminal-tabs" role="tablist" aria-label="终端会话">
+          {agentSession && !agentTerminalDetached && <button className="btn sm" role="tab" aria-selected={(terminalTabs[p.id] || 'agent') === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+          {terminalEnabled && terminalRunId && !terminalDetached && <button className={"btn sm" + (!terminalSession?.terminalOpen ? " publish-terminal-reopen" : "")} role="tab" aria-selected={(terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
+        </div>
+        {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && (terminalTabs[p.id] || 'agent') === 'agent' ? undefined : 'none' }}>
+          <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
+            onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
+            onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />
+        </div>}
+        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="发布" style={{ display: terminalSession.terminalOpen && (terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' ? undefined : 'none' }}>
+          <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />
+        </div>}
+      </>}
       </div>
 
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
@@ -1280,12 +1299,12 @@ export default function App() {
                     {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
                       <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
                         title={'在项目目录启动 ' + agentName(id) + (agentLogOnly(id) ? ' 任务执行日志，由插件领取需求后执行' : ' 交互终端执行这条需求')}
-                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} {agentLogOnly(id) ? '任务执行' : '终端执行'}</button>
+                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>{agentName(id)}</button>
                     ))}
                     {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
                         title={executor === 'agent:' + id ? '当前已指派给 ' + agentName(id) : '指派给 ' + agentName(id) + ' 执行'}
-                        onClick={() => void assignItems([item.id], 'agent:' + id)}>指派给 {agentName(id)}</button>
+                        onClick={() => void assignItems([item.id], 'agent:' + id)}>{agentName(id)}</button>
                     ))}
                     {executor !== 'ai' && (
                       <button className="btn sm" disabled={busy || completing} title="取消指派，恢复默认 AI 执行"
@@ -1739,4 +1758,13 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function ExecutionInfo({ item: i, session, now }: { item: Item; session?: { agent: string; done?: boolean; items: string[]; needsInput?: boolean; startedAt: number }; now: number }) {
+  return <> {i.aiExecution && <div className="execution-info">
+    <strong>{clientLabels[i.aiExecution.client]} {activeAIExecution(i) ? '正在执行' : i.aiExecution.outcome === 'completed' ? '执行完成' : '任务已释放'}</strong>
+    <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
+    <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, now) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
+  </div>}
+  {!activeAIExecution(i) && session && !session.done && session.items.includes(i.id) && <div className="execution-info"><strong>{agentName(session.agent)} 终端执行中{session.needsInput ? ' · 可能等待输入' : ''}</strong><span>开始 {new Date(session.startedAt).toLocaleString('zh-CN')}</span><span>已执行 {executionDuration(new Date(session.startedAt).toISOString(), now)}</span></div>}</>;
 }

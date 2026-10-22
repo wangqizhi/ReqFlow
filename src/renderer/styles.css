@@ -1166,3 +1166,11 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .side-project-search .icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: var(--side-ink); box-shadow: none; opacity: 1; }
 
 .side-project-section .side-project-tools { flex-shrink: 0; }
+
+.execution-list { max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
+.execution-page .meta { flex-wrap: wrap; }
+.terminal-tabs { display: flex; flex: 0 0 auto; gap: 10px; padding: 6px 14px; overflow-x: auto; background: var(--side-bg); border-top: 1px solid var(--line); }
+.terminal-tabs .btn { color: var(--side-ink); background: var(--side-bg); border-color: var(--side-muted); }
+.terminal-tabs [aria-selected="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.terminal-tab-panel { display: flex; flex-direction: column; flex: 0 0 clamp(160px, 28vh, 260px); max-height: 45%; min-height: 0; }
+.terminal-tab-panel > .publish-terminal { flex: 1; max-height: none; }

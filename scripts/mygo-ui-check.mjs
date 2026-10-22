@@ -54,6 +54,10 @@ try {
   });
   assert.equal(fixture.status, 0, fixture.error?.message || fixture.stderr);
   assert.equal(JSON.parse(fixture.stdout).ok, true, fixture.stdout);
+  const publishProject = cli(['workspace', 'get']).state.projects.find(p => p.name === '发布终端UI检查');
+  const crossItem = cli(['item', 'add', '--project', publishProject.id, '--title', '跨项目执行UI检查']).item.id;
+  const crossBatch = cli(['generate', '--project', publishProject.id, '--items', crossItem]).batch;
+  cli(['execution', 'claim', '--project', publishProject.id, '--run', randomUUID(), '--client', 'codex', '--claims', JSON.stringify([{ id: crossItem, version: 1, batchId: crossBatch.id, hash: crossBatch.hash }])]);
   const reportPath = path.join(temporary, 'report.json');
   const env = { ...process.env, REQFLOW_DATA_DIR: data, REQFLOW_WEBVIEW_DIR: path.join(temporary, 'webview'), REQFLOW_UI_INTERACTIONS: '1', REQFLOW_UI_NOTIFICATION: process.env.REQFLOW_UI_NOTIFICATION || '1' };
   let stderr = '';

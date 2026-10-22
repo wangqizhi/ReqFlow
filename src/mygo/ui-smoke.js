@@ -484,6 +484,19 @@
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
     const executionCards = [...document.querySelectorAll('.req-card')];
     checks.executionTab = { ok: executionCards.length === 5 && ['Codex', 'ZCode', 'Pi', 'Claude Code', 'OpenCode'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
+    const projectExecutionCards = executionCards.map(card => card.querySelector('code').textContent);
+    await click([...document.querySelectorAll('.side-label-action')].find(el => el.textContent.startsWith('执行中')));
+    await waitFor(() => !!document.querySelector('.execution-page'));
+    const globalCards = [...document.querySelectorAll('.execution-list .req-card')];
+    const executingWorkspace = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state;
+    const running = executingWorkspace.projects.flatMap(project => project.items.filter(i => !i.archived && i.status !== 'pending_verification' && i.aiExecution?.runId && !i.aiExecution.endedAt).map(item => ({ project, item })));
+    checks.globalExecutionList = { ok: globalCards.length === running.length && running.every(({project,item}) => globalCards.some(card => card.querySelector('code').textContent === item.number && card.querySelector('.meta button').textContent === project.name && card.querySelector('.execution-info').textContent.includes('已执行'))) };
+    const globalTime = document.querySelector('.execution-info').textContent;
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    checks.globalExecutionList.ok &&= document.querySelector('.execution-info').textContent !== globalTime;
+    await click([...document.querySelectorAll('.execution-list .req-card')].find(card => projectExecutionCards.includes(card.querySelector('code').textContent)).querySelector('.card-actions button'));
+    await waitFor(() => !!document.querySelector('.navtab.active')?.textContent.startsWith('执行中'));
+    checks.globalExecutionList.ok &&= !document.querySelector('.execution-page') && document.querySelectorAll('.req-card').length === 5;
     const timeBefore = document.querySelector('.execution-info').textContent;
     await new Promise(resolve => setTimeout(resolve, 1200));
     checks.executionClock = { ok: document.querySelector('.execution-info').textContent !== timeBefore };
@@ -493,6 +506,14 @@
       await waitFor(() => !document.querySelector('[aria-label="释放 AI 任务"]'));
     }
     checks.executionRelease = { ok: ![...document.querySelectorAll('.navtab')].some(el => el.textContent.startsWith('执行中')) };
+    // Release the second project's isolated fixture before the application exits.
+    await switchProject('发布终端UI检查');
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
+    await click(button('释放任务'));
+    await click(button('确认释放'));
+    await waitFor(() => !document.querySelector('[aria-label="释放 AI 任务"]'));
+    await switchProject(completionProject.name);
+
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
     const reportCard = [...document.querySelectorAll('.card-body')].find(el => el.querySelector('.item-title')?.textContent === '完成说明UI检查');
     const completionNote = reportCard?.querySelector('.completion-note');
