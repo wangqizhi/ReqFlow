@@ -254,6 +254,21 @@ Section "ReqFlow" SEC_APP
     SetErrorLevel 2
     Abort
   root_ok:
+  ; Use the bundled new binary so even upgrades from older apps release claims.
+  ; Silent installs never terminate a running app or release its tasks.
+  IfSilent shutdown_check_done
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=ReqFlow-shutdown.exe "${APP_SOURCE}"
+  Push $DataDir
+  Call ReadDataDirectory
+  ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\"' $0
+  Pop $DataDir
+  ${If} $0 != 0
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  shutdown_check_done:
   ; Request write access; the wizard asks to close a still-running app first (REQ-129).
   Push "$INSTDIR\ReqFlow.exe"
   Call EnsureRuntimeClosed

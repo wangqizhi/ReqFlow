@@ -25,7 +25,7 @@ import { SSHDirectory, isSSH } from './ssh-directory';
 import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
 import { renderMarkdown } from './markdown';
 import { ContentWorkspace } from './content';
-import { executorLabel, useLocalAgents, useAssignSetting, agentName, TERMINAL_AGENTS } from './assignment';
+import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnly, TERMINAL_AGENTS } from './assignment';
 import { ModsOverlay } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
@@ -38,7 +38,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DSH', opencode: 'OpenCode' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
@@ -537,7 +537,7 @@ export default function App() {
     }
   }
 
-  // REQ-205/206：在提交验证弹窗指派 Codex / pi，交互终端立即执行这条需求并进入「执行中」
+  // REQ-205/206/216：在提交验证弹窗指派 Codex / pi / Claude Code / DeepSeek Harness，终端立即执行这条需求并进入「执行中」
   async function startAgentSession(items: { id: string }[], agent: string) {
     if (!p || codexBusy) return;
     const projectId = p.id;
@@ -550,7 +550,7 @@ export default function App() {
       setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
       setCompleteConfirm(null);
       setTab('executing');
-      notify(actual === 'zcode' ? '已启动 ZCode 任务日志，等待插件领取需求' : '已在终端启动 ' + agentName(actual) + '，需求进入执行中');
+      notify(agentLogOnly(actual) ? '已启动 ' + agentName(actual) + ' 任务日志，等待插件完成需求' : '已在终端启动 ' + agentName(actual) + '，需求进入执行中');
     } catch (e: any) { notify(e.message, 'err'); }
     finally { setCodexBusy(false); }
   }
@@ -1275,11 +1275,11 @@ export default function App() {
                     <span className={'assign-state' + (executor === 'ai' ? '' : ' assigned')}>{executorLabel(executor)}</span>
                   </div>
                   {assignEnabled && !completeConfirm.bulk && <div className="assign-row-actions">
-                    {/* REQ-206/207：指派 Codex / pi 在交互终端立即执行这条需求（REQ-205：指派后进入执行中）；仅在实验室开启「指派」后显示 */}
+                    {/* REQ-206/207/216：指派 Codex / pi / Claude Code / DeepSeek Harness 立即执行这条需求（REQ-205：指派后进入执行中）；仅在实验室开启「指派」后显示 */}
                     {TERMINAL_AGENTS.map(id => localAgents?.includes(id) && (
                       <button key={id} className="btn sm" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || executor !== 'ai' || !fresh || executing(fresh)}
-                        title={'在项目目录启动 ' + agentName(id) + (id === 'zcode' ? ' 任务执行日志；通过插件领取后执行' : ' 交互终端执行这条需求')}
-                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} {id === 'zcode' ? '任务执行' : '终端执行'}</button>
+                        title={'在项目目录启动 ' + agentName(id) + (agentLogOnly(id) ? ' 任务执行日志，由插件领取需求后执行' : ' 交互终端执行这条需求')}
+                        onClick={() => { if (fresh) void startAgentSession([fresh], id); }}>指派 {agentName(id)} {agentLogOnly(id) ? '任务执行' : '终端执行'}</button>
                     ))}
                     {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map((id) => (
                       <button key={id} className="btn sm" disabled={busy || completing || executor === 'agent:' + id}
@@ -1297,13 +1297,13 @@ export default function App() {
           </div>
           {assignEnabled && completeConfirm.bulk && <div className="settings-actions">
             {TERMINAL_AGENTS.filter(id => localAgents?.includes(id)).map(id => <button key={id} className="btn" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || completeConfirm.items.some(item => { const fresh = p?.items.find(i => i.id === item.id); return !fresh || (fresh.executor || 'ai') !== 'ai' || executing(fresh); })}
-              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} {id === 'zcode' ? '任务执行' : '终端执行'}</button>)}
+              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} {agentLogOnly(id) ? '任务执行' : '终端执行'}</button>)}
             {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>全部指派给 {agentName(id)}</button>)}
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi 使用交互终端；ZCode 使用只读任务日志，以 build 权限运行，不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
-          {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code 使用交互终端；ZCode 与 DeepSeek Harness 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (

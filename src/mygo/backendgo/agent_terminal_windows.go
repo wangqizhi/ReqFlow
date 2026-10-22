@@ -60,9 +60,14 @@ func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 	// machine control instead of hitting sandbox permission denials.
 	// pi starts with --approve so the project directory is trusted for the run
 	// and startup never blocks on the interactive folder-trust prompt.
+	// Claude Code starts with --dangerously-skip-permissions for the same reason.
+	// DeepSeek Harness runs the shipped headless profile: one task, log output,
+	// then exit; the project directory is the default workspace root.
 	invocations := map[string]string{
-		"codex": "& codex --no-alt-screen --sandbox danger-full-access $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
-		"pi":    "& pi --approve -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"codex":       "& codex --no-alt-screen --sandbox danger-full-access $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"pi":          "& pi --approve -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"claude-code": "& claude --dangerously-skip-permissions $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"dsh":         "& dsh --profile headless $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 	}
 	invocation, ok := invocations[agent]
 	if !ok {

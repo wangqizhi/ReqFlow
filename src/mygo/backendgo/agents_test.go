@@ -18,14 +18,24 @@ func TestAgentConfigAndCommandAllowlist(t *testing.T) {
 	if _, err = b.invokeAgents("agents:save", []any{[]any{"echo injected"}}); err == nil {
 		t.Fatal("arbitrary command accepted")
 	}
+	if _, err = b.invokeAgents("agents:save", []any{[]any{"claude-code", "dsh"}}); err != nil {
+		t.Fatal("Claude Code / DeepSeek Harness rejected", err)
+	}
+	if !aiValidAgent("claude-code") || !aiValidAgentCommand("claude") {
+		t.Fatal("Claude Code 标识或命令未加入白名单")
+	}
 	if ProbeAgent("codex & echo injected")["installed"] != false {
 		t.Fatal("arbitrary shell command executed")
 	}
-	for _, pair := range [][3]string{{"1.2.3", "1.3.0", "yes"}, {"1.3.0", "1.2.3", "no"}, {"1.3.0", "1.3.0", "no"}} {
+	for _, pair := range [][3]string{{"1.2.3", "1.3.0", "yes"}, {"1.3.0", "1.2.3", "no"}, {"1.3.0", "1.3.0", "no"},
+		{"0.2.1-rc.2", "0.2.1-rc.2", "no"}, {"0.2.1-rc.2", "0.2.1", "yes"}, {"0.2.1", "0.2.2-rc.1", "yes"}} {
 		update, valid := aiLatestNewer(pair[0], pair[1])
 		if !valid || update != (pair[2] == "yes") {
-			t.Fatal("version comparison differs")
+			t.Fatalf("version comparison differs: %s -> %s", pair[0], pair[1])
 		}
+	}
+	if _, valid := aiLatestNewer("0.2.1-rc.1", "0.2.1-rc.2"); valid {
+		t.Fatal("pre-release comparison should stay unknown")
 	}
 }
 

@@ -17,17 +17,23 @@ import (
 	"time"
 )
 
-var aiAgentDefinitions = []map[string]any{{"id": "codex", "name": "Codex", "command": "codex", "package": "@openai/codex"}, {"id": "zcode", "name": "ZCode", "command": "zcode", "package": ""}, {"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}}
+var aiAgentDefinitions = []map[string]any{{"id": "codex", "name": "Codex", "command": "codex", "package": "@openai/codex"}, {"id": "zcode", "name": "ZCode", "command": "zcode", "package": ""}, {"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}, {"id": "claude-code", "name": "Claude Code", "command": "claude", "package": "@anthropic-ai/claude-code"}, {"id": "dsh", "name": "DeepSeek Harness", "command": "dsh", "package": "@deepseek-ai/dsh"}}
 var aiAgentVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+(?:-[\w.-]+)?\b`)
 var aiSimpleVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 var agentInstallMu sync.Mutex
 
 func aiValidAgent(id string) bool {
-	return id == "codex" || id == "zcode" || id == "opencode" || id == "pi"
+	return id == "codex" || id == "zcode" || id == "opencode" || id == "pi" || id == "claude-code" || id == "dsh"
+}
+
+// aiValidAgentCommand 是版本探测允许执行的命令白名单；它与 Agent 标识分开，
+// 因为 claude-code 的标识与命令名（claude）不同。
+func aiValidAgentCommand(command string) bool {
+	return command == "codex" || command == "zcode" || command == "opencode" || command == "pi" || command == "claude" || command == "dsh"
 }
 
 func ProbeAgent(command string) map[string]any {
-	if !aiValidAgent(command) {
+	if !aiValidAgentCommand(command) {
 		return map[string]any{"installed": false, "error": "Agent 命令无效"}
 	}
 	if command == "zcode" {
@@ -57,17 +63,43 @@ func ProbeAgent(command string) map[string]any {
 	return result
 }
 
+// aiVersionParts 拆分主版本号与预发布后缀，方便比较形如 0.2.1-rc.2 的版本。
+func aiVersionParts(value string) ([]string, string, bool) {
+	base, pre := value, ""
+	if i := strings.Index(value, "-"); i >= 0 {
+		base, pre = value[:i], value[i+1:]
+	}
+	if !aiSimpleVersion.MatchString(base) {
+		return nil, "", false
+	}
+	return strings.Split(base, "."), pre, true
+}
+
 func aiLatestNewer(local, latest string) (bool, bool) {
-	if !aiSimpleVersion.MatchString(local) || !aiSimpleVersion.MatchString(latest) {
+	if local == latest {
+		return false, true
+	}
+	a, aPre, okA := aiVersionParts(local)
+	b, bPre, okB := aiVersionParts(latest)
+	if !okA || !okB {
 		return false, false
 	}
-	a, b := strings.Split(local, "."), strings.Split(latest, ".")
 	for i := 0; i < 3; i++ {
 		x, _ := strconv.Atoi(a[i])
 		y, _ := strconv.Atoi(b[i])
 		if x != y {
 			return y > x, true
 		}
+	}
+	if aPre != bPre {
+		// 主版本相同时：预发布版本遇到正式版视为可更新，正式版高于预发布版。
+		if bPre == "" {
+			return aPre != "", true
+		}
+		if aPre == "" {
+			return false, true
+		}
+		return false, false
 	}
 	return false, true
 }

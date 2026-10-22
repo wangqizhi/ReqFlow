@@ -32,6 +32,12 @@ func agentTerminalLabel(agent string) string {
 	if agent == "pi" {
 		return "Pi"
 	}
+	if agent == "claude-code" {
+		return "Claude Code"
+	}
+	if agent == "dsh" {
+		return "DeepSeek Harness"
+	}
 	return agent
 }
 
@@ -85,8 +91,8 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
-		if agent != "codex" && agent != "pi" && agent != "zcode" {
-			return nil, errors.New("目前支持指派给 Codex、Pi 或 ZCode")
+		if agent != "codex" && agent != "pi" && agent != "zcode" && agent != "claude-code" && agent != "dsh" {
+			return nil, errors.New("目前支持指派给 Codex、Pi、ZCode、Claude Code 或 DeepSeek Harness")
 		}
 		if len(ids) == 0 {
 			return nil, errors.New("请至少选择一条需求")

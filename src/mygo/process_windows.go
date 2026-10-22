@@ -35,3 +35,10 @@ func showStartupError(message string) {
 	title, _ := syscall.UTF16PtrFromString("ReqFlow MyGO 启动失败")
 	_, _, _ = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x10)
 }
+
+func confirmForceShutdown(message string) bool {
+	text := syscall.StringToUTF16Ptr(message)
+	title := syscall.StringToUTF16Ptr("ReqFlow · 确认强制关闭")
+	r, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x134)
+	return r == 6
+}

@@ -11,9 +11,9 @@ const LAB_AGENTS = [
   { id: 'codex', name: 'Codex', mention: AGENT_MENTION }
 ] as const;
 
-// REQ-213：Local Agent 实验室主动检测系统里的 Agent 是否安装、版本是否需要更新。
+// REQ-213/REQ-216：Local Agent 实验室主动检测系统里的 Agent 是否安装、版本是否需要更新。
 // 结果缓存 5 分钟并复用进行中的检测，打开面板、进入页签或窗口重新聚焦时自动刷新。
-const AGENT_CATALOG = [['codex', 'Codex', '@openai/codex'], ['pi', 'Pi', '@earendil-works/pi-coding-agent'], ['opencode', 'OpenCode', 'opencode-ai'], ['zcode', 'ZCode', '']] as const;
+const AGENT_CATALOG = [['codex', 'Codex', '@openai/codex'], ['pi', 'Pi', '@earendil-works/pi-coding-agent'], ['opencode', 'OpenCode', 'opencode-ai'], ['zcode', 'ZCode', ''], ['claude-code', 'Claude Code', '@anthropic-ai/claude-code'], ['dsh', 'DeepSeek Harness', '@deepseek-ai/dsh']] as const;
 const AGENT_PROBE_TTL = 5 * 60 * 1000;
 let agentProbeCache: { at: number; agents: LocalAgent[] } | null = null;
 let agentProbeRunning: Promise<LocalAgent[]> | null = null;
@@ -125,16 +125,16 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
             {pkg ? <div className="settings-actions"><button className="btn" disabled={busy || !bridge.installLocalAgent} onClick={() => void install(id)}>{busy ? '处理中…' : agent?.installed ? '更新到最新版' : '安装'}</button><code>npm install -g {pkg}@latest</code></div> : <p className="settings-hint">仅检测官方安装；请使用 ZCode 官方安装程序。自定义入口可设置 REQFLOW_ZCODE_CLI。指派采用任务日志模式（build 权限），不支持继续输入；请先在 ZCode 完成模型与登录配置。</p>}
           </section>;
         })}
-        <p className="settings-hint">Codex / Pi 使用交互终端；ZCode 显示任务日志，完成状态以插件回写为准。OpenCode 支持配置、检测与安装，指派执行适配尚未开放。</p>
+        <p className="settings-hint">Codex / Pi / Claude Code 使用交互终端；ZCode 与 DeepSeek Harness 显示任务日志（headless 一次执行、不支持继续输入），完成状态以插件回写为准。OpenCode 支持配置、检测与安装，指派执行适配尚未开放。DeepSeek Harness 指派使用 headless profile，需在该 profile 安装 reqflow-agent-dsh 插件并配置模型，详见插件 README。</p>
       </div> : tab === 'lab' ? <div className="local-agent-body lab-body">
         <div className="lab-target"><span>项目目录</span><code title={projectDir}>{projectDir || '当前项目未关联本地目录，请先在首页「浏览项目 / 关联目录」绑定'}</code></div>
         <section>
           <div className="validation-setting"><h3>Terminal</h3><label className="switch"><input type="checkbox" aria-label="启用 Terminal" checked={terminalEnabled} disabled={!bridge.getPublishOutput} onChange={async e => { try { await setTerminalEnabled(e.target.checked); } catch { setLabError('无法保存 Terminal 设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{terminalEnabled ? '已开启' : '已关闭'}</span></label></div>
-            <p className="settings-hint">开启后立即显示终端，发布时实时显示脚本日志；可收起、重新打开或在独立窗口查看。指派 Codex / Pi / ZCode 时使用可交互的独立会话，可最大化到独立窗口继续沟通。</p>
+            <p className="settings-hint">开启后立即显示终端，发布时实时显示脚本日志；可收起、重新打开或在独立窗口查看。指派 Codex / Pi / ZCode / Claude Code / DeepSeek Harness 时使用独立会话，可最大化到独立窗口继续查看。</p>
         </section>
         <section>
           <div className="validation-setting"><h3>指派</h3><label className="switch"><input type="checkbox" aria-label="启用指派" checked={assignEnabled} onChange={async e => { try { await setAssignEnabled(e.target.checked); } catch { setLabError('无法保存指派设置，请检查本地存储'); } }} /><span className="slider" /><span className="switch-state">{assignEnabled ? '已开启' : '已关闭'}</span></label></div>
-          <p className="settings-hint">开启后，排期表单条与整个列表的「提交验证」弹窗才会出现指派浮层，单条入口可独立指派，列表入口合并 Prompt 统一指派 Codex / pi 在交互终端执行；关闭时弹窗只有是否确认完成。</p>
+          <p className="settings-hint">开启后，排期表单条与整个列表的「提交验证」弹窗才会出现指派浮层，单条入口可独立指派，列表入口合并 Prompt 统一指派 Codex / pi / Claude Code 在交互终端执行，或由 ZCode / DeepSeek Harness 执行任务日志；关闭时弹窗只有是否确认完成。</p>
         </section>
         <section>
           <div className="validation-setting"><h3>Agent 安装与更新</h3><span>{agentTotals.updates ? agentTotals.updates + ' 个可更新' : '已安装 ' + agentTotals.installed + '/' + AGENT_CATALOG.length}</span></div>

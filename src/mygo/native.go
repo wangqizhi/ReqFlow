@@ -11,6 +11,7 @@ import (
 )
 
 type nativeHost struct {
+	prepareClose  func() bool
 	window        atomic.Pointer[mygo.Window]
 	notifications desktopNotifications
 	terminals     map[string]*mygo.Window // Access only on the MyGO main thread.
@@ -78,6 +79,8 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		return nil, fmt.Errorf("native window is unavailable")
 	}
 	switch method {
+	case "window.prepareClose":
+		return n.prepareClose == nil || n.prepareClose(), nil
 	case "terminal.open", "terminal.close", "terminal.status":
 		id := firstString(args)
 		var detached bool

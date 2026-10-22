@@ -316,6 +316,10 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 			b.desktopInstaller = ""
 			return fail(errors.New("本地安装包已丢失或校验失败，请重新下载"), "download"), nil
 		}
+		approved, checkErr := desktopNative(b, "window.prepareClose")
+		if checkErr != nil || approved == false {
+			return state, checkErr
+		}
 		value, e := desktopNative(b, "shell.openPath", b.desktopInstaller)
 		if e == nil && desktopString(value) != "" {
 			e = errors.New(desktopString(value))

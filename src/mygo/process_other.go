@@ -6,5 +6,6 @@ import "os/exec"
 
 func hideChildWindow(cmd *exec.Cmd) {}
 
-func showStartupError(message string) {}
-func registeredDataDir() string       { return "" }
+func showStartupError(message string)          {}
+func registeredDataDir() string                { return "" }
+func confirmForceShutdown(message string) bool { return false }

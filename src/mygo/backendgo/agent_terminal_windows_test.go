@@ -15,6 +15,12 @@ import (
 // never contacts Codex or pi and starts no other Agent against the repository.
 func runInteractiveAgentTerminal(t *testing.T, agent string, wantArgs []string, batch bool) {
 	root, bin := t.TempDir(), t.TempDir()
+	// REQ-216：Agent 标识与命令行不一定相同（claude-code → claude），
+	// fixture 以实际命令名注册本地脚本，避免误用本机已安装的同名 CLI。
+	command := agent
+	if agent == "claude-code" {
+		command = "claude"
+	}
 	script := `[Console]::WriteLine('cwd:'+(Get-Location).Path)
 [Console]::WriteLine('args:'+($args -join '|'))
 $file=$args[-1].Substring($args[-1].IndexOf([char]0xff1a)+1)
@@ -22,7 +28,7 @@ $file=$args[-1].Substring($args[-1].IndexOf([char]0xff1a)+1)
 $value=Read-Host 'message'
 [Console]::WriteLine('reply:'+$value)
 `
-	if err := os.WriteFile(filepath.Join(bin, agent+".ps1"), []byte(script), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, command+".ps1"), []byte(script), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -57,7 +63,7 @@ $value=Read-Host 'message'
 	if _, err := b.desktopAgent("agent:start", args); agent != "codex" && err == nil {
 		t.Fatal("disabled lab allowed")
 	}
-	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"codex", "pi"}); err != nil {
+	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"codex", "pi", "claude-code", "dsh"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.desktopAgent("agent:start", []any{pid, "opencode", []any{item["id"]}}); err == nil {
@@ -144,6 +150,17 @@ func TestInteractivePiTerminal(t *testing.T) {
 	// REQ-206：pi 与 Codex 使用同样的交互终端指派；--approve 自动信任项目目录，
 	// 启动不再停在文件夹信任确认上。
 	runInteractiveAgentTerminal(t, "pi", []string{"--approve"}, false)
+}
+
+func TestInteractiveClaudeCodeTerminal(t *testing.T) {
+	// REQ-216：Claude Code 以 --dangerously-skip-permissions 启动，
+	// 与 Codex 一样在项目目录保持完全控制，不会突然弹权限确认。
+	runInteractiveAgentTerminal(t, "claude-code", []string{"--dangerously-skip-permissions"}, false)
+}
+
+func TestInteractiveDeepSeekHarnessTerminal(t *testing.T) {
+	// REQ-216：DeepSeek Harness 使用 headless profile 执行一条任务并输出日志。
+	runInteractiveAgentTerminal(t, "dsh", []string{"--profile", "headless"}, false)
 }
 
 func TestInteractiveBatchAgentTerminal(t *testing.T) {

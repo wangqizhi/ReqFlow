@@ -94,6 +94,9 @@ func guardAIExecution(p, a map[string]any) error {
 		if i == nil {
 			continue
 		}
+		if op == "complete" && coreString(a["run"]) != "" && ActiveAIExecution(i) == nil {
+			return errors.New("AI 任务已释放或结束，不能使用旧运行记录提交完成")
+		}
 		if e := ActiveAIExecution(i); e != nil {
 			if op == "complete" && e["runId"] == a["run"] {
 				continue

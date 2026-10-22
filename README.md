@@ -8,6 +8,20 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 [2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
+## 2.11.12 更新
+
+- 「提交验证」指派新增 Claude Code 与 DeepSeek Harness：Claude Code 在项目目录以交互终端执行单条或合并需求，DeepSeek Harness 使用 headless profile 执行一次任务并显示只读日志。
+- 「插件 / MOD / AGENT → Local Agent」新增两张卡片，可分别开启或关闭指派，并检测是否安装、当前版本与 npm 是否有更新，支持一键安装或更新到最新版。
+- 检测摘要、页签角标与安装数量统计同时覆盖这两个 Agent；版本比较支持 `0.2.1-rc.2` 这类预发布版本。
+- DeepSeek Harness 指派需要在该 headless profile 安装 `reqflow-agent-dsh` 插件并配置模型，完成状态以插件回写为准；执行中页面与数据看板统一显示为 DeepSeek Harness。
+- 详见 [2.11.12 版本说明](docs/release-2.11.12.md)。
+
+## 2.11.11 更新
+
+- 执行 Agent CLI 任务时关闭程序会弹出确认，默认继续运行；确认强制关闭后释放任务，使其返回排期表。
+- 安装向导与应用内更新也检查执行中任务，取消确认或释放失败则停止操作。
+- 详见 [2.11.11 版本说明](docs/release-2.11.11.md)。
+
 ## 2.11.10 更新
 
 - Local Agent 实验室主动检测：打开面板即在后台检测 Codex、Pi、OpenCode、ZCode 是否安装、版本是否需要更新，不再需要先点检测按钮。
@@ -109,7 +123,7 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 1. **创建项目**：填写项目背景和交付要求，可关联本地目录、通过免密 SSH 绑定远程目录，或配置 GitHub/GitLab 仓库拉取本地文件。项目可以按文件夹分组，通过置顶与鼠标拖拽排序。
 2. **记录需求**：在需求池填写说明，选择新需求、优化或修复，以及 P0–P2 优先级；可补充验收条件、排期日期、参考图片与交付引导。
 3. **安排开发**：选择本轮需求进行排期，生成包含背景、需求、验收要求与交付指引的 Prompt，交给编码助手。Agent/CLI 也可以读取已提交的批次。
-4. **提交验证**：实现完成后转入待验证，人工通过后归档；未通过时记录问题并退回，问题会进入后续 Prompt。实验室打开「指派」后，单条与整个列表的提交验证浮层都可以逐条指派 Codex / pi 在交互终端执行，终端可收起、重新打开或最大化到独立窗口。
+4. **提交验证**：实现完成后转入待验证，人工通过后归档；未通过时记录问题并退回，问题会进入后续 Prompt。实验室打开「指派」后，单条与整个列表的提交验证浮层都可以逐条指派 Codex / pi / Claude Code 在交互终端执行，或由 ZCode / DeepSeek Harness 执行任务日志，终端可收起、重新打开或最大化到独立窗口。
 5. **继续迭代**：归档需求可以重新打开，历史排期可在归档中的「批次历史」查看。
 
 应用保留需求版本、批次快照和验证记录，便于追踪多轮开发。需求可以迁移到其他项目，排期支持日期筛选。
@@ -120,7 +134,7 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 - **项目文件浏览**：查看 Markdown、图片和文本，编辑文本并使用 `Ctrl+S` 保存；支持语法高亮及文件右键操作。
 - **Git 面板**：初始化仓库、查看变动、暂存、提交、管理分支，以及 Pull/Push。AI 可根据实际暂存 diff 生成提交文案。Git 功能需要本机安装 Git。
 - **远程仓库与备份**：支持配置仓库地址、分支及 SSH Key 路径，测试连接，以及将工作区数据备份到远程仓库。
-- **Agent 对接**：提供 Codex、ZCode 和 Pi 插件，用当前项目目录匹配需求，并将实现结果转入待验证。Local Agent 实验室打开即主动检测系统里的 Agent 是否安装与版本是否落后。
+- **Agent 对接**：提供 Codex、ZCode、Pi、OpenCode、Claude Code 和 DeepSeek Harness 插件，用当前项目目录匹配需求，并将实现结果转入待验证。Local Agent 实验室打开即主动检测系统里的 Agent 是否安装与版本是否落后。
 
 远程目录在新建项目或浏览项目时连接，使用本机 OpenSSH 默认密钥/SSH Agent，服务器需启用 SFTP；首次连接前请在终端核对主机指纹并加入 known_hosts。目前远程文件提供只读预览，不执行远程 Git、发布或 Agent 派发。远程项目位于「协作项目」下方，连接检查失败时显示红色断线标识。远程 Agent 后续接入见 [设计讨论稿](docs/remote-agent-execution-design.md)。
 
@@ -151,11 +165,11 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 执行具体命令时，请将示例路径和 `<项目ID>` 替换为实际值。CLI 默认输出单行 JSON，退出码为 0 或 1；`--pretty` 用于人工阅读。Windows 图形程序在部分终端中可能不直接显示输出，可使用管道、重定向或子进程读取。
 
-可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/`、`.reqflow-pi/` 或 `.reqflow-opencode/`，其中包含本地需求快照。
+可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/`、`.reqflow-pi/`、`.reqflow-opencode/`、`.reqflow-claude-code/` 或 `.reqflow-dsh/`，其中包含本地需求快照。
 
 - [完整 CLI 参考](docs/cli-reference.md)
 - [Codex 插件接入](docs/reqflow-codex-plugin.md)
-- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md) · [OpenCode 插件](plugins/reqflow-agent-opencode/README.md)
+- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md) · [OpenCode 插件](plugins/reqflow-agent-opencode/README.md) · [Claude Code 插件](plugins/reqflow-agent-claude/README.md) · [DeepSeek Harness 插件](plugins/reqflow-agent-dsh/README.md)
 - [MOD 协议](docs/mod-protocol.md)
 
 ## 本地开发
@@ -224,7 +238,7 @@ npm run release:github -- --help
 | `src/core/` | 前端类型、界面辅助逻辑和 CLI 帮助，旧存储实现仅供迁移比对 |
 | `src/main/`、`src/preload/` | 旧 Electron 源码参照，不参与 2.0 编译或发布 |
 | `src/renderer/` | React 工作台 |
-| `plugins/` | Codex、ZCode、Pi 接入 |
+| `plugins/` | Codex、ZCode、Pi、OpenCode、Claude Code、DeepSeek Harness 接入 |
 | `scripts/` | 开发、构建、检查与手动发布脚本 |
 | `docs/` | CLI、架构、协议与版本说明 |
 | `build/` | 图标及安装器源码，需要入库 |

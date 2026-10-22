@@ -63,6 +63,12 @@ func run() (int, error) {
 		return 1, err
 	}
 	args := os.Args[1:]
+	if len(args) == 2 && args[0] == "--prepare-install" {
+		if prepareShutdown(backendgo.NewWorkspaceService(args[1])) {
+			return 0, nil
+		}
+		return 2, nil
+	}
 	if len(args) > 0 && args[0] == "--cli" {
 		return backendgo.RunCLI(args[1:], appVersion, dataDir, os.Stdout), nil
 	}
@@ -159,6 +165,21 @@ func run() (int, error) {
 	backend.Native = native.call
 	backend.StartAI()
 	defer backend.StopAI()
+	var shutdownApproved bool
+	native.prepareClose = func() bool {
+		var approved bool
+		mygo.RunOnMain(func() {
+			approved = prepareShutdown(backend.Workspace)
+			shutdownApproved = approved
+		})
+		return approved
+	}
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		shutdownApproved = prepareShutdown(backend.Workspace)
+		if !shutdownApproved {
+			e.PreventDefault()
+		}
+	})
 	mygo.App.WhenReady(func() {
 		// REQ-144：多屏环境下按鼠标所在屏幕居中启动（省略 X/Y 时 mygo 固定在主屏居中）
 		const windowWidth, windowHeight = 1440, 900
@@ -170,6 +191,12 @@ func run() (int, error) {
 			_ = w.SetIcon(icon)
 		}
 		native.window.Store(w)
+		w.OnClose(func(e *mygo.CloseEvent) {
+			if !shutdownApproved {
+				e.PreventDefault()
+				go mygo.App.Quit()
+			}
+		})
 		w.Page().OnWillNavigate(func(e *mygo.NavigateEvent) {
 			if !localNavigation(e.URL) {
 				e.PreventDefault()
