@@ -255,7 +255,7 @@ func maximizeTerminalCheck(ctx context.Context, child *mygo.Window) any {
             await new Promise(r=>setTimeout(r,16));
           }
           const settled=!veilVisible()&&!contentHidden();
-          return {ok:sawVeil&&covered&&settled,sawVeil,covered,settled};
+          return {ok:sawVeil&&covered&&settled&&!!document.querySelector('.terminal-tabs [role="tab"][aria-selected="true"]'),sawVeil,covered,settled,tabs:document.querySelectorAll('.terminal-tabs [role="tab"]').length};
         })()`)
 		if err != nil {
 			result <- map[string]any{"ok": false, "error": err.Error()}

@@ -3,15 +3,17 @@
  * ReqFlow × DeepSeek Harness 交互终端客户端。
  *
  * 在 ReqFlow 指派的 ConPTY 里运行：先把指派任务交给 `dsh --profile headless --json`
- * 执行一轮，按行读取 JSON 事件并渲染；这一轮结束后进入输入循环，用 `--session-id`
- * 延续同一个 DSH 会话，实现与 Codex / Claude Code 终端一致的连续沟通。
+ * 通过临时启动补丁保留运行实例，按行读取 JSON 事件并渲染；后续输入直接发送给
+ * 同一个 Agent，避免每轮重新加载插件和恢复历史。
  *
  * 只依赖 Node 内置模块；不读取 ReqFlow 数据，也不修改 DSH 配置。
  */
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join, dirname, basename, resolve } from 'node:path';
 import process from 'node:process';
 
 const args = new Map();
@@ -74,6 +76,10 @@ let printedError = '';
 let spinner = null;
 let spinnerFrame = 0;
 let closed = false;
+let pendingTurn = null;
+let freshSession = false;
+let launchDirectory = '';
+process.on('exit', () => { if (launchDirectory) rmSync(launchDirectory, { recursive: true, force: true }); });
 
 function clearSpinner() {
   if (!spinner) return;
@@ -175,81 +181,84 @@ function handleEvent(raw) {
   }
 }
 
-function dshCommand(turnSession) {
-  if (!dshBin) return '';
-  const parts = [dshBin, '--profile', profile, '--json'];
-  if (turnSession) parts.push('--session-id', turnSession);
-  return parts;
+function startRuntime() {
+  if (child) return child;
+  if (!dshBin) throw Error('未找到 DeepSeek Harness（dsh）。请先安装 @deepseek-ai/dsh，或设置 REQFLOW_DSH_BIN 指向 lib/bin.js。');
+  launchDirectory = mkdtempSync(join(tmpdir(), 'reqflow-dsh-runtime-'));
+  const patch = join(launchDirectory, 'chat.patch.yml');
+  const runtime = fileURLToPath(new URL('./dsh_runtime.mjs', import.meta.url));
+  writeFileSync(patch, `- id: headless-startup
+  disabled: true
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: reqflow-chat-runtime
+      name: ${JSON.stringify(runtime.replaceAll('\\', '/'))}
+`, 'utf8');
+  const proc = spawn(process.execPath, [dshBin, '--profile', profile, '--patch', patch], {
+    cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, DSH_PERMISSION_MODE: permission, REQFLOW_DSH_BIN: dshBin },
+  });
+  child = proc;
+  let buffered = '';
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', chunk => {
+    buffered += chunk;
+    let index;
+    while ((index = buffered.indexOf('\n')) >= 0) {
+      const row = buffered.slice(0, index).replace(/\r$/, '');
+      buffered = buffered.slice(index + 1);
+      if (!row.trim()) continue;
+      handleEvent(row);
+      let event; try { event = JSON.parse(row); } catch { continue; }
+      if (event.type === 'ready') clearSpinner();
+      if (event.type === 'final') finishTurn();
+    }
+  });
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', chunk => {
+    for (const row of String(chunk).split(/\r?\n/)) {
+      if (/^dsh:/i.test(row.trim()) && !/^dsh:\s*reasoning:/i.test(row.trim())) showError(row);
+    }
+  });
+  proc.stdin.on('error', error => { if (!closed) showError(error.message); });
+  proc.on('error', error => showError(`无法启动 DeepSeek Harness：${error.message}`));
+  proc.on('close', code => {
+    if (buffered.trim()) handleEvent(buffered.trim());
+    if (child === proc) child = null;
+    if (!closed) showError(`DeepSeek Harness 实例已退出（${code}），下次输入将重新启动。`);
+    finishTurn();
+    if (launchDirectory) { rmSync(launchDirectory, { recursive: true, force: true }); launchDirectory = ''; }
+    if (closed) process.exit(0);
+    else if (sessionId) { sessionId = ''; freshSession = true; line(yellow('原实例已结束，下一条输入将开始新会话。')); }
+  });
+  return proc;
+}
+
+function finishTurn() {
+  clearSpinner();
+  if (!printedText && finalText) block(finalText);
+  running = false;
+  const resolve = pendingTurn; pendingTurn = null;
+  resolve?.();
 }
 
 function runTurn(task) {
   return new Promise(resolve => {
-    if (!dshBin) {
-      line(red('未找到 DeepSeek Harness（dsh）。请先安装 @deepseek-ai/dsh，或设置 REQFLOW_DSH_BIN 指向 lib/bin.js。'));
-      resolve();
-      return;
-    }
-    running = true;
-    printedText = false;
-    finalText = '';
-    printedError = '';
-    startSpinner('正在启动 DeepSeek Harness');
-    const argv = dshCommand(sessionId);
-    const proc = spawn(process.execPath, argv, {
-      cwd,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, DSH_PERMISSION_MODE: permission },
-    });
-    child = proc;
-    let buffered = '';
-    const stderrLines = [];
-    proc.stdout.setEncoding('utf8');
-    proc.stdout.on('data', chunk => {
-      buffered += chunk;
-      let index;
-      while ((index = buffered.indexOf('\n')) >= 0) {
-        const row = buffered.slice(0, index).replace(/\r$/, '');
-        buffered = buffered.slice(index + 1);
-        if (row.trim()) handleEvent(row);
-      }
-    });
-    proc.stderr.setEncoding('utf8');
-    proc.stderr.on('data', chunk => {
-      for (const row of String(chunk).split(/\r?\n/)) {
-        const text = row.trim();
-        if (!text) continue;
-        stderrLines.push(text);
-        if (stderrLines.length > 40) stderrLines.shift();
-        if (/^dsh:\s*reasoning:/i.test(text)) continue;
-        if (/^dsh:/i.test(text) && !printedError) showError(text);
-      }
-    });
-    proc.on('error', error => {
-      clearSpinner();
-      line(red(`无法启动 DeepSeek Harness：${error.message}`));
-    });
-    proc.on('close', code => {
-      clearSpinner();
-      if (buffered.trim()) handleEvent(buffered.trim());
-      running = false;
-      child = null;
-      if (!printedText && finalText) block(finalText);
-      if (code !== 0 && !printedError && !closed) {
-        const reason = stderrLines.find(row => /^dsh:/i.test(row));
-        line(red(`✗ dsh 退出码 ${code}${reason ? '：' + reason.replace(/^dsh:\s*/i, '') : ''}`));
-      }
-      resolve();
-    });
-    const payload = String(task ?? '');
-    proc.stdin.on('error', () => { /* 进程可能已经退出 */ });
-    proc.stdin.end(payload, 'utf8');
+    running = true; printedText = false; finalText = ''; printedError = '';
+    startSpinner(child ? '思考中' : '正在启动 DeepSeek Harness');
+    pendingTurn = resolve;
+    try {
+      const proc = startRuntime();
+      proc.stdin.write(JSON.stringify({ type: 'prompt', task: String(task ?? ''), fresh: freshSession }) + '\n', 'utf8');
+      freshSession = false;
+    } catch (error) { showError(error.message); finishTurn(); }
   });
 }
 
 function stopChild() {
   if (!child) return;
-  try { child.kill('SIGINT'); } catch { /* ignore */ }
+  try { child.stdin.write(JSON.stringify({ type: 'cancel' }) + '\n'); } catch { /* ignore */ }
 }
 
 function shutdown(code = 0) {
@@ -258,7 +267,9 @@ function shutdown(code = 0) {
   clearSpinner();
   stopChild();
   if (rl) rl.close();
-  process.exit(code);
+  if (!child) { process.exit(code); return; }
+  child.stdin.end();
+  setTimeout(() => { child?.kill(); process.exit(code); }, 2000).unref();
 }
 
 function banner() {
@@ -286,10 +297,22 @@ function handleLine(input) {
   if (!text) { rl.prompt(); return; }
   if (text === '/exit' || text === '/quit') { shutdown(0); return; }
   if (text === '/new') {
-    sessionId = '';
-    line(dim('已开始新会话。'));
+    sessionId = ''; freshSession = true;
+    line(dim('已开始新会话（复用运行实例）。'));
     rl.prompt();
     return;
+  }
+  if (text.startsWith('/reqflow-task-file ')) {
+    const file = resolve(text.slice('/reqflow-task-file '.length));
+    if (dirname(file).toLowerCase() !== resolve(tmpdir()).toLowerCase() || !/^reqflow-dsh-task-.+\.txt$/.test(basename(file))) {
+      showError('指派任务文件路径无效'); rl.prompt(); return;
+    }
+    try {
+      const task = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+      rmSync(file);
+      line(dim('已接收新的指派任务，复用当前实例…'));
+      return runTurn(task).then(() => { if (!closed) rl.prompt(); });
+    } catch (error) { showError('读取指派任务失败：' + error.message); rl.prompt(); return; }
   }
   if (!rl.terminal) line(dim('❯ ' + text));
   return runTurn(text).then(() => { if (!closed) rl.prompt(); });

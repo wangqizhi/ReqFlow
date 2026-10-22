@@ -172,8 +172,8 @@ func TestDshChatInvocation(t *testing.T) {
 	if strings.Contains(command, "selected-task") {
 		t.Fatalf("task text leaked into the command line: %s", command)
 	}
-	if !strings.Contains(string(dshChatScript), "--json") || !strings.Contains(string(dshChatScript), "--session-id") {
-		t.Fatal("embedded client must drive the json event stream and continue the session")
+	if !strings.Contains(string(dshChatScript), "--patch") || !strings.Contains(string(dshRuntimeScript), "agent.followup") {
+		t.Fatal("embedded client must keep the headless runtime and agent alive")
 	}
 	if !strings.Contains(string(dshChatScript), "DSH_PERMISSION_MODE") {
 		t.Fatal("embedded client must forward the permission mode to dsh")
@@ -201,16 +201,20 @@ func TestDshChatPTY(t *testing.T) {
 	root := t.TempDir()
 	fake := filepath.Join(root, "fake-dsh.mjs")
 	script := `import process from 'node:process';
-const argv = process.argv.slice(2);
-const sid = argv.includes('--session-id') ? argv[argv.indexOf('--session-id') + 1] : '';
-let task = '';
-process.stdin.setEncoding('utf8');
-for await (const chunk of process.stdin) task += chunk;
+import { createInterface } from 'node:readline';
+let round = 0, session = 1;
 const out = value => process.stdout.write(JSON.stringify(value) + '\n');
-out({ type: 'session', sessionId: sid || 'session-test-1' });
-out({ type: 'text', text: '权限：' + (process.env.DSH_PERMISSION_MODE || '') });
-out({ type: 'text', text: (sid ? '继续：' : '开始：') + task.trim() });
-out({ type: 'final', text: '' });
+out({ type: 'ready' });
+createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  if (request.type !== 'prompt') return;
+  if (request.fresh) { session++; round = 0; }
+  out({ type: 'session', sessionId: 'session-test-' + session });
+  out({ type: 'text', text: '权限：' + (process.env.DSH_PERMISSION_MODE || '') });
+  out({ type: 'text', text: (++round > 1 ? '继续：' : '开始：') + request.task.trim() });
+  out({ type: 'text', text: '实例轮次：' + round + '，会话：' + session });
+  out({ type: 'final', text: '' });
+});
 `
 	if err := os.WriteFile(fake, []byte(script), 0600); err != nil {
 		t.Fatal(err)
@@ -259,6 +263,60 @@ out({ type: 'final', text: '' });
 		t.Fatal(err)
 	}
 	waitFor("继续：第二条任务")
+	waitFor("实例轮次：2，会话：1")
+	if _, err := pty.Write([]byte("/new\r第三条任务\r")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("开始：第三条任务")
+	waitFor("实例轮次：1，会话：2")
+	if err := queueDshPrompt(&agentRun{pty: pty}, "追加指派第一行\n追加指派第二行"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("继续：追加指派第一行")
+	waitFor("追加指派第二行")
+	waitFor("实例轮次：2，会话：2")
+	// Reassign after completion through the real desktop API, preserving the PTY.
+	b := NewBackend(t.TempDir(), root, "test")
+	state := coreTestGet(t, b.Workspace)
+	pid := coreString(coreMap(coreList(coreMap(state["state"])["projects"])[0])["id"])
+	mutate := func(action map[string]any) map[string]any {
+		action["project"] = pid
+		result, err := b.Workspace.Mutate(action, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return coreMap(coreList(coreMap(result["state"])["projects"])[0])
+	}
+	mutate(map[string]any{"op": "projectDir", "dir": root})
+	p := mutate(map[string]any{"op": "item", "body": "上一批"})
+	old := coreString(coreMap(coreList(p["items"])[0])["id"])
+	mutate(map[string]any{"op": "generate", "ids": []any{old}})
+	mutate(map[string]any{"op": "complete", "id": old, "summary": "已完成"})
+	p = mutate(map[string]any{"op": "item", "body": "复用指派任务"})
+	var next string
+	for _, value := range coreList(p["items"]) {
+		item := coreMap(value)
+		if coreString(item["body"]) == "复用指派任务" {
+			next = coreString(item["id"])
+		}
+	}
+	mutate(map[string]any{"op": "generate", "ids": []any{next}})
+	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"dsh"}); err != nil {
+		t.Fatal(err)
+	}
+	b.agentRuns = map[string]*agentRun{"existing-dsh": {pty: pty, project: pid, agent: "dsh", items: []string{old}}}
+	result, err := b.desktopAgent("agent:start", []any{pid, "dsh", []any{next}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desktopMap(result)["runId"] != "existing-dsh" || len(b.agentRuns) != 1 {
+		t.Fatal("reassignment restarted the runtime", result)
+	}
+	waitFor("复用指派任务")
+	waitFor("实例轮次：3，会话：2")
+	if dshAssignmentsFinished(p, []string{next}) {
+		t.Fatal("unfinished assignment allowed another batch")
+	}
 }
 
 func TestInteractiveBatchAgentTerminal(t *testing.T) {

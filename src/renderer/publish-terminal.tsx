@@ -2,8 +2,8 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncEx
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { bridge, type TerminalSession } from './api';
-import { agentLogOnly } from './assignment';
+import { bridge, type TerminalSession, type TerminalPeer } from './api';
+import { agentLogOnly, agentName } from './assignment';
 import { Check, Maximize2, RefreshCw, X } from './icons';
 
 const settingKey = 'reqflow-lab-terminal';
@@ -229,7 +229,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
   </section>;
 }
 
-export function PublishTerminalWindow({ runId }: { runId: string }) {
+export function PublishTerminalWindow({ runId, tabs }: { runId: string; tabs?: ReactNode }) {
   const [session, setSession] = useState<TerminalSession | null>(null), [error, setError] = useState('');
   useEffect(() => {
     let cancelled = false, timer: ReturnType<typeof setTimeout>;
@@ -249,7 +249,7 @@ export function PublishTerminalWindow({ runId }: { runId: string }) {
     try { const result = await bridge.closePublishTerminal?.(runId); if (!result?.ok) throw Error(result?.error || '无法关闭终端窗口'); }
     catch (e: any) { setError(e.message); }
   }
-  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载终端…'}</span></div>}</div>;
+  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}{session ? <PublishTerminal tabs={tabs} runId={runId} project={session.project} session={session} onClose={() => void close()} /> : <div className="terminal-loading" role="status"><RefreshCw size={20} className="terminal-loading-spinner" /><span>{error ? '正在重试…' : '正在加载终端…'}</span></div>}</div>;
 }
 
 // Interactive agent sessions use the same dock as publish output, but remain
@@ -330,11 +330,38 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
 }
 
 // 指派终端的独立窗口（REQ-212）：与主窗口共享同一个后端会话，关闭窗口不结束会话。
-export function AgentTerminalWindow({ runId, project, agent }: { runId: string; project: string; agent: string }) {
+export function AgentTerminalWindow({ runId, project, agent, tabs }: { runId: string; project: string; agent: string; tabs?: ReactNode }) {
   const [error, setError] = useState('');
   async function close() {
     try { const result = await bridge.closeAgentTerminal?.(runId); if (!result?.ok) throw Error(result?.error || '无法关闭终端窗口'); }
     catch (e: any) { setError(e.message); }
   }
-  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}<AgentTerminal runId={runId} project={project} agent={agent} onClose={() => void close()} /></div>;
+  return <div className="publish-terminal-window">{error && <p className="terminal-window-error" role="alert">{error}</p>}<AgentTerminal tabs={tabs} runId={runId} project={project} agent={agent} onClose={() => void close()} /></div>;
+}
+
+export function TerminalWindow({ runId, project, agent }: { runId: string; project: string; agent: string }) {
+  const [peers, setPeers] = useState<TerminalPeer[]>([{ runId, agent }]);
+  const [active, setActive] = useState(runId);
+  const [projectName, setProjectName] = useState(project);
+  useEffect(() => {
+    let disposed = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const published = agent ? undefined : await bridge.getPublishTerminal?.(runId);
+        const result = agent ? await bridge.agentTerminalStatus?.(runId) : published;
+        if (!disposed && result?.ok) {
+          if (result.peers?.length) setPeers(result.peers);
+          if (published?.session?.project) setProjectName(published.session.project);
+        }
+      } catch { /* Keep the existing tabs while the backend reconnects. */ }
+      finally { if (!disposed) timer = setTimeout(poll, 500); }
+    };
+    void poll();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [runId, agent]);
+  const selected = peers.some(peer => peer.runId === active) ? active : peers[0]?.runId;
+  const tabs = <div className="terminal-tabs" role="tablist" aria-label="终端会话">{peers.map(peer => <button key={peer.runId} className="terminal-tab" role="tab" aria-selected={selected === peer.runId} onClick={() => setActive(peer.runId)}>{peer.agent ? agentName(peer.agent) : '发布'}</button>)}</div>;
+  return <div className="terminal-group-window">{peers.map(peer => <div key={peer.runId} className="terminal-window-panel" role="tabpanel" aria-label={peer.agent ? agentName(peer.agent) : '发布'} style={{ display: selected === peer.runId ? undefined : 'none' }}>
+    {peer.agent ? <AgentTerminalWindow runId={peer.runId} project={projectName} agent={agentName(peer.agent)} tabs={tabs} /> : <PublishTerminalWindow runId={peer.runId} tabs={tabs} />}
+  </div>)}</div>;
 }

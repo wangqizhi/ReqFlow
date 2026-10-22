@@ -20,6 +20,9 @@ import (
 //go:embed dsh_chat.mjs
 var dshChatScript []byte
 
+//go:embed dsh_runtime.mjs
+var dshRuntimeScript []byte
+
 // dshChatScriptPath 返回本次运行使用的客户端脚本路径，内容变化时覆盖写入，
 // 避免升级后残留旧脚本。
 func dshChatScriptPath() (string, error) {
@@ -28,6 +31,9 @@ func dshChatScriptPath() (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, "dsh-chat.mjs")
+	if err := os.WriteFile(filepath.Join(dir, "dsh_runtime.mjs"), dshRuntimeScript, 0o600); err != nil {
+		return "", err
+	}
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, dshChatScript) {
 		return path, nil
 	}

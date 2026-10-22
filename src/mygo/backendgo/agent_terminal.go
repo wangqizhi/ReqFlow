@@ -137,6 +137,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		if b.agentRuns == nil {
 			b.agentRuns = map[string]*agentRun{}
 		}
+		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 %d 条需求：%s，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", len(items), strings.Join(labels, "、"), BuildPrompt(p, items))
 		for id, r := range b.agentRuns {
 			r.mu.Lock()
 			done := r.done
@@ -152,10 +153,20 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 				}() {
 					return desktopOK(map[string]any{"runId": id, "agent": r.agent}), nil
 				}
+				if agent == "dsh" && r.agent == agent && dshAssignmentsFinished(p, r.items) {
+					if err := queueDshPrompt(r, prompt); err != nil {
+						return nil, err
+					}
+					for _, itemID := range itemIDs {
+						if !slices.Contains(r.items, itemID) {
+							r.items = append(r.items, itemID)
+						}
+					}
+					return desktopOK(map[string]any{"runId": id, "agent": r.agent, "items": r.items}), nil
+				}
 				return nil, errors.New("此项目已有 " + agentTerminalLabel(r.agent) + " 会话，请先完成或停止当前会话")
 			}
 		}
-		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 %d 条需求：%s，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", len(items), strings.Join(labels, "、"), BuildPrompt(p, items))
 		var pty agentPTY
 		if agent == "zcode" {
 			pty, err = startZCodeTask(root, prompt)
@@ -207,13 +218,18 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	}
 	// 指派的交互终端与发布终端共用窗口机制：最大化后在独立窗口继续同一个会话。
 	if channel == "agent:terminal:status" {
-		status, err := desktopNative(b, "terminal.status", desktopText(args, 0))
-		return desktopOK(map[string]any{"detached": status == true}), err
+		id := desktopText(args, 0)
+		_, detached, err := b.terminalWindowID(id)
+		return desktopOK(map[string]any{"detached": detached, "peers": b.currentTerminalPeers(id)}), err
 	}
 	if channel == "agent:terminal:open" || channel == "agent:terminal:close" {
 		id := desktopText(args, 0)
+		windowID, _, err := b.terminalWindowID(id)
+		if err != nil {
+			return nil, err
+		}
 		if channel == "agent:terminal:close" {
-			_, err := desktopNative(b, "terminal.close", id)
+			_, err := desktopNative(b, "terminal.close", windowID)
 			return desktopOK(nil), err
 		}
 		name := r.project
@@ -221,7 +237,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			name = coreString(p["name"])
 		}
 		query := "&agent=" + url.QueryEscape(r.agent) + "&project=" + url.QueryEscape(name)
-		_, err := desktopNative(b, "terminal.open", id, name+" · "+agentTerminalLabel(r.agent), query)
+		_, err = desktopNative(b, "terminal.open", windowID, name+" · "+agentTerminalLabel(r.agent), query)
 		return desktopOK(nil), err
 	}
 	if channel == "agent:status" {
@@ -260,4 +276,38 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		return desktopOK(nil), r.pty.Resize(cols, rows)
 	}
 	return nil, errors.New("未知终端操作")
+}
+
+func dshAssignmentsFinished(project map[string]any, ids []string) bool {
+	for _, id := range ids {
+		item := coreFind(coreList(project["items"]), id)
+		if item != nil && !coreTruthy(item["archived"]) && !coreIn(coreString(item["status"]), "pending_verification", "archived") {
+			return false
+		}
+	}
+	return true
+}
+
+// Send only a short control line through ConPTY; a full multiline prompt can
+// exceed the console line limit or be split into separate chat turns.
+func queueDshPrompt(run *agentRun, prompt string) error {
+	file, err := os.CreateTemp("", "reqflow-dsh-task-*.txt")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	_, err = file.WriteString(prompt)
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		run.control.Lock()
+		_, err = run.pty.Write([]byte("/reqflow-task-file " + name + "\r"))
+		run.control.Unlock()
+	}
+	if err != nil {
+		_ = os.Remove(name)
+	}
+	return err
 }

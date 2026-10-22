@@ -190,9 +190,9 @@ export default function App() {
     });
   }, [terminalEnabled, p?.id, p?.name]);
   useEffect(() => {
-    for (const session of Object.values(publishStates)) {
+    for (const [projectId, session] of Object.entries(publishStates)) {
       if (session.terminalRunId && session.terminalProject) {
-        void bridge.syncPublishTerminal?.(session.terminalRunId, { ...session, project: session.terminalProject, result: session.result ? { ok: session.result.ok, error: session.result.error } : null }).catch(() => {});
+        void bridge.syncPublishTerminal?.(session.terminalRunId, { ...session, projectId, project: session.terminalProject, result: session.result ? { ok: session.result.ok, error: session.result.error } : null }).catch(() => {});
       }
     }
   }, [publishStates]);
@@ -210,7 +210,7 @@ export default function App() {
   }, [terminalRunId]);
   async function detachTerminal() {
     if (!terminalSession?.terminalRunId || !p || !bridge.openPublishTerminal || !bridge.syncPublishTerminal) throw Error('独立终端仅桌面版支持');
-    const synced = await bridge.syncPublishTerminal(terminalSession.terminalRunId, { ...terminalSession, project: p.name, result: terminalSession.result ? { ok: terminalSession.result.ok, error: terminalSession.result.error } : null });
+    const synced = await bridge.syncPublishTerminal(terminalSession.terminalRunId, { ...terminalSession, projectId: p.id, project: p.name, result: terminalSession.result ? { ok: terminalSession.result.ok, error: terminalSession.result.error } : null });
     if (!synced.ok) throw Error(synced.error || '无法同步终端状态');
     const opened = await bridge.openPublishTerminal(terminalSession.terminalRunId);
     if (!opened.ok) throw Error(opened.error || '无法打开独立终端');
@@ -550,7 +550,7 @@ export default function App() {
       if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
       // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
       const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
-      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
+      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: result.items || items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
       setTerminalTabs(tabs => ({ ...tabs, [projectId]: 'agent' }));
       setCompleteConfirm(null);
       setTab('executing');
@@ -866,9 +866,10 @@ export default function App() {
             </div>);
   }
 
+  const activeTerminalTab = agentSession?.open && (!terminalSession?.terminalOpen || terminalTabs[p?.id || ''] !== 'publish') ? 'agent' : 'publish';
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
-          {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={(terminalTabs[p.id] || 'agent') === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
-          {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={(terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
+          {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+          {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
 
   return (
@@ -1259,16 +1260,16 @@ export default function App() {
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {p && ((agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
-        {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && (terminalTabs[p.id] || 'agent') === 'agent' ? undefined : 'none' }}>
+        {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
             onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
             onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />
         </div>}
-        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="发布" style={{ display: terminalSession.terminalOpen && (terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' ? undefined : 'none' }}>
+        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="发布" style={{ display: terminalSession.terminalOpen && activeTerminalTab === 'publish' ? undefined : 'none' }}>
           <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />
         </div>}
-        {agentSession && !agentSession.open && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
-        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>打开终端{publishing ? ' · 执行中' : ''}</button>}
+        {agentSession && !agentSession.open && !agentTerminalDetached && !terminalSession?.terminalOpen && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && !agentSession && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>打开终端{publishing ? ' · 执行中' : ''}</button>}
       </>}
       </div>
 

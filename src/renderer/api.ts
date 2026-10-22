@@ -39,9 +39,10 @@ export type GitMilestoneInfo = { repo: boolean; branch: string; total: number; c
 
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
-export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
+export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; projectId?: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
+export type TerminalPeer = { runId: string; agent?: string };
 export interface ReqFlowBridge {
-  startAgent?(project: string, agent: string, ids: string[]): Promise<{ ok: boolean; runId?: string; agent?: string; error?: string }>;
+  startAgent?(project: string, agent: string, ids: string[]): Promise<{ ok: boolean; runId?: string; agent?: string; items?: string[]; error?: string }>;
   readAgent?(runId: string, offset: number): Promise<{ ok: boolean; data?: string; offset?: number; done?: boolean; idleMs?: number; error?: string }>;
   /** 终端收起后轮询会话状态（是否仍在运行、距上次输出的毫秒数），不需要传输终端内容。 */
   agentStatus?(runId: string): Promise<{ ok: boolean; done?: boolean; idleMs?: number; error?: string }>;
@@ -51,7 +52,7 @@ export interface ReqFlowBridge {
   /** 指派终端最大化：在独立窗口打开同一个交互会话，与发布终端一致。 */
   openAgentTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
   closeAgentTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
-  agentTerminalStatus?(runId: string): Promise<{ ok: boolean; detached?: boolean; error?: string }>;
+  agentTerminalStatus?(runId: string): Promise<{ ok: boolean; detached?: boolean; peers?: TerminalPeer[]; error?: string }>;
   getTerminalSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveTerminalSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
   /** 实验室「指派」开关（REQ-207）：开启后「提交验证」弹窗才会显示指派浮层。 */
@@ -90,7 +91,7 @@ export interface ReqFlowBridge {
   runPublish?(root: string, rel: string, terminalRunId?: string): Promise<{ ok: boolean; output?: string; error?: string }>;
   getPublishOutput?(runId: string, offset: number): Promise<{ ok: boolean; data: string; offset: number; done: boolean; started: boolean; truncated?: boolean; error?: string }>;
   syncPublishTerminal?(runId: string, session: TerminalSession): Promise<{ ok: boolean; error?: string }>;
-  getPublishTerminal?(runId: string): Promise<{ ok: boolean; session: TerminalSession | null; detached: boolean; error?: string }>;
+  getPublishTerminal?(runId: string): Promise<{ ok: boolean; session: TerminalSession | null; detached: boolean; peers?: TerminalPeer[]; error?: string }>;
   openPublishTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
   closePublishTerminal?(runId: string): Promise<{ ok: boolean; error?: string }>;
   /** 发布完成系统通知（REQ-110）：整个发布流程结束时上报结果，窗口不在最前端时由主进程弹系统通知。 */

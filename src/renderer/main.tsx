@@ -1,8 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { AgentTerminalWindow, PublishTerminalWindow } from './publish-terminal';
-import { agentName } from './assignment';
+import { TerminalWindow } from './publish-terminal';
 import './styles.css';
 import { installDraggableOverlays } from './draggable-overlays';
 installDraggableOverlays();
@@ -15,9 +14,7 @@ const terminalProject = params.get('project') || '';
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {terminalRunId
-      ? terminalAgent
-        ? <AgentTerminalWindow runId={terminalRunId} project={terminalProject} agent={agentName(terminalAgent)} />
-        : <PublishTerminalWindow runId={terminalRunId} />
+      ? <TerminalWindow runId={terminalRunId} project={terminalProject} agent={terminalAgent} />
       : <App />}
   </StrictMode>
 );

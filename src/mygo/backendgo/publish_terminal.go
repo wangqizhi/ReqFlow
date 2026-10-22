@@ -9,6 +9,7 @@ import (
 // Frontend-owned release progress also covers Git/AI steps before the script starts.
 // Keep it in memory so all terminal windows can observe the same session.
 type publishTerminalSession struct {
+	ProjectID string `json:"projectId,omitempty"`
 	Project   string `json:"project"`
 	Idle      bool   `json:"idle,omitempty"`
 	Running   bool   `json:"running"`
@@ -70,18 +71,26 @@ func (b *Backend) desktopPublishTerminal(channel string, args []any) (any, error
 		if !exists {
 			return desktopOK(map[string]any{"session": nil, "detached": false}), nil
 		}
-		status, err := desktopNative(b, "terminal.status", id)
-		return desktopOK(map[string]any{"session": session, "detached": status == true}), err
+		_, detached, err := b.terminalWindowID(id)
+		return desktopOK(map[string]any{"session": session, "detached": detached, "peers": b.currentTerminalPeers(id)}), err
 	}
 	if !exists {
 		return nil, errors.New("发布终端会话不存在")
 	}
 	switch channel {
 	case "publish:terminal:open":
-		_, err := desktopNative(b, "terminal.open", id, session.Project)
+		windowID, _, err := b.terminalWindowID(id)
+		if err != nil {
+			return nil, err
+		}
+		_, err = desktopNative(b, "terminal.open", windowID, session.Project)
 		return desktopOK(nil), err
 	case "publish:terminal:close":
-		_, err := desktopNative(b, "terminal.close", id)
+		windowID, _, err := b.terminalWindowID(id)
+		if err != nil {
+			return nil, err
+		}
+		_, err = desktopNative(b, "terminal.close", windowID)
 		return desktopOK(nil), err
 	}
 	return nil, errors.New("未知发布终端操作")

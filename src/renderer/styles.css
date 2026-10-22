@@ -607,6 +607,8 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .terminal-elapsed { color: var(--side-muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
 .publish-terminal > header strong { max-width: 35%; }
 .publish-terminal-window { height: 100vh; display: flex; flex-direction: column; background: var(--side-bg); color: var(--side-ink); }
+.terminal-group-window { height: 100vh; background: var(--side-bg); }
+.terminal-window-panel { height: 100%; }
 .publish-terminal-window > .publish-terminal { flex: 1; max-height: none; border-top: 0; }
 .terminal-window-error { color: #fca5a5; margin: 0; padding: 10px 14px; }
 .publish-terminal .icon-btn { color: var(--side-muted); flex-shrink: 0; }
