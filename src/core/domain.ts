@@ -249,7 +249,7 @@ export function buildPrompt(p: Project, items: Item[]) {
     p.description +
     '\n\n## 引导词 · v' +
     p.guideVersion +
-    '\n' +
+    ' - 请开发过程中严格执行引导词中的要求。\n' +
     guidance +
     (p.contextRules ? "\n\n## 项目守则（自动生成）\n" + p.contextRules : "") +
     '\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n' +

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -45,7 +45,7 @@ function elapsedTime(start: number, end: number) {
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   return (seconds >= 3600 ? String(Math.floor(seconds / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(seconds / 60) % 60).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
 }
-export function PublishTerminal({ runId, project, session, onClose, onDetach }: { runId: string; project: string; session: PublishSession; onClose(): void; onDetach?(): Promise<void> }) {
+export function PublishTerminal({ runId, project, session, onClose, onDetach, tabs }: { runId: string; project: string; session: PublishSession; tabs?: ReactNode; onClose(): void; onDetach?(): Promise<void> }) {
   const container = useRef<HTMLDivElement>(null);
   const veil = useRef<HTMLDivElement>(null);
   const veilApi = useRef<{ show(): void; hide(): void } | null>(null);
@@ -219,7 +219,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach }: 
       <span className="terminal-status" role="status">{detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
-      <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>
+      <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>{tabs}
     <div className="publish-terminal-body">
       <div className="publish-terminal-content" ref={container} />
       <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
@@ -259,7 +259,7 @@ export const AGENT_INPUT_IDLE_MS = 45000;
 export function agentNeedsInput(done: boolean | undefined, idleMs: number | undefined) {
   return !done && (idleMs || 0) >= AGENT_INPUT_IDLE_MS;
 }
-export function AgentTerminal({ runId, project, agent, onClose, onDetach, onState }: { runId: string; project: string; agent: string; onClose(done: boolean): void; onDetach?(): Promise<void>; onState?(state: { needsInput: boolean; done: boolean }): void }) {
+export function AgentTerminal({ runId, project, agent, onClose, onDetach, onState, tabs }: { runId: string; project: string; agent: string; tabs?: ReactNode; onClose(done: boolean): void; onDetach?(): Promise<void>; onState?(state: { needsInput: boolean; done: boolean }): void }) {
   // ZCode 使用只读任务日志；DeepSeek Harness 由后端嵌入的聊天客户端提供交互终端
   const logOnly = agentLogOnly(agent);
   const container = useRef<HTMLDivElement>(null);
@@ -326,7 +326,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); terminal.dispose(); };
   }, [runId]);
-  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header><div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
+  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
 }
 
 // 指派终端的独立窗口（REQ-212）：与主窗口共享同一个后端会话，关闭窗口不结束会话。

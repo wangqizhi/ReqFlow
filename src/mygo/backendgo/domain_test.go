@@ -218,7 +218,7 @@ func TestCorePromptMatchesTypeScript(t *testing.T) {
 		t.Fatal(e)
 	}
 	prompt := BuildPrompt(coreMap(fixture["p"]), coreList(fixture["items"]))
-	if hash := coreHash(prompt); hash != "b5bbe7b3934410f43f782bfe1dc98232856eec727c3d0976e0e8d800ecd8b7d8" {
+	if hash := coreHash(prompt); hash != "1c5e43bcc66146b6698673f20459eef5cd036c9f83fa961d9aba43c6d8def563" {
 		t.Fatalf("TypeScript prompt mismatch: %s", hash)
 	}
 }

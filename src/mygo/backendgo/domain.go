@@ -540,7 +540,7 @@ func BuildPrompt(p map[string]any, items []any) string {
 	if text := coreString(p["contextRules"]); text != "" {
 		rules = "\n\n## 项目守则（自动生成）\n" + text
 	}
-	r := "# 项目：" + coreString(p["name"]) + "\n\n## 项目上下文\n" + coreString(p["description"]) + "\n\n## 引导词 · v" + coreString(p["guideVersion"]) + "\n" + guidance + rules + "\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n" + strings.Join(sections, "\n\n")
+	r := "# 项目：" + coreString(p["name"]) + "\n\n## 项目上下文\n" + coreString(p["description"]) + "\n\n## 引导词 · v" + coreString(p["guideVersion"]) + " - 请开发过程中严格执行引导词中的要求。\n" + guidance + rules + "\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n" + strings.Join(sections, "\n\n")
 	if len(tail) > 0 {
 		r += "\n\n" + strings.Join(tail, "\n\n")
 	}
