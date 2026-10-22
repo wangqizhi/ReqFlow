@@ -500,10 +500,12 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                   const page=document.querySelector('.mods-page'),rect=page.getBoundingClientRect();
                   const body=page.querySelector('.local-agent-body, .mod-document'),bodyRect=body.getBoundingClientRect();
                   const viewport=body.clientHeight;
+                  const headRect=page.querySelector('header').getBoundingClientRect();
+                  const fillsWidth=SURFACE!=='mods-protocol'||Math.abs(bodyRect.width-headRect.width)<2;
                   body.scrollTop=body.scrollHeight;await pause();
                   const reachedEnd=Math.abs(body.scrollHeight-body.clientHeight-body.scrollTop)<2;
                   body.scrollTop=0;
-                  return {ok:!document.querySelector('.overlay')&&!page.querySelector('[role="tablist"]')&&rect.top>=0&&rect.bottom<=innerHeight+1&&bodyRect.bottom<=rect.bottom&&bodyRect.top>=page.querySelector('header').getBoundingClientRect().bottom&&page.clientWidth===document.querySelector('.main').clientWidth&&body.scrollWidth<=body.clientWidth+1&&viewport>100&&reachedEnd&&nav.querySelector('[aria-current="page"]').textContent.startsWith(label),height:innerHeight,scrollable:body.scrollHeight>viewport,reachedEnd};
+                  return {ok:!document.querySelector('.overlay')&&!page.querySelector('[role="tablist"]')&&rect.top>=0&&rect.bottom<=innerHeight+1&&bodyRect.bottom<=rect.bottom&&bodyRect.top>=page.querySelector('header').getBoundingClientRect().bottom&&page.clientWidth===document.querySelector('.main').clientWidth&&body.scrollWidth<=body.clientWidth+1&&viewport>100&&reachedEnd&&fillsWidth&&nav.querySelector('[aria-current="page"]').textContent.startsWith(label),height:innerHeight,scrollable:body.scrollHeight>viewport,reachedEnd,fillsWidth};
                 })()`
 				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
 				report, err := w.Page().EvalContext(ctx, code)

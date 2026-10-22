@@ -292,6 +292,11 @@
     checks.modsWorkspace = { ok: !document.querySelector('.overlay') && !document.querySelector('.mods-page [role="dialog"], .mods-page [role="tablist"]') && modsNav().querySelectorAll('button').length === 4 && document.querySelector('.mods-page').clientWidth === document.querySelector('.main').clientWidth };
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     checks.modsWorkspace.ok &&= !!document.querySelector('.mods-page');
+    // REQ-235：插件 / MOD 说明占满右侧工作区，不再只占据中间一段阅读宽度。
+    const modsPage = document.querySelector('.mods-page');
+    const protocolDoc = modsPage.querySelector('.mod-document');
+    const contentWidth = modsPage.querySelector('.settings-page-head')?.getBoundingClientRect().width || 0;
+    checks.modsProtocolFullWidth = { ok: !!protocolDoc && contentWidth > 0 && Math.abs(protocolDoc.getBoundingClientRect().width - contentWidth) < 2 && protocolDoc.scrollWidth <= protocolDoc.clientWidth + 1, document: protocolDoc?.getBoundingClientRect().width || 0, content: contentWidth };
     await new Promise(resolve => setTimeout(resolve, 250));
     await click(modsMenu('Local Agent'));
     const detectStatus = document.querySelector('[role="status"].agent-detect-status')?.textContent || '';
