@@ -65,8 +65,8 @@ export function agentName(id: string) {
 // 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持；REQ-216 新增 Claude Code / DeepSeek Harness）
 export const TERMINAL_AGENTS = ['codex', 'pi', 'zcode', 'claude-code', 'dsh'];
 
-// 只读任务日志模式：一次性执行、输出日志，不支持继续输入（ZCode、DeepSeek Harness headless）
-export const LOG_AGENTS = ['zcode', 'dsh'];
+// 只读任务日志模式：一次性执行、输出日志，不支持继续输入（ZCode）
+export const LOG_AGENTS = ['zcode'];
 export function agentLogOnly(agent: string) {
   return LOG_AGENTS.includes(agent) || LOG_AGENTS.some(id => agentName(id) === agent);
 }

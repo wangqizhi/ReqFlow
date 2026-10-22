@@ -260,7 +260,7 @@ export function agentNeedsInput(done: boolean | undefined, idleMs: number | unde
   return !done && (idleMs || 0) >= AGENT_INPUT_IDLE_MS;
 }
 export function AgentTerminal({ runId, project, agent, onClose, onDetach, onState }: { runId: string; project: string; agent: string; onClose(done: boolean): void; onDetach?(): Promise<void>; onState?(state: { needsInput: boolean; done: boolean }): void }) {
-  // REQ-216：ZCode 与 DeepSeek Harness 使用只读任务日志（一次性执行，不支持继续输入）
+  // ZCode 使用只读任务日志；DeepSeek Harness 由后端嵌入的聊天客户端提供交互终端
   const logOnly = agentLogOnly(agent);
   const container = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');

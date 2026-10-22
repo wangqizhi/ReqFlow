@@ -125,7 +125,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
             {pkg ? <div className="settings-actions"><button className="btn" disabled={busy || !bridge.installLocalAgent} onClick={() => void install(id)}>{busy ? '处理中…' : agent?.installed ? '更新到最新版' : '安装'}</button><code>npm install -g {pkg}@latest</code></div> : <p className="settings-hint">仅检测官方安装；请使用 ZCode 官方安装程序。自定义入口可设置 REQFLOW_ZCODE_CLI。指派采用任务日志模式（build 权限），不支持继续输入；请先在 ZCode 完成模型与登录配置。</p>}
           </section>;
         })}
-        <p className="settings-hint">Codex / Pi / Claude Code 使用交互终端；ZCode 与 DeepSeek Harness 显示任务日志（headless 一次执行、不支持继续输入），完成状态以插件回写为准。OpenCode 支持配置、检测与安装，指派执行适配尚未开放。DeepSeek Harness 指派使用 headless profile，需在该 profile 安装 reqflow-agent-dsh 插件并配置模型，详见插件 README。</p>
+        <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness 使用交互终端；ZCode 显示任务日志（headless 一次执行、不支持继续输入），完成状态以插件回写为准。OpenCode 支持配置、检测与安装，指派执行适配尚未开放。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入；使用 headless profile，需在该 profile 安装 reqflow-agent-dsh 插件并配置模型，详见插件 README。</p>
       </div> : tab === 'lab' ? <div className="local-agent-body lab-body">
         <div className="lab-target"><span>项目目录</span><code title={projectDir}>{projectDir || '当前项目未关联本地目录，请先在首页「浏览项目 / 关联目录」绑定'}</code></div>
         <section>

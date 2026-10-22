@@ -1302,7 +1302,7 @@ export default function App() {
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code 使用交互终端；ZCode 与 DeepSeek Harness 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness 使用交互终端；ZCode 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入，需在 headless profile 安装 reqflow-agent-dsh 插件并配置模型。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
         </div></div>}

@@ -159,6 +159,8 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		var pty agentPTY
 		if agent == "zcode" {
 			pty, err = startZCodeTask(root, prompt)
+		} else if agent == "dsh" {
+			pty, err = startDshChatPTY(root, prompt, coreString(p["name"]))
 		} else {
 			pty, err = startAgentPTY(root, agent, prompt)
 		}

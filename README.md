@@ -8,6 +8,13 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 [2.0 安装升级与绿色版说明](docs/mygo-portable.md)。新版安装器沿用原安装位置与数据标记，仅清理明确的旧 Electron/Node 组件，保留旧工作区、图片、AI 设置和用户文件。
 
+## 2.11.13 更新
+
+- 「提交验证」指派 DeepSeek Harness 改为交互终端：首轮执行指派任务后可在同一终端继续输入，与 Codex / Claude Code 的交互方式一致。
+- 终端显示 DSH 的思考摘要、工具调用与结果；`Ctrl+C` 中止当前一轮，`/new` 开新会话，`/exit` 退出，每轮沿用同一个 DSH 会话保持上下文。
+- 交互终端客户端随程序内嵌，运行时释放到临时目录；DeepSeek Harness 仍使用 headless profile，需要 Node.js 22+、可用的 `dsh` 命令，并在该 profile 安装 `reqflow-agent-dsh` 插件与配置模型。
+- 只读任务日志仅保留给 ZCode；详见 [2.11.13 版本说明](docs/release-2.11.13.md)。
+
 ## 2.11.12 更新
 
 - 「提交验证」指派新增 Claude Code 与 DeepSeek Harness：Claude Code 在项目目录以交互终端执行单条或合并需求，DeepSeek Harness 使用 headless profile 执行一次任务并显示只读日志。
