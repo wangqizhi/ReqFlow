@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+
+const bundle = await build({ entryPoints: ['src/renderer/agent-session.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
+const { sessionOwnsItem, itemExecuting } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const session = { runId: 'terminal', items: ['rejected', 'other'], versions: { rejected: 1, other: 1 }, done: false };
+const item = { id: 'rejected', version: 1, status: 'ready' };
+assert.equal(itemExecuting(item, session), true, 'initial assignment is visible before plugin claim');
+assert.equal(itemExecuting({ ...item, status: 'pending_verification' }, session), false);
+assert.equal(sessionOwnsItem({ ...item, status: 'pending_verification' }, session), true, 'keep terminal during verification');
+const rejected = { ...item, version: 2 };
+assert.equal(itemExecuting(rejected, session), false, 'rejected new version returns to requirement pool');
+assert.equal(sessionOwnsItem(rejected, session), false, 'old terminal does not own the rejected version');
+assert.equal(itemExecuting({ ...rejected, status: 'in_progress' }, session), false, 'rescheduling cannot revive the old session');
+assert.equal(itemExecuting(rejected, { ...session, versions: { rejected: 2 } }), true, 'new assignment can execute the new version');
+assert.equal(itemExecuting({ ...rejected, aiExecution: { runId: 'new-claim' } }, session), true, 'independent active claims remain visible');
+assert.equal(itemExecuting({ ...item, aiExecution: { runId: 'finished', endedAt: '2026-10-22T10:35:48Z' } }, { ...session, done: true }), false);
+assert.equal(sessionOwnsItem({ ...item, archived: true }, session), false);
+assert.equal(sessionOwnsItem({ ...item, status: 'archived' }, session), false);
+assert.equal(sessionOwnsItem({ ...item, id: 'other' }, session), true, 'another current assignment keeps the terminal alive');
+assert.equal(itemExecuting({ ...item, id: 'unrelated' }, session), false);
+console.log('PASS: terminal assignment, completion, rejection, rescheduling, new claims and archived assignments.');

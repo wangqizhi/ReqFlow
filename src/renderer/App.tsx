@@ -29,6 +29,7 @@ import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnl
 import { ModsPage, modsTabs } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
+import { itemExecuting, sessionOwnsItem, type AgentSession } from './agent-session';
 
 const labels: Record<string, string> = {
   feature: '新需求', improvement: '优化', bug: '修复',
@@ -66,7 +67,7 @@ export default function App() {
     });
   }
   // REQ-205：指派 Agent 的交互终端会话；item 为正在执行的需求，needsInput 表示终端可能在等待输入
-  const [agentSessions, setAgentSessions] = useState<Record<string, { runId: string; open: boolean; items: string[]; agent: string; startedAt: number; needsInput?: boolean; done?: boolean }>>({});
+  const [agentSessions, setAgentSessions] = useState<Record<string, AgentSession>>({});
   // REQ-212：指派终端在独立窗口打开时隐藏停靠终端，窗口关闭后恢复
   const [agentDetached, setAgentDetached] = useState<Record<string, boolean>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
@@ -550,7 +551,14 @@ export default function App() {
       if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
       // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
       const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
-      setAgentSessions(sessions => ({ ...sessions, [projectId]: { runId: result.runId!, open: true, items: result.items || items.map(item => item.id), agent: actual, startedAt: Date.now() } }));
+      setAgentSessions(sessions => {
+        const previous = sessions[projectId];
+        const ids = result.items || items.map(item => item.id);
+        const versions = Object.fromEntries(ids.map(id => [id,
+          previous?.runId === result.runId && previous.versions[id] !== undefined
+            ? previous.versions[id] : p.items.find(item => item.id === id)!.version]));
+        return { ...sessions, [projectId]: { runId: result.runId!, open: true, items: ids, versions, agent: actual, startedAt: previous?.runId === result.runId ? previous.startedAt : Date.now() } };
+      });
       setTerminalTabs(tabs => ({ ...tabs, [projectId]: 'agent' }));
       setCompleteConfirm(null);
       setTab('executing');
@@ -606,8 +614,8 @@ export default function App() {
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
   // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
   const agentSession = agentSessions[p?.id || ''];
-  const executing = (i: Item) => !i.archived && i.status !== 'pending_verification' && (!!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.items.includes(i.id)));
-  const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => !i.archived && i.status !== 'pending_verification' && (!!activeAIExecution(i) || (!!agentSessions[project.id] && !agentSessions[project.id].done && agentSessions[project.id].items.includes(i.id)))).map(item => ({ project, item })));
+  const executing = (i: Item) => itemExecuting(i, agentSession);
+  const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => itemExecuting(i, agentSessions[project.id])).map(item => ({ project, item })));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
@@ -649,10 +657,10 @@ export default function App() {
     for (const [projectId, session] of Object.entries(agentSessions)) {
       if (session.done || agentClosedRef.current.has(session.runId)) continue;
       const project = data.projects.find(project => project.id === projectId);
-      if (project?.items.some(i => session.items.includes(i.id) && !i.archived && i.status !== 'archived')) continue;
+      if (project?.items.some(i => sessionOwnsItem(i, session))) continue;
       agentClosedRef.current.add(session.runId);
       void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
-      notify('本次指派需求已全部归档或移除，' + agentName(session.agent) + ' 终端保留执行输出');
+      notify('本次指派需求已归档、移除或进入新版本，' + agentName(session.agent) + ' 终端保留执行输出');
     }
   }, [data, agentSessions]);
   // REQ-212：指派终端最大化到独立窗口后，主界面不再渲染停靠终端，并轮询窗口是否仍然打开
@@ -880,19 +888,19 @@ export default function App() {
         <div className="brand"><img className="mark" src="./app-icon.png" alt="ReqFlow" /><div>ReqFlow<small>需求流{appVersion ? ` v${appVersion}` : ''}</small></div></div>
         {mode === 'SETTINGS' ? <>
           <div className="side-label">设置</div>
-          <nav className="side-projects" aria-label="设置功能菜单">
+          <nav className="side-projects side-menu" aria-label="设置功能菜单">
             <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
             {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span className="project-name">{title}</span></button>)}
           </nav>
         </> : mode === 'MODS' ? <>
           <div className="side-label">插件 / MOD / AGENT</div>
-          <nav className="side-projects" aria-label="插件功能菜单">
+          <nav className="side-projects side-menu" aria-label="插件功能菜单">
             <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
             {modsTabs.map(([id, title]) => <button className={'side-project' + (modsTab === id ? ' active' : '')} aria-current={modsTab === id ? 'page' : undefined} key={id} onClick={() => setModsTab(id)}><Layers size={16} /><span className="project-name">{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
           </nav>
         </> : mode === 'CONTENT' ? <>
           <div className="side-label">上下文管理</div>
-          <nav className="side-projects" aria-label="上下文管理功能菜单">
+          <nav className="side-projects side-menu" aria-label="上下文管理功能菜单">
             <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
             <div className="side-project active" aria-current="page"><FileText size={16} /><span className="project-name">上下文 · 提示词</span></div>
           </nav>
@@ -1767,11 +1775,11 @@ export default function App() {
   );
 }
 
-function ExecutionInfo({ item: i, session, now }: { item: Item; session?: { agent: string; done?: boolean; items: string[]; needsInput?: boolean; startedAt: number }; now: number }) {
+function ExecutionInfo({ item: i, session, now }: { item: Item; session?: AgentSession; now: number }) {
   return <> {i.aiExecution && <div className="execution-info">
     <strong>{clientLabels[i.aiExecution.client]} {activeAIExecution(i) ? '正在执行' : i.aiExecution.outcome === 'completed' ? '执行完成' : '任务已释放'}</strong>
     <span>开始 {new Date(i.aiExecution.startedAt).toLocaleString('zh-CN')}</span>
     <span>{activeAIExecution(i) ? '已执行 ' + executionDuration(i.aiExecution.startedAt, now) : '用时 ' + executionDuration(i.aiExecution.startedAt, Date.parse(i.aiExecution.endedAt || i.aiExecution.startedAt))}</span>
   </div>}
-  {!activeAIExecution(i) && session && !session.done && session.items.includes(i.id) && <div className="execution-info"><strong>{agentName(session.agent)} 终端执行中{session.needsInput ? ' · 可能等待输入' : ''}</strong><span>开始 {new Date(session.startedAt).toLocaleString('zh-CN')}</span><span>已执行 {executionDuration(new Date(session.startedAt).toISOString(), now)}</span></div>}</>;
+  {!activeAIExecution(i) && session && sessionOwnsItem(i, session) && <div className="execution-info"><strong>{agentName(session.agent)} 终端执行中{session.needsInput ? ' · 可能等待输入' : ''}</strong><span>开始 {new Date(session.startedAt).toLocaleString('zh-CN')}</span><span>已执行 {executionDuration(new Date(session.startedAt).toISOString(), now)}</span></div>}</>;
 }

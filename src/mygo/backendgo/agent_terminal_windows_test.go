@@ -304,7 +304,7 @@ createInterface({ input: process.stdin }).on('line', line => {
 	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"dsh"}); err != nil {
 		t.Fatal(err)
 	}
-	b.agentRuns = map[string]*agentRun{"existing-dsh": {pty: pty, project: pid, agent: "dsh", items: []string{old}}}
+	b.agentRuns = map[string]*agentRun{"existing-dsh": {pty: pty, project: pid, agent: "dsh", items: []string{old}, assignments: map[string]agentAssignment{old: {version: 1}}}}
 	result, err := b.desktopAgent("agent:start", []any{pid, "dsh", []any{next}})
 	if err != nil {
 		t.Fatal(err)

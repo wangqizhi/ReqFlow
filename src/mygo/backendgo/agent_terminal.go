@@ -151,6 +151,12 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			done := r.done
 			r.mu.Unlock()
 			if r.project == project && !done {
+				// A rejected/edited requirement is a new round. Retire its old TUI
+				// before the renderer's asynchronous stop request reaches us.
+				if !agentHasCurrentAssignments(p, r) {
+					go r.close()
+					continue
+				}
 				if r.agent == agent && len(r.items) == len(itemIDs) && func() bool {
 					for _, id := range itemIDs {
 						if !slices.Contains(r.items, id) {
@@ -349,6 +355,16 @@ func dshAssignmentsFinished(project map[string]any, ids []string) bool {
 		}
 	}
 	return true
+}
+
+func agentHasCurrentAssignments(project map[string]any, run *agentRun) bool {
+	for id, assignment := range run.assignments {
+		item := coreFind(coreList(project["items"]), id)
+		if item != nil && !coreTruthy(item["archived"]) && item["status"] != "archived" && coreNum(item["version"]) == assignment.version {
+			return true
+		}
+	}
+	return false
 }
 
 // Send only a short control line through ConPTY; a full multiline prompt can
