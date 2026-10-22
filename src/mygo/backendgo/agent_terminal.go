@@ -42,17 +42,23 @@ func agentTerminalLabel(agent string) string {
 }
 
 type agentRun struct {
-	mu        sync.Mutex
-	control   sync.Mutex
-	pty       agentPTY
-	project   string
-	items     []string
-	agent     string
-	output    []byte
-	total     int64
-	lastWrite int64 // 最近一次 PTY 输出的 Unix 毫秒；total 为 0 时无效
-	done      bool
-	closeOnce sync.Once
+	mu          sync.Mutex
+	control     sync.Mutex
+	pty         agentPTY
+	project     string
+	items       []string
+	assignments map[string]agentAssignment // Protected by Backend.agentMu, like items.
+	agent       string
+	output      []byte
+	total       int64
+	lastWrite   int64 // 最近一次 PTY 输出的 Unix 毫秒；total 为 0 时无效
+	done        bool
+	closeOnce   sync.Once
+}
+
+type agentAssignment struct {
+	version int64
+	batch   string
 }
 
 func (r *agentRun) close() { r.closeOnce.Do(func() { _ = r.pty.Close() }) }
@@ -122,6 +128,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		items := []any{}
 		itemIDs := []string{}
 		labels := []string{}
+		assignments := map[string]agentAssignment{}
 		for _, value := range ids {
 			id := coreString(value)
 			item := coreFind(coreList(p["items"]), value)
@@ -130,6 +137,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			}
 			items = append(items, item)
 			itemIDs = append(itemIDs, id)
+			assignments[id] = agentAssignment{version: coreNum(item["version"]), batch: coreString(ScheduledBatch(p, item)["id"])}
 			labels = append(labels, coreString(item["number"])+"（需求 ID："+id+"）")
 		}
 		b.agentMu.Lock()
@@ -161,6 +169,10 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 						if !slices.Contains(r.items, itemID) {
 							r.items = append(r.items, itemID)
 						}
+						if r.assignments == nil {
+							r.assignments = map[string]agentAssignment{}
+						}
+						r.assignments[itemID] = assignments[itemID]
 					}
 					return desktopOK(map[string]any{"runId": id, "agent": r.agent, "items": r.items}), nil
 				}
@@ -179,24 +191,11 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			return nil, err
 		}
 		id := coreUUID()
-		r := &agentRun{pty: pty, project: project, items: itemIDs, agent: agent}
+		r := &agentRun{pty: pty, project: project, items: itemIDs, assignments: assignments, agent: agent}
 		b.agentRuns[id] = r
 		drained := make(chan struct{})
 		go func() { defer close(drained); r.collect() }()
-		go func() {
-			code, err := pty.Wait(context.Background())
-			r.close()
-			<-drained
-			r.mu.Lock()
-			message := fmt.Sprintf("\r\n[%s 已退出，退出码 %d]\r\n", agentTerminalLabel(agent), code)
-			if err != nil {
-				message = fmt.Sprintf("\r\n[%s 会话结束：%v]\r\n", agentTerminalLabel(agent), err)
-			}
-			r.output = append(r.output, []byte(message)...)
-			r.total += int64(len(message))
-			r.done = true
-			r.mu.Unlock()
-		}()
+		go b.waitAgent(r, drained)
 		return desktopOK(map[string]any{"runId": id}), nil
 	}
 	b.agentMu.Lock()
@@ -276,6 +275,70 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		return desktopOK(nil), r.pty.Resize(cols, rows)
 	}
 	return nil, errors.New("未知终端操作")
+}
+
+// Wait for the CLI to stop before releasing, including a claim made just before
+// exit. Mark done only after cleanup so the UI cannot offer reassignment early.
+func (b *Backend) waitAgent(r *agentRun, drained <-chan struct{}) {
+	code, err := r.pty.Wait(context.Background())
+	r.close()
+	<-drained
+	message := fmt.Sprintf("\r\n[%s 已退出，退出码 %d]\r\n", agentTerminalLabel(r.agent), code)
+	if err != nil {
+		message = fmt.Sprintf("\r\n[%s 会话结束：%v]\r\n", agentTerminalLabel(r.agent), err)
+	}
+	count, releaseErr := b.releaseAgentExecutions(r)
+	if releaseErr != nil {
+		message += fmt.Sprintf("[释放任务失败：%v；请在执行中页面释放剩余任务]\r\n", releaseErr)
+	} else if count > 0 {
+		message += fmt.Sprintf("[已释放 %d 条任务，可在排期表重新指派]\r\n", count)
+	}
+	r.mu.Lock()
+	r.output = append(r.output, []byte(message)...)
+	r.total += int64(len(message))
+	r.done = true
+	r.mu.Unlock()
+}
+
+func (b *Backend) releaseAgentExecutions(r *agentRun) (int, error) {
+	b.agentMu.Lock()
+	assignments := make(map[string]agentAssignment, len(r.assignments))
+	for id, assignment := range r.assignments {
+		assignments[id] = assignment
+	}
+	b.agentMu.Unlock()
+	p, err := b.desktopProject(r.project) // Read fresh storage, including external plugin claims.
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	var failures []error
+	for id, assignment := range assignments {
+		item := coreFind(coreList(p["items"]), id)
+		if item == nil {
+			continue
+		}
+		execution := ActiveAIExecution(item)
+		if execution == nil || execution["client"] != r.agent || coreNum(execution["version"]) != assignment.version || coreString(execution["batchId"]) != assignment.batch {
+			continue
+		}
+		runID := coreString(execution["runId"])
+		_, err := b.Workspace.Mutate(map[string]any{"op": "executionRelease", "project": r.project, "id": id, "run": runID, "note": agentTerminalLabel(r.agent) + " 终端会话已结束，任务返回排期表"}, nil)
+		if err != nil {
+			// Completion or a new owner between the read and mutation is harmless.
+			current, readErr := b.desktopProject(r.project)
+			if readErr == nil {
+				latest := coreFind(coreList(current["items"]), id)
+				if latest == nil || ActiveAIExecution(latest) == nil || ActiveAIExecution(latest)["runId"] != runID {
+					continue
+				}
+			}
+			failures = append(failures, fmt.Errorf("%s: %w", id, err))
+			continue
+		}
+		count++
+	}
+	return count, errors.Join(failures...)
 }
 
 func dshAssignmentsFinished(project map[string]any, ids []string) bool {

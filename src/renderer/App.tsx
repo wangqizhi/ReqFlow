@@ -881,20 +881,20 @@ export default function App() {
         {mode === 'SETTINGS' ? <>
           <div className="side-label">设置</div>
           <nav className="side-projects" aria-label="设置功能菜单">
-            <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span>返回项目菜单</span></button>
-            {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span>{title}</span></button>)}
+            <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
+            {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span className="project-name">{title}</span></button>)}
           </nav>
         </> : mode === 'MODS' ? <>
           <div className="side-label">插件 / MOD / AGENT</div>
           <nav className="side-projects" aria-label="插件功能菜单">
-            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
-            {modsTabs.map(([id, title]) => <button className={'side-project' + (modsTab === id ? ' active' : '')} aria-current={modsTab === id ? 'page' : undefined} key={id} onClick={() => setModsTab(id)}><Layers size={16} /><span>{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
+            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
+            {modsTabs.map(([id, title]) => <button className={'side-project' + (modsTab === id ? ' active' : '')} aria-current={modsTab === id ? 'page' : undefined} key={id} onClick={() => setModsTab(id)}><Layers size={16} /><span className="project-name">{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
           </nav>
         </> : mode === 'CONTENT' ? <>
           <div className="side-label">上下文管理</div>
           <nav className="side-projects" aria-label="上下文管理功能菜单">
-            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
-            <div className="side-project active" aria-current="page"><FileText size={16} /><span>上下文 · 提示词</span></div>
+            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
+            <div className="side-project active" aria-current="page"><FileText size={16} /><span className="project-name">上下文 · 提示词</span></div>
           </nav>
         </> : <>
         <section className="side-project-section" aria-label="我的项目">
@@ -917,7 +917,7 @@ export default function App() {
           ))}</details>)}
         </nav>
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
-            <Plus size={16} /><span>新建项目</span>
+            <Plus size={16} /><span className="project-name">新建项目</span>
           </button>
         </section>
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
