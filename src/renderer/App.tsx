@@ -52,6 +52,7 @@ export default function App() {
   const [version, setVersion] = useState(0);
   const [appVersion, setAppVersion] = useState('');
   const [pid, setPid] = useState('');
+  const [projectQuery, setProjectQuery] = useState('');
   const [tab, setTabState] = useState('feature');
   const projectTabs = useRef<Record<string, string>>({});
   function savedTab(id: string) {
@@ -602,7 +603,7 @@ export default function App() {
   // 执行中的需求也可参与生成：前一轮未完成时可与新需求累积生成，或单独生成
   // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
   const agentSession = agentSessions[p?.id || ''];
-  const executing = (i: Item) => !!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.items.includes(i.id));
+  const executing = (i: Item) => !i.archived && i.status !== 'pending_verification' && (!!activeAIExecution(i) || (!!agentSession && !agentSession.done && agentSession.items.includes(i.id)));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
@@ -636,20 +637,19 @@ export default function App() {
     }, 3000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [agentSessions]);
-  // REQ-205：指派的需求转入待验证（或被归档 / 移除）后，自动停止并关闭对应终端会话
+  // 待验证期间继续交互；全部关联需求归档或移除后停止会话。
   const agentClosedRef = useRef(new Set<string>());
   useEffect(() => {
-    if (!p) return;
-    const session = agentSessions[p.id];
-    if (!session || session.done || agentClosedRef.current.has(session.runId)) return;
-    const remaining = p.items.filter(i => session.items.includes(i.id) && !i.archived && i.status !== 'pending_verification');
-    if (remaining.length) return;
-    agentClosedRef.current.add(session.runId);
-    void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
-    void bridge.closeAgentTerminal?.(session.runId).catch(() => { /* 独立窗口可能已关闭 */ });
-    setAgentSessions(s => { const next = { ...s }; delete next[p.id]; return next; });
-    notify('本次指派需求已全部完成或移除，' + agentName(session.agent) + ' 终端已自动关闭');
-  }, [data, agentSessions, p?.id]);
+    if (!data) return;
+    for (const [projectId, session] of Object.entries(agentSessions)) {
+      if (session.done || agentClosedRef.current.has(session.runId)) continue;
+      const project = data.projects.find(project => project.id === projectId);
+      if (project?.items.some(i => session.items.includes(i.id) && !i.archived && i.status !== 'archived')) continue;
+      agentClosedRef.current.add(session.runId);
+      void bridge.stopAgent?.(session.runId).catch(() => { /* 会话可能已结束 */ });
+      notify('本次指派需求已全部归档或移除，' + agentName(session.agent) + ' 终端保留执行输出');
+    }
+  }, [data, agentSessions]);
   // REQ-212：指派终端最大化到独立窗口后，主界面不再渲染停靠终端，并轮询窗口是否仍然打开
   const agentTerminalRunId = agentSession?.runId;
   useEffect(() => {
@@ -881,20 +881,21 @@ export default function App() {
           </nav>
         </> : <>
         <section className="side-project-section" aria-label="我的项目">
-        <div className="side-label side-label-row">我的项目
+        <div className="side-label side-label-row"><span className="side-project-heading">我的项目</span>
+          <label className="field side-project-search"><input aria-label="搜索项目" placeholder="搜索" value={projectQuery} onChange={e => setProjectQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setProjectQuery(''); }} />{projectQuery && <button type="button" className="icon-btn" aria-label="清除项目搜索" title="清除搜索" onClick={() => setProjectQuery('')}><X size={12} /></button>}</label>
           <div className="side-project-tools"><button className="icon-btn side-add-folder" aria-label="管理项目" title="排序、隐藏与分组" onClick={() => setProjectManagerOpen(true)}><Settings size={15} /></button>
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
           </div>
         </div>
         <nav className="side-projects side-project-scroll" aria-label="项目列表">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
-          {(data.folders || [{id: 'default', name: 'default'}]).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
+          {(data.folders || [{id: 'default', name: 'default'}]).filter(folder => !projectQuery.trim() || data.projects.some(pr => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
             // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
             <button className="side-folder-del" aria-label={'删除文件夹 ' + folder.name} title="删除文件夹（项目迁移到 default）"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
               <Trash size={12} />
             </button>
-          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id).map((pr) => (
+          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((pr) => (
             renderSidebarProject(pr)
           ))}</details>)}
         </nav>
@@ -1153,7 +1154,7 @@ export default function App() {
                       </div>}
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
-                          : executing(i) ? '已在 ' + agentName(agentSession!.agent) + ' 交互终端执行；可直接在终端输入沟通，完成后自动转入待验证并关闭终端。'
+                          : executing(i) ? '已在 ' + agentName(agentSession!.agent) + ' 交互终端执行；可直接在终端输入沟通，完成后自动转入待验证，终端可继续对话至需求归档。'
                           : i.status === 'ready' ? '点击排期转入待开发，或勾选后批量排期。'
                           : i.status === 'in_progress' ? '开发完成后提交验证；需修改时退回需求池重新编辑。'
                           : i.status === 'pending_verification' ? '验证完成后，直接记录通过或未通过。'
@@ -1244,7 +1245,7 @@ export default function App() {
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {p && agentSession?.open && !agentTerminalDetached && <AgentTerminal key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)}
         onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
-        onClose={done => setAgentSessions(s => { const next = { ...s }; if (done) delete next[p.id]; else next[p.id] = { ...s[p.id], open: false }; return next; })}
+        onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
         onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />}
       {p && agentSession && !agentSession.open && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }))}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
       {!agentSessions[p?.id || ''] && terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && p && <PublishTerminal key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />}
@@ -1297,8 +1298,8 @@ export default function App() {
           </div>
           {assignEnabled && completeConfirm.bulk && <div className="settings-actions">
             {TERMINAL_AGENTS.filter(id => localAgents?.includes(id)).map(id => <button key={id} className="btn" disabled={codexBusy || busy || completing || !p?.dir || !bridge.startAgent || completeConfirm.items.some(item => { const fresh = p?.items.find(i => i.id === item.id); return !fresh || (fresh.executor || 'ai') !== 'ai' || executing(fresh); })}
-              onClick={() => void startAgentSession(completeConfirm.items, id)}>合并 {completeConfirm.items.length} 条指派 {agentName(id)} {agentLogOnly(id) ? '任务执行' : '终端执行'}</button>)}
-            {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>全部指派给 {agentName(id)}</button>)}
+              onClick={() => void startAgentSession(completeConfirm.items, id)} title={'合并本次需求并指派给 ' + agentName(id)}>{agentName(id)}</button>)}
+            {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>{agentName(id)}</button>)}
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}

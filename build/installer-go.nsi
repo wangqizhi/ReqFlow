@@ -265,6 +265,21 @@ Section "ReqFlow" SEC_APP
   ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\"' $0
   Pop $DataDir
   ${If} $0 != 0
+    ; Older launchers may have closed the app before this task check. Restore
+    ; the installed app on cancellation; never launch the temporary helper UI.
+    FindWindow $1 "" "ReqFlow · 需求流"
+    ${If} $1 != 0
+      System::Call 'user32::ShowWindow(p r1, i 9)'
+      System::Call 'user32::SetForegroundWindow(p r1)'
+      Goto restore_app_done
+    ${EndIf}
+    IfFileExists "$INSTDIR\ReqFlow.exe" 0 restore_legacy_app
+    ExecShell "open" "$INSTDIR\ReqFlow.exe"
+    Goto restore_app_done
+    restore_legacy_app:
+    IfFileExists "$INSTDIR\ReqFlow-MyGO.exe" 0 restore_app_done
+    ExecShell "open" "$INSTDIR\ReqFlow-MyGO.exe"
+    restore_app_done:
     SetErrorLevel 2
     Abort
   ${EndIf}

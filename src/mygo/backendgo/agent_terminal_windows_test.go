@@ -163,8 +163,8 @@ func TestInteractiveClaudeCodeTerminal(t *testing.T) {
 func TestDshChatInvocation(t *testing.T) {
 	// REQ-216 后续：DeepSeek Harness 没有自带 TUI，由嵌入的聊天客户端驱动 headless
 	// profile；任务正文走临时文件，命令行只保留固定参数与路径。
-	command := dshChatInvocation(`C:\Program Files\nodejs\node.exe`, `C:\Temp\reqflow-dsh\dsh-chat.mjs`, `C:\Temp\reqflow-dsh-task-1.txt`, `C:\work\需求 项目`, `演示"项目`)
-	for _, want := range []string{`node.exe`, `dsh-chat.mjs`, `--task-file`, `reqflow-dsh-task-1.txt`, `--cwd`, `--profile headless`, `--label`, `需求 项目`} {
+	command := dshChatInvocation(`C:\Program Files\nodejs\node.exe`, `C:\Temp\reqflow-dsh\dsh-chat.mjs`, `C:\Temp\reqflow-dsh-task-1.txt`, `C:\work\需求 项目`, `演示"项目`, dshPermissionMode())
+	for _, want := range []string{`node.exe`, `dsh-chat.mjs`, `--task-file`, `reqflow-dsh-task-1.txt`, `--cwd`, `--profile headless`, `--permission`, `danger-full-access`, `--label`, `需求 项目`} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("invocation missing %q: %s", want, command)
 		}
@@ -174,6 +174,21 @@ func TestDshChatInvocation(t *testing.T) {
 	}
 	if !strings.Contains(string(dshChatScript), "--json") || !strings.Contains(string(dshChatScript), "--session-id") {
 		t.Fatal("embedded client must drive the json event stream and continue the session")
+	}
+	if !strings.Contains(string(dshChatScript), "DSH_PERMISSION_MODE") {
+		t.Fatal("embedded client must forward the permission mode to dsh")
+	}
+}
+
+func TestDshPermissionMode(t *testing.T) {
+	// ReqFlow 启动的 DSH 默认完全访问，与 Codex 的 danger-full-access 对齐。
+	t.Setenv("REQFLOW_DSH_PERMISSION_MODE", "")
+	if got := dshPermissionMode(); got != "danger-full-access" {
+		t.Fatalf("default permission = %q", got)
+	}
+	t.Setenv("REQFLOW_DSH_PERMISSION_MODE", "workspace-write")
+	if got := dshPermissionMode(); got != "workspace-write" {
+		t.Fatalf("override permission = %q", got)
 	}
 }
 
@@ -193,6 +208,7 @@ process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) task += chunk;
 const out = value => process.stdout.write(JSON.stringify(value) + '\n');
 out({ type: 'session', sessionId: sid || 'session-test-1' });
+out({ type: 'text', text: '权限：' + (process.env.DSH_PERMISSION_MODE || '') });
 out({ type: 'text', text: (sid ? '继续：' : '开始：') + task.trim() });
 out({ type: 'final', text: '' });
 `
@@ -237,6 +253,7 @@ out({ type: 'final', text: '' });
 		mu.Unlock()
 		t.Fatalf("output missing %q:\n%s", want, captured)
 	}
+	waitFor("权限：danger-full-access")
 	waitFor("开始：第一条任务")
 	if _, err := pty.Write([]byte("第二条任务\r")); err != nil {
 		t.Fatal(err)

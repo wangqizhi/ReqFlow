@@ -36,6 +36,12 @@ process.stdout.on('error', () => {});
 const line = (text = '') => write(text + '\r\n');
 
 const profile = args.get('profile') || 'headless';
+// ReqFlow 启动的 DSH 默认完全访问：与 Codex 指派的 --sandbox danger-full-access
+// 对齐，避免需求实现被工作区沙箱或无人应答的审批拦住。
+// base 组合用 DSH_PERMISSION_MODE 同时决定沙箱模式与审批策略
+// （danger-full-access → 沙箱完全访问、审批 never），因此只设置一个环境变量。
+const permission = args.get('permission') || process.env.REQFLOW_DSH_PERMISSION_MODE || 'danger-full-access';
+const permissionLabel = permission === 'danger-full-access' ? '完全访问' : permission;
 const cwd = args.get('cwd') || process.cwd();
 const label = args.get('label') || '';
 const taskFile = args.get('task-file') || '';
@@ -189,7 +195,12 @@ function runTurn(task) {
     printedError = '';
     startSpinner('正在启动 DeepSeek Harness');
     const argv = dshCommand(sessionId);
-    const proc = spawn(process.execPath, argv, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, argv, {
+      cwd,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, DSH_PERMISSION_MODE: permission },
+    });
     child = proc;
     let buffered = '';
     const stderrLines = [];
@@ -253,6 +264,7 @@ function shutdown(code = 0) {
 function banner() {
   line(bold('DeepSeek Harness') + (label ? dim(' · ' + label) : ''));
   line(dim(`workspace: ${cwd}`));
+  line(dim(`权限：${permissionLabel}` + (permission === 'danger-full-access' ? '' : `（${permission}）`)));
   line(dim('输入消息继续沟通；/exit 退出，/new 开新会话。'));
   line();
 }
