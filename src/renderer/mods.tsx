@@ -103,8 +103,8 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return <div className="overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <section className="help-panel" role="dialog" aria-modal="true" aria-label="插件/MOD/AGENT">
-      <header className="help-header"><div><h2><Layers /> 插件 / MOD / AGENT</h2><p>对接规范草案 · 尚未开放插件安装与运行功能</p></div><button className="icon-btn" aria-label="关闭插件/MOD/AGENT" onClick={onClose}><X /></button></header>
+    <section className="help-panel mods-panel" role="dialog" aria-modal="true" aria-label="插件/MOD/AGENT">
+      <header className="help-header"><div><h2><Layers /> 插件 / MOD / AGENT</h2><p>管理本地 Agent、查看接入说明与实验功能</p></div><button className="icon-btn" aria-label="关闭插件/MOD/AGENT" onClick={onClose}><X /></button></header>
       <div className="settings-tabs" role="tablist">{[['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']].map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}{id === 'agents' && agentTotals.updates > 0 && <span className="tab-badge" title={agentTotals.updates + ' 个 Agent 有可用更新'}>{agentTotals.updates}</span>}</button>)}</div>
       {tab === 'agents' ? <div className="local-agent-body">
         <p className="settings-hint">打开本页会自动检测系统里的 Agent 是否已安装、版本是否需要更新；结果缓存 5 分钟，窗口重新获得焦点或点击「重新检测」会刷新。配置后可以在「提交验证」弹窗中指派（需先在实验室打开「指派」）。Codex 默认可指派；其他 Agent 在此开启后出现在指派选项中。</p>

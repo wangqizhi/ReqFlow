@@ -1172,10 +1172,37 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 
 .execution-list { max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
 .execution-page .meta { flex-wrap: wrap; }
-.terminal-tabs { display: flex; flex: 0 0 auto; align-items: flex-end; gap: 2px; padding: 5px 10px 0; background: color-mix(in srgb, #fff 4%, var(--side-bg)); border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
-.terminal-tab { display: inline-flex; align-items: center; padding: 4px 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; background: transparent; color: var(--side-muted); font-size: 12px; line-height: 18px; white-space: nowrap; flex-shrink: 0; transition: color .15s ease, background-color .15s ease, border-color .15s ease; }
-.terminal-tab:hover { color: var(--side-ink); background: rgba(255, 255, 255, 0.05); }
-.terminal-tab[aria-selected="true"] { position: relative; z-index: 1; margin-bottom: -1px; color: var(--side-ink); background: var(--side-bg); border-color: rgba(255, 255, 255, 0.1); }
+/* Bottom session tabs share the terminal surface, without a separator seam. */
+.publish-terminal > .terminal-tabs { order: 2; }
+.terminal-tabs { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 4px; padding: 0 14px 6px; overflow-x: auto; background: var(--side-bg); border: 0; }
+.terminal-tab { display: inline-flex; align-items: center; padding: 6px 16px; border: 0; border-radius: 0 0 7px 7px; background: transparent; color: var(--side-muted); font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; flex-shrink: 0; transition: color .15s ease, background-color .15s ease; }
+.terminal-tab:hover { color: var(--side-ink); background: var(--side-hover); }
+.terminal-tab[aria-selected="true"] { color: var(--side-ink); background: var(--side-hover); box-shadow: inset 0 -2px var(--accent); }
+.terminal-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .terminal-tab { transition: none; } }
 .terminal-tab-panel { display: flex; flex-direction: column; flex: 0 0 clamp(160px, 28vh, 260px); max-height: 45%; min-height: 0; }
 .terminal-tab-panel > .publish-terminal { flex: 1; max-height: none; }
+
+/* Plugin workspace: consistent navigation, cards and independent action rows. */
+.mods-panel { width: min(960px, 100%); height: min(780px, calc(100vh - 60px)); }
+.mods-panel .help-header { flex-shrink: 0; padding: 20px 24px; }
+.mods-panel .help-header h2 { display: flex; align-items: center; gap: 10px; }
+.mods-panel > .settings-tabs { gap: 20px; padding: 0; margin: 0 24px; }
+.mods-panel > .settings-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 14px 0; background: transparent; font-weight: 400; }
+.mods-panel > .settings-tabs button.on { border-bottom-color: var(--accent); color: var(--accent-dark); }
+.mods-panel .local-agent-body { display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
+.mods-panel .local-agent-body > p, .mods-panel .local-agent-body > .settings-actions { margin: 0; }
+.mods-panel .local-agent-card, .mods-panel .lab-body > section { margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.mods-panel .validation-setting { padding: 0; margin: 0 0 14px; background: transparent; flex-wrap: wrap; }
+.mods-panel h3 { margin: 0; font-size: 15px; }
+.mods-panel .settings-hint { line-height: 1.7; }
+.mods-panel .settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.mods-panel .settings-actions code { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 7px; background: var(--bg); font-size: 12px; overflow-wrap: anywhere; }
+.mods-panel [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }
+.mods-panel .lab-target { margin: 0; }
+.mods-panel .mod-document { flex: 1; overflow-y: auto; line-height: 1.75; }
+@media (max-width: 600px) {
+  .mods-panel { height: calc(100vh - 32px); }
+  .mods-panel .local-agent-body { padding: 16px; }
+  .mods-panel > .settings-tabs { gap: 16px; margin: 0 16px; }
+}

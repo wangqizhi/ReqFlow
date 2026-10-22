@@ -915,8 +915,6 @@ export default function App() {
         </section>
         <button className="side-label side-label-action" onClick={() => { setMode('CONTENT'); setNewMenu(false); }}>上下文管理</button>
         <button className={'side-label side-label-action' + (mode === 'EXECUTING' ? ' active' : '')} aria-current={mode === 'EXECUTING' ? 'page' : undefined} onClick={() => { setMode('EXECUTING'); setNewMenu(false); }}>执行中 <span className="small-count">{globalExecuting.length}</span></button>
-        <div className="side-label">协作项目</div>
-        <div className="flow-note">开发中<br /><small>后续支持项目同步与协作</small></div>
         </>}
         <div className="side-foot">
           <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>

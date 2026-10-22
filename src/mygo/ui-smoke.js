@@ -248,7 +248,7 @@
     const collaboration = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '协作项目');
     // REQ-167：远程项目并入「我的项目」文件夹，「远程项目」独立分组不再存在
     const remoteHeading = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '远程项目');
-    checks.remoteProjectSection = { ok: !remoteHeading && !!collaboration };
+    checks.remoteProjectSection = { ok: !remoteHeading && !collaboration };
     await click(newProject);
     await waitFor(() => !!document.querySelector('.project-create'));
     await click(button('连接远程服务器'));
@@ -261,9 +261,9 @@
     await click(projectDialog.querySelector('[aria-label="关闭"]'));
     await waitFor(() => !document.querySelector('.project-create'));
 
-    const labelStyle = getComputedStyle(collaboration);
+    const labelStyle = getComputedStyle(document.querySelector('.side-label'));
     const contextStyle = getComputedStyle(contextButton);
-    checks.contextEntry = { ok: contextButton.getBoundingClientRect().top >= document.querySelector('.side-project-section').getBoundingClientRect().bottom && contextButton.getBoundingClientRect().top < collaboration.getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
+    checks.contextEntry = { ok: contextButton.getBoundingClientRect().top >= document.querySelector('.side-project-section').getBoundingClientRect().bottom && contextButton.getBoundingClientRect().top < document.querySelector('.side-foot').getBoundingClientRect().top && contextStyle.fontSize === labelStyle.fontSize && contextStyle.color === labelStyle.color && contextStyle.letterSpacing === labelStyle.letterSpacing };
     await click(contextButton);
     checks.contentMenu = { ok: !!document.querySelector('.content-workspace') && !!document.querySelector('.context-git-bar') && !document.querySelector('.switcher') && !document.querySelector('.project-folder') && footer === document.querySelector('.side-foot') };
     await click(button('新建提示词'));
