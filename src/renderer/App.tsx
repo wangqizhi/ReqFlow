@@ -867,8 +867,8 @@ export default function App() {
   }
 
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
-          {agentSession && !agentTerminalDetached && <button className="btn sm" role="tab" aria-selected={(terminalTabs[p.id] || 'agent') === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
-          {terminalEnabled && terminalRunId && !terminalDetached && <button className="btn sm" role="tab" aria-selected={(terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
+          {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={(terminalTabs[p.id] || 'agent') === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+          {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={(terminalTabs[p.id] || (agentSession ? 'agent' : 'publish')) === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
 
   return (

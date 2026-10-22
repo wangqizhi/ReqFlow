@@ -1141,6 +1141,9 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 
 .agent-history-scroll { width: 16px; flex: 0 0 16px; overflow-y: scroll; overflow-x: hidden; scrollbar-color: #78716c #292524; }
 .agent-history-scroll > div { width: 1px; }
+/* REQ-226：Agent 终端仅保留最右侧历史滚动条，隐藏 xterm 自带视口滚动条（滚轮滚动不受影响） */
+.agent-terminal-content .xterm-viewport { scrollbar-width: none; }
+.agent-terminal-content .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 /* 项目搜索与标题工具保持同一行 20px 高度。 */
 .side-project-section .side-label-row { gap: 8px; }
@@ -1169,9 +1172,10 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 
 .execution-list { max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
 .execution-page .meta { flex-wrap: wrap; }
-.terminal-tabs { display: flex; flex: 0 0 auto; gap: 8px; padding: 4px 14px 14px; overflow-x: auto; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--side-bg)), var(--side-bg)); }
-.terminal-tabs .btn { color: var(--side-muted); background: transparent; border-color: transparent; transition: color .18s ease, background-color .18s ease, border-color .18s ease; }
-.terminal-tabs [aria-selected="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--side-bg)); }
-@media (prefers-reduced-motion: reduce) { .terminal-tabs .btn { transition: none; } }
+.terminal-tabs { display: flex; flex: 0 0 auto; align-items: flex-end; gap: 2px; padding: 5px 10px 0; background: color-mix(in srgb, #fff 4%, var(--side-bg)); border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.terminal-tab { display: inline-flex; align-items: center; padding: 4px 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; background: transparent; color: var(--side-muted); font-size: 12px; line-height: 18px; white-space: nowrap; flex-shrink: 0; transition: color .15s ease, background-color .15s ease, border-color .15s ease; }
+.terminal-tab:hover { color: var(--side-ink); background: rgba(255, 255, 255, 0.05); }
+.terminal-tab[aria-selected="true"] { position: relative; z-index: 1; margin-bottom: -1px; color: var(--side-ink); background: var(--side-bg); border-color: rgba(255, 255, 255, 0.1); }
+@media (prefers-reduced-motion: reduce) { .terminal-tab { transition: none; } }
 .terminal-tab-panel { display: flex; flex-direction: column; flex: 0 0 clamp(160px, 28vh, 260px); max-height: 45%; min-height: 0; }
 .terminal-tab-panel > .publish-terminal { flex: 1; max-height: none; }
