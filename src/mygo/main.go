@@ -489,6 +489,35 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 			_, _ = w.Page().EvalContext(ctx, `(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click();await new Promise(r=>setTimeout(r,100));[...document.querySelectorAll('button')].find(b=>b.textContent==='放弃更改')?.click()})()`)
 			time.Sleep(100 * time.Millisecond)
 			// REQ-188：单独捕获上下文管理页（加入 Git 后的状态栏与卡片布局）。
+			for _, surface := range []string{"mods-protocol", "mods-agents", "mods-lab"} {
+				code := `(async()=>{
+                  const pause=()=>new Promise(r=>setTimeout(r,100));
+                  const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  if(!document.querySelector('.mods-page')) { button('插件/MOD/AGENT').click();await pause(); }
+                  const nav=document.querySelector('[aria-label="插件功能菜单"]');
+                  const label=SURFACE==='mods-protocol'?'插件 / MOD 说明':SURFACE==='mods-agents'?'Local Agent':'实验室';
+                  [...nav.querySelectorAll('button')].find(b=>b.textContent.startsWith(label)).click();await pause();
+                  const page=document.querySelector('.mods-page'),rect=page.getBoundingClientRect();
+                  const body=page.querySelector('.local-agent-body, .mod-document'),bodyRect=body.getBoundingClientRect();
+                  const viewport=body.clientHeight;
+                  body.scrollTop=body.scrollHeight;await pause();
+                  const reachedEnd=Math.abs(body.scrollHeight-body.clientHeight-body.scrollTop)<2;
+                  body.scrollTop=0;
+                  return {ok:!document.querySelector('.overlay')&&!page.querySelector('[role="tablist"]')&&rect.top>=0&&rect.bottom<=innerHeight+1&&bodyRect.bottom<=rect.bottom&&bodyRect.top>=page.querySelector('header').getBoundingClientRect().bottom&&page.clientWidth===document.querySelector('.main').clientWidth&&body.scrollWidth<=body.clientWidth+1&&viewport>100&&reachedEnd&&nav.querySelector('[aria-current="page"]').textContent.startsWith(label),height:innerHeight,scrollable:body.scrollHeight>viewport,reachedEnd};
+                })()`
+				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
+				report, err := w.Page().EvalContext(ctx, code)
+				if err != nil {
+					report = map[string]any{"ok": false, "error": err.Error()}
+				}
+				name := fmt.Sprintf("%s.%s-%d", path, surface, height)
+				_ = writeReport(name+".json", report)
+				if png, err := w.CapturePage(); err == nil {
+					_ = os.WriteFile(name+".png", png, 0600)
+				}
+			}
+			_, _ = w.Page().EvalContext(ctx, `[...document.querySelectorAll('button')].find(b=>b.textContent==='返回项目菜单').click()`)
+			time.Sleep(100 * time.Millisecond)
 			contentCode := `(async()=>{
               const pause=()=>new Promise(r=>setTimeout(r,100));
               const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);

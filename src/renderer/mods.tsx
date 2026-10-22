@@ -2,7 +2,7 @@ import protocol from '../../docs/mod-protocol.md?raw';
 import { bridge, type LocalAgent } from './api';
 import { useCallback, useEffect, useState } from 'react';
 import { renderMarkdown } from './markdown';
-import { X, Layers, ExternalLink, Copy } from './icons';
+import { Layers, ExternalLink, Copy } from './icons';
 import { AGENT_MENTION, useAssignSetting } from './assignment';
 import { useTerminalSetting } from './publish-terminal';
 
@@ -31,11 +31,13 @@ function probeLocalAgents(force = false): Promise<LocalAgent[]> {
   return agentProbeRunning;
 }
 
-export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { onClose(): void; initialTab?: string; projectDir?: string }) {
+export const modsTabs = [['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']] as const;
+
+export function ModsPage({ tab, projectDir, onUpdateCountChange }: { tab: string; projectDir?: string; onUpdateCountChange(count: number): void }) {
   const [terminalEnabled, setTerminalEnabled] = useTerminalSetting();
   // REQ-207：实验室「指派」开关，控制「提交验证」弹窗是否显示指派浮层
   const [assignEnabled, setAssignEnabled] = useAssignSetting();
-  const [tab, setTab] = useState(initialTab), [enabled, setEnabled] = useState<string[]>([]), [agents, setAgents] = useState<LocalAgent[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
+  const [enabled, setEnabled] = useState<string[]>([]), [agents, setAgents] = useState<LocalAgent[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
   const [detecting, setDetecting] = useState(false), [probedAt, setProbedAt] = useState(0), [probeError, setProbeError] = useState('');
   const [labBusyId, setLabBusyId] = useState(''), [labStatus, setLabStatus] = useState(''), [labError, setLabError] = useState('');
   const [backend, setBackend] = useState(''), [migrating, setMigrating] = useState(false);
@@ -52,6 +54,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
   }
   const labUrl = projectDir ? 'codex://threads/new?path=' + encodeURIComponent(projectDir) + '&prompt=' + encodeURIComponent(AGENT_MENTION) : '';
   const agentTotals = { installed: agents.filter(a => a.installed).length, updates: agents.filter(a => a.update === true).length, unchecked: agents.filter(a => a.registryError).length };
+  useEffect(() => { onUpdateCountChange(agentTotals.updates); }, [agentTotals.updates, onUpdateCountChange]);
   const detectStatus = !bridge.detectLocalAgents ? '检测仅在桌面版可用'
     : detecting
     ? (agents.length ? '正在检查最新版本…' : '正在检测系统里的 Agent 安装状态…')
@@ -96,16 +99,8 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
       setLabStatus('已调起 ' + agent.name + ' 窗口' + '；Agent 引用已复制到剪贴板，若输入框未自动填入请手动粘贴发送。');
     } catch (e: any) { setLabError(e.message); } finally { setLabBusyId(''); }
   }
-  // REQ-062：Esc 关闭插件/MOD/AGENT 说明浮层
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return <div className="overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <section className="help-panel mods-panel" role="dialog" aria-modal="true" aria-label="插件/MOD/AGENT">
-      <header className="help-header"><div><h2><Layers /> 插件 / MOD / AGENT</h2><p>管理本地 Agent、查看接入说明与实验功能</p></div><button className="icon-btn" aria-label="关闭插件/MOD/AGENT" onClick={onClose}><X /></button></header>
-      <div className="settings-tabs" role="tablist">{[['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']].map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}{id === 'agents' && agentTotals.updates > 0 && <span className="tab-badge" title={agentTotals.updates + ' 个 Agent 有可用更新'}>{agentTotals.updates}</span>}</button>)}</div>
+  return <section className="mods-page" aria-label="插件/MOD/AGENT">
+      <header className="settings-page-head"><h1><Layers />{modsTabs.find(([id]) => id === tab)?.[1]}</h1><p>管理本地 Agent、查看接入说明与实验功能</p></header>
       {tab === 'agents' ? <div className="local-agent-body">
         <p className="settings-hint">打开本页会自动检测系统里的 Agent 是否已安装、版本是否需要更新；结果缓存 5 分钟，窗口重新获得焦点或点击「重新检测」会刷新。配置后可以在「提交验证」弹窗中指派（需先在实验室打开「指派」）。Codex 默认可指派；其他 Agent 在此开启后出现在指派选项中。</p>
         <div className="settings-actions">
@@ -138,7 +133,7 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         </section>
         <section>
           <div className="validation-setting"><h3>Agent 安装与更新</h3><span>{agentTotals.updates ? agentTotals.updates + ' 个可更新' : '已安装 ' + agentTotals.installed + '/' + AGENT_CATALOG.length}</span></div>
-          <p className="settings-hint">{detectStatus}{probeError ? ' · ' + probeError : ''}。打开「Local Agent」页签会自动检测安装状态与版本，可在其中安装或更新。</p>
+          <p className="settings-hint">{detectStatus}{probeError ? ' · ' + probeError : ''}。打开左侧「Local Agent」菜单会自动检测安装状态与版本，可在其中安装或更新。</p>
           <div className="settings-actions"><button className="btn" disabled={detecting || !bridge.detectLocalAgents} onClick={() => void detect()}>{detecting ? '检测中…' : '检测安装 / 检查更新'}</button></div>
         </section>
         {LAB_AGENTS.map((agent) => <section key={agent.id}>
@@ -163,6 +158,5 @@ export function ModsOverlay({ onClose, initialTab = 'protocol', projectDir }: { 
         <p className="settings-hint">链接格式：<code>codex://threads/new?path=&lt;项目目录&gt;&amp;prompt=&lt;Agent引用&gt;</code></p>
         <p className="settings-hint">Agent 引用：<code>{AGENT_MENTION}</code>（Codex）。在绑定 ReqFlow 项目目录的聊天中只发送对应引用，即可授权读取排期并开始实现，完成后回写待验证（见「插件 / MOD 说明」）。</p>
       </div> : <article className="help-body fb-md mod-document" dangerouslySetInnerHTML={{ __html: renderMarkdown(protocol) }} />}
-    </section>
-  </div>;
+    </section>;
 }

@@ -1186,25 +1186,19 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .terminal-tab-panel > .publish-terminal { flex: 1; max-height: none; }
 
 /* Plugin workspace: consistent navigation, cards and independent action rows. */
-.mods-panel { width: min(960px, 100%); height: min(780px, calc(100vh - 60px)); }
-.mods-panel .help-header { flex-shrink: 0; padding: 20px 24px; }
-.mods-panel .help-header h2 { display: flex; align-items: center; gap: 10px; }
-.mods-panel > .settings-tabs { gap: 20px; padding: 0; margin: 0 24px; }
-.mods-panel > .settings-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 14px 0; background: transparent; font-weight: 400; }
-.mods-panel > .settings-tabs button.on { border-bottom-color: var(--accent); color: var(--accent-dark); }
-.mods-panel .local-agent-body { display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
-.mods-panel .local-agent-body > p, .mods-panel .local-agent-body > .settings-actions { margin: 0; }
-.mods-panel .local-agent-card, .mods-panel .lab-body > section { margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.mods-panel .validation-setting { padding: 0; margin: 0 0 14px; background: transparent; flex-wrap: wrap; }
-.mods-panel h3 { margin: 0; font-size: 15px; }
-.mods-panel .settings-hint { line-height: 1.7; }
-.mods-panel .settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-.mods-panel .settings-actions code { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 7px; background: var(--bg); font-size: 12px; overflow-wrap: anywhere; }
-.mods-panel [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }
-.mods-panel .lab-target { margin: 0; }
-.mods-panel .mod-document { flex: 1; overflow-y: auto; line-height: 1.75; }
+.mods-page { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; padding: 24px 28px; }
+.mods-page h1 { display: flex; align-items: center; gap: 10px; }
+.mods-page .local-agent-body { display: flex; flex-direction: column; gap: 16px; background: var(--bg); padding: 0 12px 0 0; }
+.mods-page .local-agent-body > p, .mods-page .local-agent-body > .settings-actions { margin: 0; }
+.mods-page .local-agent-card, .mods-page .lab-body > section { flex-shrink: 0; margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.mods-page .validation-setting { padding: 0; margin: 0 0 14px; background: transparent; flex-wrap: wrap; }
+.mods-page h3 { margin: 0; font-size: 15px; }
+.mods-page .settings-hint { line-height: 1.7; }
+.mods-page .settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.mods-page .settings-actions code { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 7px; background: var(--bg); font-size: 12px; overflow-wrap: anywhere; }
+.mods-page [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }
+.mods-page .lab-target { margin: 0; }
+.mods-page .mod-document { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 0 0; line-height: 1.75; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-  .mods-panel { height: calc(100vh - 32px); }
-  .mods-panel .local-agent-body { padding: 16px; }
-  .mods-panel > .settings-tabs { gap: 16px; margin: 0 16px; }
+  .mods-page { padding: 20px; }
 }

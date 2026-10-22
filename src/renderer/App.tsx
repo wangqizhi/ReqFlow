@@ -26,7 +26,7 @@ import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projec
 import { renderMarkdown } from './markdown';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnly, TERMINAL_AGENTS } from './assignment';
-import { ModsOverlay } from './mods';
+import { ModsPage, modsTabs } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
 
@@ -107,11 +107,11 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState('ai');
   const [settingsBusy, setSettingsBusy] = useState(false);
   const settingsPage = useRef<SettingsPageHandle>(null);
-  const [modsOpen, setModsOpen] = useState(false);
   const [modsTab, setModsTab] = useState('protocol');
+  const [modsUpdates, setModsUpdates] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS' | 'EXECUTING'>('FLOW');
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS' | 'EXECUTING' | 'MODS'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -884,6 +884,12 @@ export default function App() {
             <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span>返回项目菜单</span></button>
             {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span>{title}</span></button>)}
           </nav>
+        </> : mode === 'MODS' ? <>
+          <div className="side-label">插件 / MOD / AGENT</div>
+          <nav className="side-projects" aria-label="插件功能菜单">
+            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span>返回项目菜单</span></button>
+            {modsTabs.map(([id, title]) => <button className={'side-project' + (modsTab === id ? ' active' : '')} aria-current={modsTab === id ? 'page' : undefined} key={id} onClick={() => setModsTab(id)}><Layers size={16} /><span>{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
+          </nav>
         </> : mode === 'CONTENT' ? <>
           <div className="side-label">上下文管理</div>
           <nav className="side-projects" aria-label="上下文管理功能菜单">
@@ -918,7 +924,7 @@ export default function App() {
         <button className={'side-label side-label-action' + (mode === 'EXECUTING' ? ' active' : '')} aria-current={mode === 'EXECUTING' ? 'page' : undefined} onClick={() => { setMode('EXECUTING'); setNewMenu(false); }}>执行中 <span className="small-count">{globalExecuting.length}</span></button>
         </>}
         <div className="side-foot">
-          <button className="btn plain" onClick={() => { setModsTab('protocol'); setModsOpen(true); }}><Layers />插件/MOD/AGENT</button>
+          <button className={'btn plain' + (mode === 'MODS' ? ' active' : '')} aria-current={mode === 'MODS' ? 'page' : undefined} onClick={() => { if (mode !== 'MODS') setModsTab('protocol'); setMode('MODS'); setNewMenu(false); }}><Layers />插件/MOD/AGENT</button>
           <button className={'btn plain' + (mode === 'STATS' ? ' active' : '')} aria-current={mode === 'STATS' ? 'page' : undefined} onClick={() => { setMode('STATS'); setNewMenu(false); }}><BarChart />数据看板</button>
           <button className="btn plain" aria-current={mode === 'SETTINGS' ? 'page' : undefined} onClick={() => { setMode('SETTINGS'); setNewMenu(false); }}><Settings />设置</button>
           <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
@@ -945,7 +951,7 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
           const result = await bridge.getWorkspace();
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
@@ -1282,7 +1288,6 @@ export default function App() {
       {directoryPicker && <div className="overlay" role="dialog" aria-modal="true" aria-label="选择项目目录"><div className="dialog"><h3>选择项目目录</h3><p>绑定本地文件夹，或连接远程服务器选择目录。</p><div className="settings-actions"><button className="btn" onClick={async () => { const r = await bridge.pickDir?.(); if (r?.ok && r.dir && await act({ op: 'projectDir', dir: r.dir }, true)) { setDirectoryPicker(false); setBrowserOpen(true); } }}>本地文件夹</button><button className="btn primary" onClick={() => { setDirectoryPicker(false); setSSHPicker(true); }}>远程服务器</button><button className="btn" onClick={() => setDirectoryPicker(false)}>取消</button></div></div></div>}
       {sshPicker && <SSHDirectory initial={p?.dir} onClose={() => setSSHPicker(false)} onSelect={async dir => { if (await act({ op: 'projectDir', dir }, true)) { setSSHPicker(false); setBrowserOpen(true); } else { throw Error('项目目录未保存，请查看主界面提示'); } }} />}
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
-      {modsOpen && <ModsOverlay initialTab={modsTab} projectDir={p?.dir} onClose={() => setModsOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? (completeConfirm.bulk ? '，或合并 Prompt 统一指派 Agent 执行。' : '，或在下方指派 Agent 执行。') : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
           <div className="assign-list">
@@ -1326,7 +1331,7 @@ export default function App() {
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
           {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness 使用交互终端；ZCode 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入，需在 headless profile 安装 reqflow-agent-dsh 插件并配置模型。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness。</p>}
-          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setModsOpen(true); }}>配置 Agent</button>}</div>
+          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setMode('MODS'); setNewMenu(false); }}>配置 Agent</button>}</div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="还有未验证的功能"

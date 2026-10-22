@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,7 +19,8 @@ import (
 )
 
 // Go requests respect environment proxies and the Windows user's configured
-// manual proxy. Local endpoints bypass the system proxy.
+// manual proxy. Local endpoints bypass the system proxy. If the proxy cannot
+// be reached, retry directly within the same request timeout.
 func DesktopHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = func(r *http.Request) (*url.URL, error) {
@@ -31,8 +33,48 @@ func DesktopHTTPClient(timeout time.Duration) *http.Client {
 		}
 		return desktopSystemProxy(r.URL.Scheme)
 	}
-	return &http.Client{Timeout: timeout, Transport: transport}
+	direct := transport.Clone()
+	direct.Proxy = nil
+	return &http.Client{Timeout: timeout, Transport: &desktopProxyFallbackTransport{proxy: transport, direct: direct}}
 }
+
+type desktopProxyFallbackTransport struct {
+	proxy  *http.Transport
+	direct *http.Transport
+}
+
+func (t *desktopProxyFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.proxy.RoundTrip(req)
+	var proxyErr, dialErr *net.OpError
+	// Only retry a failure to dial the proxy, before any request is sent.
+	// HTTP errors, proxy authentication and destination errors are left intact.
+	if !errors.As(err, &proxyErr) || proxyErr.Op != "proxyconnect" ||
+		!errors.As(proxyErr.Err, &dialErr) || dialErr.Op != "dial" || req.Context().Err() != nil {
+		return response, err
+	}
+	retry := req.Clone(req.Context())
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.GetBody == nil {
+			return response, err
+		}
+		body, bodyErr := req.GetBody()
+		if bodyErr != nil {
+			return response, err
+		}
+		retry.Body = body
+	}
+	response, directErr := t.direct.RoundTrip(retry)
+	if directErr != nil {
+		return response, fmt.Errorf("代理连接失败（%v）；直连失败：%w", err, directErr)
+	}
+	return response, nil
+}
+
+func (t *desktopProxyFallbackTransport) CloseIdleConnections() {
+	t.proxy.CloseIdleConnections()
+	t.direct.CloseIdleConnections()
+}
+
 func desktopCloneMap(m map[string]any) map[string]any {
 	r := map[string]any{}
 	for k, v := range m {
