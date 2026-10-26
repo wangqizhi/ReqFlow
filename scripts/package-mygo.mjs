@@ -1,4 +1,4 @@
-// Ship only the verified Go executable. NSIS is a packaging tool, never a runtime.
+// Ship the verified Go desktop and Linux server executables. NSIS is a packaging tool.
 import { readFile, writeFile, stat, mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -22,6 +22,20 @@ export const legacyRuntimeFiles = [
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export async function sha256(file) { return createHash('sha256').update(await readFile(file)).digest('hex'); }
+export async function serverBinaryDefines(directory, info) {
+  const defines = [];
+  for (const arch of ['amd64', 'arm64']) {
+    const name = `reqflow-server-linux-${arch}`;
+    const file = path.join(directory, name);
+    const metadata = info.serverBinaries?.find(binary => binary.name === name);
+    const details = await stat(file).catch(() => null);
+    if (!details?.isFile() || !metadata || details.size !== metadata.size || await sha256(file) !== metadata.sha256) {
+      throw Error(`Linux 服务端缺失或与构建信息不一致：${name}，请先 npm run build`);
+    }
+    defines.push(`/DAPP_SERVER_LINUX_${arch.toUpperCase()}=${file}`);
+  }
+  return defines;
+}
 export function cleanupInclude() {
   return '!macro ReqFlowCleanupLegacy\n' + legacyRuntimeFiles.map(file =>
     `  Push "$INSTDIR\\${file.replaceAll('/', '\\')}"\n  Call DeleteLegacyRuntime`).join('\n') +
@@ -50,6 +64,7 @@ export async function packageMyGO() {
   const info = JSON.parse(await readFile(path.join(root, 'release/win-unpacked/build-info.json'), 'utf8'));
   const sourceHash = await sha256(source);
   if (info.version !== version || info.backend !== 'go' || info.runtime !== 'mygo' || info.sha256 !== sourceHash) throw Error('Go 构建信息或哈希不匹配，请先 npm run build');
+  const serverDefines = await serverBinaryDefines(path.dirname(source), info);
   const release = path.join(root, 'release');
   const setupName = `ReqFlow-Setup-${version}.exe`;
   const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-'));
@@ -58,11 +73,6 @@ export async function packageMyGO() {
     await writeFile(include, cleanupInclude(), 'utf8');
     const nsis = await findNSIS();
     // REQ-237：同步服务端 Linux 二进制随安装包分发（SSH 自动安装时上传到服务器）。
-    const serverDefines = [];
-    for (const name of ['reqflow-server-linux-amd64', 'reqflow-server-linux-arm64']) {
-      const file = path.join(release, 'win-unpacked', name);
-      if ((await stat(file).catch(() => null))?.isFile()) serverDefines.push(`/DAPP_SERVER_${name.replaceAll('-', '_').toUpperCase()}=${file}`);
-    }
     await run(nsis, ['/V2', '/INPUTCHARSET', 'UTF8', `/DAPP_VERSION=${version}`, `/DAPP_FILE_VERSION=${version.split('-')[0]}.0`,
       `/DAPP_SOURCE=${source}`, `/DAPP_BUILD_INFO=${path.join(release, 'win-unpacked/build-info.json')}`,
       `/DAPP_ICON=${path.join(root, 'build/icon.ico')}`, `/DAPP_OUTPUT=${path.join(release, setupName)}`,
@@ -71,7 +81,7 @@ export async function packageMyGO() {
     const assets = {};
     for (const name of [setupName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };
     await writeFile(path.join(release, `packaging-manifest-${version}.json`), JSON.stringify({
-      version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: sourceHash }, assets,
+      version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: sourceHash }, serverBinaries: info.serverBinaries, assets,
       cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true, files: legacyRuntimeFiles }
     }, null, 2) + '\n');
     await writeFile(path.join(release, `SHA256SUMS-${version}.txt`), Object.entries(assets).map(([name, value]) => `${value.sha256}  ${name}`).join('\n') + '\n');

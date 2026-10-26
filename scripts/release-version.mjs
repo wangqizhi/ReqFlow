@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { serverBinaryDefines } from './package-mygo.mjs';
 
 const versionPattern = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
 
@@ -36,6 +37,7 @@ export async function verifyReleaseVersion(root, version) {
   // REQ-237：reqflow-server-linux-* 是随包分发的同步服务端二进制，允许存在；其余一律拒绝。
   const allowed = ['ReqFlow.exe', 'build-info.json', 'reqflow-server-linux-amd64', 'reqflow-server-linux-arm64'];
   if (files.some(name => !allowed.includes(name)) || !files.includes('ReqFlow.exe') || !files.includes('build-info.json')) throw Error('Go 构建目录包含多余运行库或未知文件，请重新构建');
+  await serverBinaryDefines(directory, packaged);
   const digest = file => {
     const bytes = readFileSync(file);
     if (bytes.subarray(0, 2).toString() !== 'MZ') throw Error(`产物不是 Windows 可执行文件：${path.basename(file)}`);
@@ -50,6 +52,7 @@ export async function verifyReleaseVersion(root, version) {
   const names = [`ReqFlow-Setup-${version}.exe`];
   if (manifest.version !== version || manifest.backend !== 'go' || manifest.runtime !== 'mygo' ||
       manifest.executable?.path !== 'win-unpacked/ReqFlow.exe' || manifest.executable?.sha256 !== executableHash ||
+      JSON.stringify(manifest.serverBinaries) !== JSON.stringify(packaged.serverBinaries) ||
       JSON.stringify(Object.keys(manifest.assets || {}).sort()) !== JSON.stringify([...names].sort()) ||
       manifest.cleanup?.mode !== 'explicit-files-only' || manifest.cleanup?.recursiveDelete !== false || manifest.cleanup?.preservesData !== true) {
     throw Error('Go 打包清单与当前构建不一致；拒绝旧 Electron 产物');

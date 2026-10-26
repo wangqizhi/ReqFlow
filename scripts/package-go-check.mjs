@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, copyFile, rm, stat, symlink } from
 import { spawnSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { legacyRuntimeFiles, cleanupInclude, findNSIS, sha256 } from './package-mygo.mjs';
+import { legacyRuntimeFiles, cleanupInclude, findNSIS, sha256, serverBinaryDefines } from './package-mygo.mjs';
 import { prepareReleaseVersion, verifyReleaseVersion } from './release-version.mjs';
 
 const root = path.resolve(process.cwd());
@@ -35,7 +35,22 @@ try {
   run('go', ['build', '-o', app, '.'], { cwd: sourceDir });
   const infoFile = path.join(sourceDir, 'build-info.json');
   const appHash = await sha256(app);
-  await writeFile(infoFile, JSON.stringify({ version, backend: 'go', runtime: 'mygo', executable: 'ReqFlow.exe', sha256: appHash }));
+  const serverBinaries = [];
+  for (const arch of ['amd64', 'arm64']) {
+    const name = `reqflow-server-linux-${arch}`;
+    await put(sourceDir, name, `Linux server fixture ${arch}`);
+    serverBinaries.push({ name, sha256: await sha256(path.join(sourceDir, name)), size: (await stat(path.join(sourceDir, name))).size });
+  }
+  const info = { version, backend: 'go', runtime: 'mygo', executable: 'ReqFlow.exe', sha256: appHash, serverBinaries };
+  await writeFile(infoFile, JSON.stringify(info));
+  const serverDefines = await serverBinaryDefines(sourceDir, info);
+  assert.ok(serverDefines[0].startsWith('/DAPP_SERVER_LINUX_AMD64='));
+  assert.ok(serverDefines[1].startsWith('/DAPP_SERVER_LINUX_ARM64='));
+  await assert.rejects(serverBinaryDefines(temp, info), /Linux 服务端缺失/);
+  await assert.rejects(serverBinaryDefines(sourceDir, { ...info, serverBinaries: [] }), /Linux 服务端缺失/);
+  await put(sourceDir, serverBinaries[0].name, 'corrupt');
+  await assert.rejects(serverBinaryDefines(sourceDir, info), /Linux 服务端缺失/);
+  await put(sourceDir, serverBinaries[0].name, 'Linux server fixture amd64');
   const include = path.join(temp, 'cleanup.nsh');
   const text = cleanupInclude();
   assert.ok(!/RMDir\s+\/r|Delete\s+[^\r\n]*\*/i.test(text), 'No recursive deletes or wildcards');
@@ -45,6 +60,7 @@ try {
     const setup = path.join(temp, name + '.exe');
     run(nsis, ['/V2', '/INPUTCHARSET', 'UTF8', '/DAPP_VERSION=2.0.0', '/DAPP_FILE_VERSION=2.0.0.0', `/DAPP_SOURCE=${app}`,
       `/DAPP_BUILD_INFO=${infoFile}`, `/DAPP_ICON=${path.join(root, 'build/icon.ico')}`, `/DAPP_OUTPUT=${setup}`,
+      ...serverDefines,
       `/DLEGACY_CLEANUP_INCLUDE=${include}`, ...(sandbox ? [`/DSANDBOX_DIR=${directory}`] : []), path.join(root, 'build/installer-go.nsi')]);
     return setup;
   }
@@ -65,6 +81,8 @@ try {
   for (const name of sentinelFiles) assert.equal(await readFile(path.join(install, name), 'utf8'), 'DO NOT DELETE ' + name, 'Preserved ' + name);
   assert.deepEqual(await readFile(path.join(install, 'data-dir.cfg')), cfg, 'UTF-16 legacy data-dir.cfg is unchanged');
   assert.equal(await sha256(path.join(install, 'ReqFlow.exe')), appHash);
+  for (const binary of serverBinaries) assert.equal(await sha256(path.join(install, binary.name)), binary.sha256, `Installed ${binary.name}`);
+  console.log('PASS: both Linux server binaries are mandatory, verified and installed with matching hashes');
   console.log('PASS: actual silent NSIS upgrade replaces app, clears explicit Electron/Node files, preserves SQLite/JSON/images/AI/profile/LocalState/custom files and UTF-16 data marker');
 
   const protectedInstall = path.join(temp, 'protected install');
@@ -148,14 +166,18 @@ SectionEnd
   await mkdir(path.join(releaseDir, 'win-unpacked'), { recursive: true });
   await copyFile(app, path.join(releaseDir, 'win-unpacked/ReqFlow.exe'));
   await copyFile(infoFile, path.join(releaseDir, 'win-unpacked/build-info.json'));
+  for (const binary of serverBinaries) await copyFile(path.join(sourceDir, binary.name), path.join(releaseDir, 'win-unpacked', binary.name));
   await copyFile(setup, path.join(releaseDir, `ReqFlow-Setup-${version}.exe`));
   const assets = {};
   for (const kind of ['Setup']) {
     const name = `ReqFlow-${kind}-${version}.exe`;
     assets[name] = { sha256: await sha256(path.join(releaseDir, name)), size: (await stat(path.join(releaseDir, name))).size };
   }
-  await put(releaseDir, `packaging-manifest-${version}.json`, JSON.stringify({ version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: appHash }, assets, cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true } }));
+  await put(releaseDir, `packaging-manifest-${version}.json`, JSON.stringify({ version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: appHash }, serverBinaries, assets, cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true } }));
   assert.equal(await verifyReleaseVersion(fixtureRoot, version), version);
+  await rm(path.join(releaseDir, 'win-unpacked', serverBinaries[0].name));
+  await assert.rejects(verifyReleaseVersion(fixtureRoot, version), /Linux 服务端缺失/);
+  await copyFile(path.join(sourceDir, serverBinaries[0].name), path.join(releaseDir, 'win-unpacked', serverBinaries[0].name));
   // A stale portable file is ignored; only the installer is a release asset.
   await put(releaseDir, `ReqFlow-Portable-${version}.exe`, 'stale portable');
   assert.equal(await verifyReleaseVersion(fixtureRoot, version), version);
@@ -167,7 +189,9 @@ SectionEnd
   console.log('PASS: PE product versions match 2.0.0; Go manifest/hash checks reject substituted Electron assets and stale runtime directories');
 
   // _?= keeps the uninstaller in place and makes the test wait for real completion.
-  run(path.join(install, 'Uninstall ReqFlow.exe'), ['/S', `_?=${install}`]);
+  // NSIS requires the final _?= value without quotes, even when it contains spaces.
+  run(path.join(install, 'Uninstall ReqFlow.exe'), ['/S', `_?=${install}`], { windowsVerbatimArguments: true });
+  for (const binary of serverBinaries) assert.equal(await exists(path.join(install, binary.name)), false, `Uninstalled ${binary.name}`);
   for (const name of sentinelFiles) assert.ok(await exists(path.join(install, name)), 'Uninstall preserves ' + name);
   assert.deepEqual(await readFile(path.join(install, 'data-dir.cfg')), cfg);
   console.log('PASS: actual silent uninstaller retains user data and data-dir.cfg');

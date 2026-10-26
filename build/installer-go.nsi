@@ -297,12 +297,8 @@ Section "ReqFlow" SEC_APP
   File "${APP_SOURCE}"
   IfErrors write_failed
   File "${APP_BUILD_INFO}"
-!ifdef APP_SERVER_LINUX_AMD64
   File "${APP_SERVER_LINUX_AMD64}"
-!endif
-!ifdef APP_SERVER_LINUX_ARM64
   File "${APP_SERVER_LINUX_ARM64}"
-!endif
   WriteUninstaller "$INSTDIR\Uninstall ReqFlow.exe"
   IfErrors write_failed
   !insertmacro ReqFlowCleanupLegacy
