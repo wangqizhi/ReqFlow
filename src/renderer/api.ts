@@ -37,6 +37,25 @@ export type GitOpResult = { ok: true; summary?: string; warning?: string } | { o
 export type GitCommit = { hash: string; short: string; author: string; date: string; refs: string[]; subject: string; body: string };
 export type GitMilestoneInfo = { repo: boolean; branch: string; total: number; commits: GitCommit[] };
 
+/** Server Agent 状态：已连接 / 断开 / 证书异常 / 待确认信任（REQ-239）。 */
+export type ServerAgentStatus = {
+  state?: 'connected' | 'disconnected' | 'need_trust' | 'cert_error';
+  error?: string;
+  kind?: string;
+  code?: string;
+  lastConnectedAt?: string;
+  lastSyncError?: string;
+  fingerprint?: string;
+  lastSync?: Record<string, string>;
+};
+export type ServerAgentEntry = {
+  id: string; name: string; host: string; port: number;
+  tlsMode: 'pin' | 'ca'; autoConnect: boolean;
+  hasToken: boolean; trusted: boolean; fingerprint?: string;
+  status?: ServerAgentStatus;
+};
+export type ServerAgentDraft = Partial<ServerAgentEntry> & { token?: string };
+
 export type LocalAgent = { id: string; name: string; command: string; package: string; installed: boolean; version?: string; latest?: string; update?: boolean; error?: string; registryError?: string };
 export type PublishSession = { running: boolean; step: string; startedAt: number; endedAt?: number; revision: number; result: { ok: boolean; output: string; error?: string } | null };
 export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; projectId?: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
@@ -140,6 +159,17 @@ export interface ReqFlowBridge {
   gitCommit?(root: string, message: string, project?: string, items?: { id: string; version: number }[]): Promise<GitOpResult>;
   gitBranchCreate?(root: string, name: string): Promise<GitOpResult>;
   gitBranchSwitch?(root: string, name: string): Promise<GitOpResult>;
+  // Server Agent（REQ-237/238/239/240）：远程同步服务端的配置、信任与项目同步
+  getServerAgents?(): Promise<{ ok: boolean; servers?: ServerAgentEntry[]; error?: string }>;
+  saveServerAgent?(config: ServerAgentDraft): Promise<{ ok: boolean; id?: string; trusted?: boolean; hasToken?: boolean; error?: string }>;
+  deleteServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
+  testServerAgent?(config: ServerAgentDraft): Promise<{ ok: boolean; kind?: 'network' | 'cert' | 'auth'; code?: string; error?: string; fingerprint?: string }>;
+  trustServerAgent?(id: string): Promise<{ ok: boolean; fingerprint?: string; error?: string }>;
+  resetServerAgentTrust?(id: string): Promise<{ ok: boolean; error?: string }>;
+  connectServerAgent?(id: string): Promise<{ ok: boolean; kind?: string; code?: string; error?: string; fingerprint?: string }>;
+  disconnectServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
+  installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; summary?: string; error?: string }>;
+  syncProjectToServer?(project: string, mode: 'push' | 'pull'): Promise<{ ok: boolean; revision?: number; items?: number; error?: string }>;
 }
 
 declare global {

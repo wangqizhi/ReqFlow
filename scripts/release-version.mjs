@@ -33,7 +33,9 @@ export async function verifyReleaseVersion(root, version) {
     throw Error('打包应用必须是版本一致的 Go/MyGO 产物；拒绝上传 Electron 或 Node 版本');
   }
   const files = readdirSync(directory).sort();
-  if (JSON.stringify(files) !== JSON.stringify(['ReqFlow.exe', 'build-info.json'].sort())) throw Error('Go 构建目录包含多余运行库或未知文件，请重新构建');
+  // REQ-237：reqflow-server-linux-* 是随包分发的同步服务端二进制，允许存在；其余一律拒绝。
+  const allowed = ['ReqFlow.exe', 'build-info.json', 'reqflow-server-linux-amd64', 'reqflow-server-linux-arm64'];
+  if (files.some(name => !allowed.includes(name)) || !files.includes('ReqFlow.exe') || !files.includes('build-info.json')) throw Error('Go 构建目录包含多余运行库或未知文件，请重新构建');
   const digest = file => {
     const bytes = readFileSync(file);
     if (bytes.subarray(0, 2).toString() !== 'MZ') throw Error(`产物不是 Windows 可执行文件：${path.basename(file)}`);

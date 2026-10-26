@@ -5,8 +5,9 @@ import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
 import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
+import { ServerAgentPage } from './server-agent';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['server', 'Server Agent'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -247,7 +248,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
     : tab === 'logs' ? loaded && (!bridge.savePublishLogSettings || publishLogLoaded)
-    : tab === 'data' ? true
+    : tab === 'server' || tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
     if (tab === 'ai') return perform(async () => { const r = await bridge.saveAISettings(configuration()); if (r.ok) setSavedAI(fingerprint(configuration())); return r; }, 'AI 配置已保存，当前供应商已生效');
@@ -266,7 +267,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
       if (r.ok) setSavedPublishLogging(publishLogging);
       return r;
     }, '日志设置已保存');
-    if (tab === 'data') return true;
+    if (tab === 'server' || tab === 'data') return true;
     return perform(async () => { const r = await bridge.saveBackupSettings!(backup); if (r.ok) setSavedBackup(fingerprint(backup)); return r; }, '备份设置已保存');
   }
   async function saveAndFinish() {
@@ -304,7 +305,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置">
-      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、需求模板、同步备份与本机数据</p></div>
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、需求模板、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -367,10 +368,11 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
           <p className="settings-hint">导入会读取远端备份，补充缺失项目、需求与历史；相同 ID 保留本机内容。导入前保留本机恢复副本，不上传本机数据。</p>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
+        {tab === 'server' && <ServerAgentPage notify={notify} />}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}
-      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
+      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && tab !== 'server' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
       {importConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title"><div className="dialog-head"><h2 id="remote-import-title">从远端导入备份</h2></div><p>将先保存当前备份仓库设置，再读取所选分支的备份。仅补充本机缺失内容，相同 ID 的项目设置与需求保留本机版本；远端执行锁不会恢复。</p><p>导入前的本机工作区会保存在数据目录的 before-remote-import.json 中。</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setImportConfirm(false)}>取消</button><button className="btn primary" disabled={busy || status.running} onClick={() => void importRemoteBackup()}>{busy ? '正在导入…' : '确认导入'}</button></div></div></div>}
       {leaveConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title"><div className="dialog-head"><h2 id="unsaved-settings-title">设置尚未保存</h2></div><p>存在未保存的设置，是否保存后返回项目菜单？</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setLeaveConfirm(false)}>继续编辑</button><button className="btn" disabled={busy} onClick={onLeave}>放弃更改</button><button className="btn primary" disabled={busy || (backupDirty && status.running)} onClick={() => void saveAllAndLeave()}>{busy ? '保存中…' : '保存并返回'}</button></div></div></div>}
   </section>;

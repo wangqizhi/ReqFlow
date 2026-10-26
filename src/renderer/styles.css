@@ -779,7 +779,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .requirement-dialog .field.inline > span { white-space: nowrap; }
 .requirement-dialog textarea { resize: none; }
 .requirement-dialog .advanced-toggle { margin-bottom: 10px; }
-.requirement-advanced { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; }
+/* REQ-236：展开更多设置后，标题与验收条件各占据一整行；标题单行输入、验收条件多行输入 */
+.requirement-advanced { display: grid; grid-template-columns: 1fr; }
 .requirement-advanced .image-settings { grid-column: 1 / -1; }
 .image-settings p { margin: 4px 0 8px; font-size: 11.5px; color: var(--muted); }
 .requirement-advanced .attachment-grid { flex-wrap: nowrap; overflow-x: auto; max-height: 112px; margin-bottom: 8px; }
@@ -790,6 +791,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .requirement-advanced .attachment-grid .btn { font-size: 11px; padding: 2px 7px; }
 .requirement-advanced .validation-setting { align-self: start; }
 .requirement-advanced .field textarea { min-height: 62px; }
+/* REQ-236：单列布局比两列更高，压缩字段间距与缩略图高度，
+   保证 1440×900 下含 12 张缩略图仍不出现弹窗滚动条（ui-guidelines）。 */
+.requirement-advanced .field { margin-bottom: 7px; }
+.requirement-advanced .field textarea { min-height: 46px; }
+.requirement-advanced .attachment-grid { max-height: 78px; }
+.requirement-advanced .attachment-grid figure { width: 84px; }
+.requirement-advanced .attachment-grid img { height: 34px; }
+.requirement-dialog .advanced-toggle { margin-bottom: 8px; }
 .dialog-head, .help-header, .fb-tree-head, .fb-viewer-head, .dialog > h3 { cursor: grab; touch-action: none; }
 .overlay-dragging, .overlay-dragging * { cursor: grabbing !important; user-select: none; }
 .project-remote-overlay { z-index: 100; }
@@ -1210,3 +1219,22 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 @media (max-width: 600px) {
   .mods-page { padding: 20px; }
 }
+
+/* ---- Server Agent（REQ-237/238/239）：远程同步服务端管理 ---- */
+.server-agent-page .agent-server-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.agent-server-card { background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.agent-server-card.connected { border-color: #3d9a6b; }
+.agent-server-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.agent-server-head strong { font-size: 14px; color: var(--ink); }
+.agent-server-head code { background: transparent; padding: 0; font-size: 12px; color: var(--muted); }
+.agent-state { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+.agent-state.on { color: #2c7a50; border-color: #3d9a6b; background: #eef7f1; }
+.agent-state.cert { color: #b3452c; border-color: #d9826b; background: #fbf0ec; }
+.agent-mode { font-size: 11.5px; color: var(--muted); }
+.agent-server-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.agent-server-error { margin: 0; font-size: 12px; color: #b3452c; overflow-wrap: anywhere; }
+.agent-server-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.agent-empty { padding: 18px; text-align: center; color: var(--muted); font-size: 13px; }
+.agent-install-box, .agent-editor { border: 1px solid var(--line-2); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; background: var(--panel); }
+.agent-install-box h3, .agent-editor h3 { margin: 0 0 10px; font-size: 15px; }
+.agent-fingerprint { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; letter-spacing: 0.06em; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; margin: 0 0 12px; }

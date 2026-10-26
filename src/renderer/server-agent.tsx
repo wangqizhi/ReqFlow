@@ -1,0 +1,254 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { bridge, type ServerAgentDraft, type ServerAgentEntry } from './api';
+import { Check, Eye, FolderOpen, Globe, Plus, ShieldAlert, Trash, X } from './icons';
+
+// Server Agent 设置页（REQ-237/238/239）：管理多套远程同步服务端配置，
+// 展示连接状态（已连接 / 断开 / 证书异常 / 待确认信任）与失败原因；
+// 首次连接需确认服务端证书指纹，指纹变化时阻断并提供手动重置入口。
+
+type Editor = ServerAgentDraft & { token?: string };
+const emptyEditor: Editor = { name: '', host: '', port: 8787, tlsMode: 'pin', autoConnect: false, token: '' };
+
+function statusLabel(status?: ServerAgentEntry['status']): { text: string; cls: string } {
+  switch (status?.state) {
+    case 'connected': return { text: '已连接', cls: 'on' };
+    case 'cert_error': return { text: '证书异常', cls: 'cert' };
+    case 'need_trust': return { text: '待确认信任', cls: 'cert' };
+    default: return { text: '断开', cls: 'off' };
+  }
+}
+function failureText(kind?: string, message?: string): string {
+  if (!message) return '';
+  if (kind === 'network') return '网络不可达：' + message;
+  if (kind === 'cert') return '证书不匹配：' + message;
+  if (kind === 'auth') return '认证失败：' + message;
+  return message;
+}
+function formatFingerprint(value?: string): string {
+  return (value || '').toUpperCase().replace(/(.{2})(?=.)/g, '$1:');
+}
+function timeLabel(value?: string): string {
+  if (!value) return '—';
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString('zh-CN') : '—';
+}
+
+export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' | 'err'): void }) {
+  const [servers, setServers] = useState<ServerAgentEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [confirm, setConfirm] = useState<{ server: ServerAgentEntry; fingerprint?: string; code?: string; message?: string } | null>(null);
+  const [install, setInstall] = useState({ open: false, ssh: '', port: 8787, dataDir: '' });
+  const pollRef = useRef(false);
+
+  const refresh = useCallback(async (quiet = true) => {
+    if (!bridge.getServerAgents) { if (!quiet) setError('Server Agent 仅桌面版可用'); setLoaded(true); return; }
+    try {
+      const r = await bridge.getServerAgents();
+      if (!r.ok) throw Error(r.error || '读取服务端配置失败');
+      setServers(r.servers || []);
+      setError('');
+    } catch (e: any) {
+      if (!quiet) setError(e.message);
+    } finally { setLoaded(true); }
+  }, []);
+
+  useEffect(() => { void refresh(false); }, [refresh]);
+  useEffect(() => {
+    if (pollRef.current) return;
+    pollRef.current = true;
+    const timer = window.setInterval(() => void refresh(true), 5000);
+    return () => { pollRef.current = false; window.clearInterval(timer); };
+  }, [refresh]);
+
+  async function run(key: string, action: () => Promise<any>, success: string) {
+    if (busy) return;
+    setBusy(key);
+    try {
+      const r = await action();
+      if (r && r.ok === false && !r.kind) throw Error(r.error || '操作失败');
+      await refresh(true);
+      if (r?.ok === false) return r;
+      notify(success);
+      return r;
+    } catch (e: any) {
+      notify(e.message, 'err');
+      return null;
+    } finally { setBusy(''); }
+  }
+
+  async function connect(server: ServerAgentEntry) {
+    const r = await run(server.id, () => bridge.connectServerAgent!(server.id), '已连接 ' + server.name);
+    if (r && r.ok === false) handleProbeResult(server, r);
+  }
+
+  // NEED_TRUST（首次）与 CERT_CHANGED（指纹变化）都进入确认弹窗，由用户显式确认或重置。
+  function handleProbeResult(server: ServerAgentEntry, result: { ok: boolean; code?: string; fingerprint?: string; error?: string }) {
+    if (result.code === 'NEED_TRUST' || result.code === 'CERT_CHANGED') {
+      setConfirm({ server, fingerprint: result.fingerprint, code: result.code, message: result.error });
+      notify(result.code === 'NEED_TRUST' ? '首次连接需确认证书指纹' : '服务端证书已变更，连接已被阻断', 'err');
+    } else if (result.error) {
+      notify(failureText(undefined, result.error), 'err');
+    }
+  }
+
+  async function testEditor() {
+    if (!editor) return;
+    const draft = { ...editor, id: editingId || undefined };
+    const r = await bridge.testServerAgent?.(draft);
+    if (!r) { notify('连接测试仅桌面版可用', 'err'); return; }
+    if (r.ok) notify('连接测试通过：网络、证书与令牌全部有效');
+    else {
+      notify('测试失败 — ' + failureText(r.kind, r.error), 'err');
+      if (r.code === 'NEED_TRUST' && editor.name) setConfirm({ server: { ...emptyEditor, ...draft } as ServerAgentEntry, fingerprint: r.fingerprint, code: r.code, message: r.error });
+    }
+  }
+
+  async function saveEditor() {
+    if (!editor) return;
+    if (!editor.name?.trim() || !editor.host?.trim()) { notify('请填写名称与地址', 'err'); return; }
+    const r = await run('save', () => bridge.saveServerAgent!({ ...editor, id: editingId || undefined }), '服务端配置已保存');
+    if (r?.ok !== false) { setEditor(null); setEditingId(null); setTokenVisible(false); }
+  }
+
+  async function confirmTrust() {
+    if (!confirm) return;
+    if (confirm.code === 'CERT_CHANGED') {
+      const reset = await bridge.resetServerAgentTrust!(confirm.server.id);
+      if (!reset.ok) { notify(reset.error || '重置信任失败', 'err'); return; }
+    }
+    const r = await bridge.trustServerAgent!(confirm.server.id);
+    if (!r.ok) { notify(r.error || '确认信任失败', 'err'); setConfirm(null); return; }
+    notify('已信任该证书指纹');
+    setConfirm(null);
+    await run(confirm.server.id, () => bridge.connectServerAgent!(confirm.server.id), '已连接 ' + confirm.server.name);
+  }
+
+  async function resetTrust(server: ServerAgentEntry) {
+    const r = await run(server.id, () => bridge.resetServerAgentTrust!(server.id), '已清除信任记录，下次连接需重新确认指纹');
+    void r;
+  }
+
+  async function runInstall() {
+    if (!install.ssh.trim()) { notify('请填写免密 SSH 目标', 'err'); return; }
+    const result = await run('install', () => bridge.installServerAgent!({ ssh: install.ssh.trim(), port: install.port, dataDir: install.dataDir.trim() || undefined }), '安装完成');
+    if (result?.ok) {
+      setInstall({ open: false, ssh: '', port: 8787, dataDir: '' });
+      setEditingId(null);
+      setEditor({ name: result.name || 'ReqFlow Server', host: result.host, port: result.port || 8787, tlsMode: 'pin', autoConnect: false, token: result.token });
+      setTokenVisible(true);
+      notify('已生成配置草稿（含访问令牌），保存后测试连接');
+    }
+  }
+
+  return <section className="server-agent-page" aria-label="Server Agent">
+    <p className="settings-hint">Server Agent 是可部署在 NAS / 云主机上的 ReqFlow 同步服务端，保存各设备的需求流数据。在「项目设置 → 远程同步」关联后，flow 数据自动推送服务端，本地始终保留一份；发布等操作仍在本地进行。</p>
+    {!bridge.getServerAgents && <p className="settings-message" role="alert">Server Agent 仅桌面版可用。</p>}
+    {error && <p className="settings-message" role="alert">{error}</p>}
+    <div className="agent-server-list">
+      {loaded && !servers.length && <div className="empty agent-empty">还没有远程服务端配置；新增服务端或通过 SSH 自动安装。</div>}
+      {servers.map(server => {
+        const status = statusLabel(server.status);
+        const failure = failureText(server.status?.kind, server.status?.error) || server.status?.lastSyncError || '';
+        return <article className={'agent-server-card' + (server.status?.state === 'connected' ? ' connected' : '')} key={server.id}>
+          <div className="agent-server-head">
+            <Globe size={16} />
+            <strong>{server.name}</strong>
+            <code>{server.host}:{server.port}</code>
+            <span className={'agent-state ' + status.cls}>{status.text}</span>
+            <span className="agent-mode">{server.tlsMode === 'ca' ? '受信任 CA' : '自签 + 指纹'}</span>
+            {server.autoConnect && <span className="agent-mode">开机自动连接</span>}
+          </div>
+          <div className="agent-server-meta">
+            <span>最近连接：{timeLabel(server.status?.lastConnectedAt)}</span>
+            <span>最近同步：{timeLabel(Object.values(server.status?.lastSync || {})[0])}</span>
+            <span title={server.fingerprint ? '已信任指纹 ' + formatFingerprint(server.fingerprint) : ''}>{server.trusted ? '已信任证书指纹' : '尚未确认指纹'}</span>
+          </div>
+          {failure && <p className="agent-server-error" role="alert">{failure}</p>}
+          <div className="agent-server-actions">
+            <button className="btn sm" disabled={!!busy} onClick={() => server.status?.state === 'connected' ? run(server.id, () => bridge.disconnectServerAgent!(server.id), '已断开 ' + server.name) : connect(server)}>
+              {server.status?.state === 'connected' ? '断开' : '连接'}
+            </button>
+            <button className="btn sm" disabled={!!busy || !bridge.testServerAgent} onClick={async () => {
+              const r = await bridge.testServerAgent!({ id: server.id });
+              if (r.ok) notify('连接测试通过');
+              else { notify('测试失败 — ' + failureText(r.kind, r.error), 'err'); handleProbeResult(server, r); }
+            }}>测试连接</button>
+            <button className="btn sm" disabled={!!busy} onClick={() => { setEditor({ ...server, token: '' }); setEditingId(server.id); setTokenVisible(false); }}>编辑</button>
+            {server.trusted && <button className="btn sm" disabled={!!busy} title="清除已保存的证书指纹，下次连接重新确认" onClick={() => void resetTrust(server)}><ShieldAlert size={14} />重置信任</button>}
+            <button className="btn sm" disabled={!!busy} onClick={() => void run(server.id, () => bridge.deleteServerAgent!(server.id), '已删除 ' + server.name)}><Trash size={14} />删除</button>
+          </div>
+        </article>;
+      })}
+    </div>
+
+    <div className="settings-actions">
+      <button className="btn" disabled={!!busy || !bridge.saveServerAgent} onClick={() => { setEditor({ ...emptyEditor }); setEditingId(null); setTokenVisible(false); }}><Plus size={16} />新增服务端</button>
+      <button className="btn" disabled={!!busy || !bridge.installServerAgent} onClick={() => setInstall({ ...install, open: !install.open })}><FolderOpen size={16} />SSH 自动安装…</button>
+    </div>
+
+    {install.open && <div className="agent-install-box">
+      <h3>自动安装到免密登录的服务器</h3>
+      <p className="settings-hint">通过已配置免密（公钥）登录的 SSH 上传 reqflow-server 到 Linux 服务器，自动生成配置与访问令牌，并以 crontab / systemd 方式常驻。要求本机可直连该服务器。</p>
+      <label className="field">SSH 目标<input value={install.ssh} onChange={e => setInstall({ ...install, ssh: e.target.value })} placeholder="user@nas.lan 或 user@192.168.1.10:22" /></label>
+      <div className="settings-columns">
+        <label className="field">服务端端口<input type="number" min={1} max={65535} value={install.port} onChange={e => setInstall({ ...install, port: Number(e.target.value) })} /></label>
+        <label className="field">数据目录（可选）<input value={install.dataDir} onChange={e => setInstall({ ...install, dataDir: e.target.value })} placeholder="默认 ~/reqflow-server/data" /></label>
+      </div>
+      <div className="settings-actions">
+        <button className="btn primary" disabled={!!busy || !install.ssh.trim()} onClick={() => void runInstall()}>{busy === 'install' ? '安装中…' : '安装到服务器'}</button>
+        <button className="btn" onClick={() => setInstall({ open: false, ssh: '', port: 8787, dataDir: '' })}>收起</button>
+      </div>
+    </div>}
+
+    {editor && <form className="agent-editor" onSubmit={e => { e.preventDefault(); void saveEditor(); }}>
+      <h3>{editingId ? '编辑服务端' : '新增服务端'}</h3>
+      <label className="field">名称<input value={editor.name || ''} autoFocus onChange={e => setEditor({ ...editor, name: e.target.value })} placeholder="如 家庭 NAS" /></label>
+      <div className="settings-columns">
+        <label className="field">地址<input value={editor.host || ''} onChange={e => setEditor({ ...editor, host: e.target.value })} placeholder="nas.lan 或 192.168.1.10" /></label>
+        <label className="field">端口<input type="number" min={1} max={65535} value={editor.port || 8787} onChange={e => setEditor({ ...editor, port: Number(e.target.value) })} /></label>
+      </div>
+      <div className="field"><span>证书模式</span>
+        <div className="segmented" role="group" aria-label="证书模式">
+          {([['pin', '自签 + 指纹确认'], ['ca', '受信任 CA 证书']] as const).map(([id, label]) =>
+            <button type="button" key={id} aria-pressed={(editor.tlsMode || 'pin') === id} className={(editor.tlsMode || 'pin') === id ? 'on' : ''} onClick={() => setEditor({ ...editor, tlsMode: id })}>{label}</button>)}
+        </div>
+      </div>
+      <label className="field">访问令牌<div className="input-action">
+        <input autoComplete="off" type={tokenVisible ? 'text' : 'password'} value={editor.token || ''} onChange={e => setEditor({ ...editor, token: e.target.value })} placeholder={editingId ? '留空保留已保存的令牌' : '服务端 server token 命令输出的令牌'} />
+        <button type="button" className="icon-btn" aria-label={tokenVisible ? '隐藏令牌' : '显示令牌'} aria-pressed={tokenVisible} onClick={() => setTokenVisible(!tokenVisible)}><Eye />{tokenVisible && <span className="eye-slash" />}</button>
+      </div></label>
+      <div className="validation-setting"><div><label htmlFor={'agent-auto-' + (editingId || 'new')}>开机自动连接</label><p>ReqFlow 启动时自动连接该服务端，并每分钟同步关联项目。</p></div>
+        <label className="switch"><input id={'agent-auto-' + (editingId || 'new')} type="checkbox" checked={!!editor.autoConnect} onChange={e => setEditor({ ...editor, autoConnect: e.target.checked })} /><span className="slider" /><span className="switch-state">{editor.autoConnect ? '已开启' : '已关闭'}</span></label></div>
+      <div className="settings-actions">
+        <button type="button" className="btn" disabled={!!busy || !bridge.testServerAgent || !editor.host?.trim()} onClick={() => void testEditor()}>测试连接</button>
+        <button type="button" className="btn" onClick={() => { setEditor(null); setEditingId(null); }}>取消</button>
+        <button className="btn primary" disabled={!!busy}>{busy === 'save' ? '保存中…' : '保存服务端'}</button>
+      </div>
+    </form>}
+
+    {confirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认服务端证书指纹" style={{ zIndex: 80 }}>
+      <div className="dialog">
+        <div className="dialog-head">
+          <div>
+            <h3>{confirm.code === 'CERT_CHANGED' ? '服务端证书已变更' : '首次连接 · 确认证书指纹'}</h3>
+            <p>{confirm.code === 'CERT_CHANGED'
+              ? '已信任的「' + confirm.server.name + '」指纹发生变化，为防止中间人攻击已阻断连接。请确认是服务器重签证书后，重置信任并确认新指纹。'
+              : '请核对「' + confirm.server.name + '」返回的证书指纹与服务端 server run 日志中的指纹一致后，再建立信任。'}</p>
+          </div>
+          <button className="icon-btn" aria-label="关闭" onClick={() => setConfirm(null)}><X size={18} /></button>
+        </div>
+        <p className="agent-fingerprint" title={confirm.fingerprint || ''}>{formatFingerprint(confirm.fingerprint)}</p>
+        {confirm.message && <p className="settings-hint">{confirm.message}</p>}
+        <div className="settings-actions">
+          <button className="btn" onClick={() => setConfirm(null)}>取消</button>
+          <button className="btn primary" onClick={() => void confirmTrust()}><Check size={15} />{confirm.code === 'CERT_CHANGED' ? '重置并确认新指纹' : '信任并连接'}</button>
+        </div>
+      </div>
+    </div>}
+  </section>;
+}

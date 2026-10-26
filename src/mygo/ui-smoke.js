@@ -125,7 +125,7 @@
     await click(button('设置'));
     await waitFor(() => document.querySelector('.settings-page') && !button('新增配置').disabled);
     const settingsNav = document.querySelector('[aria-label="设置功能菜单"]');
-    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 6 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
+    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 7 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
     const profileCount = document.querySelectorAll('.ai-profile-list button').length;
     await click(button('新增配置'));
     await click(button('本地 CLI'));
@@ -701,7 +701,7 @@
     await waitFor(() => !!document.querySelector('.project-guide-dialog'));
     const guideDialog = document.querySelector('.project-guide-dialog');
     const guideTabs = [...guideDialog.querySelectorAll('.settings-tabs button')];
-    checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
+    checks.guideTabs = { ok: guideTabs.map(el => el.textContent).join('|') === '引导词|基线模板|验证与发布|远程同步|版本历史' && guideDialog.querySelectorAll('.guidance-field').length === 2 && !!button('保存设置') && guideDialog.querySelectorAll('.guidance-field-head .btn').length === 2 };
     const guideBody = guideDialog.querySelector('.settings-body');
     checks.guideNoScrollbar = { ok: guideBody.scrollHeight <= guideBody.clientHeight + 1, scrollHeight: guideBody.scrollHeight, clientHeight: guideBody.clientHeight };
     checks.guideExpandedFits = { ok: true };
@@ -796,7 +796,7 @@
     upload.dispatchEvent(new Event('change', { bubbles: true }));
     await waitFor(() => document.querySelectorAll('.requirement-dialog .attachment-grid figure').length === 12);
     const dialog = document.querySelector('.requirement-dialog');
-    checks.advancedLayout = { ok: dialog.scrollHeight <= dialog.clientHeight + 1 && buttons.every(el => el.getBoundingClientRect().bottom < innerHeight), images: 12 };
+    checks.advancedLayout = { ok: dialog.scrollHeight <= dialog.clientHeight + 1 && buttons.every(el => el.getBoundingClientRect().bottom < innerHeight), images: 12, scrollHeight: dialog.scrollHeight, clientHeight: dialog.clientHeight };
   }
   return { ok: Object.values(checks).every(check => check.ok) && controls === 2 && dragRegion === 'drag' && controlsDragRegion === 'no-drag', title: document.title, sidebarProjects, controls, dragRegion, controlsDragRegion, checks };
 })()

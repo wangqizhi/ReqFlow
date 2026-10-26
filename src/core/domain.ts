@@ -104,6 +104,7 @@ export type Project = {
   contextRulesDisabled?: boolean;
   contextRulesLimit?: number; // 守则字数上限，默认 500
   requirementDraft?: Record<string, any>;
+  serverAgent?: { id: string }; // 关联的同步服务端（REQ-240）：flow 数据自动推送，本地保留一份
 };
 
 export type ContextPrompt = { id: string; title: string; body: string; tags: string[]; projectId?: string; feature?: string; code?: string; files?: string[] };
@@ -344,7 +345,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   }));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'projectSync', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!(localOps.includes(a?.op) || ['requirementDraft', 'executionClaim', 'executionRelease'].includes(a?.op)) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -536,6 +537,15 @@ async function applyOperation(s: Workspace, a: any) {
   }
   if (a.op === 'projectRemote') {
     p.remote = validateRemote(a.remote);
+    return;
+  }
+
+  if (a.op === 'projectSync') {
+    // REQ-240：项目关联 / 解除关联 Server Agent；解除后继续使用本地数据
+    const id = typeof a.server === 'string' ? a.server.trim() : String(a.server?.id || '').trim();
+    if (!a.server) { delete p.serverAgent; return; }
+    if (!id) throw Error('请选择要关联的 Server Agent');
+    p.serverAgent = { id };
     return;
   }
 

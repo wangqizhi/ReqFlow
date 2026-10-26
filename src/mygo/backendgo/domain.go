@@ -572,7 +572,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -1054,6 +1054,22 @@ func coreApplyOperation(s, a map[string]any) error {
 			return e
 		}
 		p["remote"] = remote
+		return nil
+	case "projectSync":
+		// REQ-240：项目关联 / 解除关联 Server Agent；解除后继续使用本地数据。
+		server := coreMap(a["server"])
+		id := strings.TrimSpace(coreString(server["id"]))
+		if a["server"] == nil || a["server"] == "" {
+			delete(p, "serverAgent")
+			return nil
+		}
+		if id == "" {
+			id = strings.TrimSpace(coreString(a["server"]))
+		}
+		if id == "" {
+			return errors.New("请选择要关联的 Server Agent")
+		}
+		p["serverAgent"] = map[string]any{"id": id}
 		return nil
 	case "projectDir":
 		if coreHas(a, "dir") {

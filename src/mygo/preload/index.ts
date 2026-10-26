@@ -86,6 +86,16 @@ const channels = {
   gitCommit: 'git:commit',
   gitBranchCreate: 'git:branchCreate',
   gitBranchSwitch: 'git:branchSwitch',
+  getServerAgents: 'server:agents:get',
+  saveServerAgent: 'server:agents:save',
+  deleteServerAgent: 'server:agents:delete',
+  testServerAgent: 'server:agents:test',
+  trustServerAgent: 'server:agents:trust',
+  resetServerAgentTrust: 'server:agents:trustReset',
+  connectServerAgent: 'server:connect',
+  disconnectServerAgent: 'server:disconnect',
+  installServerAgent: 'server:install',
+  syncProjectToServer: 'server:projectSync',
 } as const;
 const api = Object.fromEntries(Object.entries(channels).map(([name, channel]) => [name, (...args: unknown[]) => window.mygo.call("ReqFlow.Invoke", channel, args)]));
 Object.defineProperty(window, "reqflow", { value: api, writable: false, configurable: false });

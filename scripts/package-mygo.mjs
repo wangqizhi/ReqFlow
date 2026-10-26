@@ -57,9 +57,16 @@ export async function packageMyGO() {
     const include = path.join(temp, 'legacy-cleanup.nsh');
     await writeFile(include, cleanupInclude(), 'utf8');
     const nsis = await findNSIS();
+    // REQ-237：同步服务端 Linux 二进制随安装包分发（SSH 自动安装时上传到服务器）。
+    const serverDefines = [];
+    for (const name of ['reqflow-server-linux-amd64', 'reqflow-server-linux-arm64']) {
+      const file = path.join(release, 'win-unpacked', name);
+      if ((await stat(file).catch(() => null))?.isFile()) serverDefines.push(`/DAPP_SERVER_${name.replaceAll('-', '_').toUpperCase()}=${file}`);
+    }
     await run(nsis, ['/V2', '/INPUTCHARSET', 'UTF8', `/DAPP_VERSION=${version}`, `/DAPP_FILE_VERSION=${version.split('-')[0]}.0`,
       `/DAPP_SOURCE=${source}`, `/DAPP_BUILD_INFO=${path.join(release, 'win-unpacked/build-info.json')}`,
       `/DAPP_ICON=${path.join(root, 'build/icon.ico')}`, `/DAPP_OUTPUT=${path.join(release, setupName)}`,
+      ...serverDefines,
       `/DLEGACY_CLEANUP_INCLUDE=${include}`, path.join(root, 'build/installer-go.nsi')]);
     const assets = {};
     for (const name of [setupName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };

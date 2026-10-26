@@ -297,6 +297,12 @@ Section "ReqFlow" SEC_APP
   File "${APP_SOURCE}"
   IfErrors write_failed
   File "${APP_BUILD_INFO}"
+!ifdef APP_SERVER_LINUX_AMD64
+  File "${APP_SERVER_LINUX_AMD64}"
+!endif
+!ifdef APP_SERVER_LINUX_ARM64
+  File "${APP_SERVER_LINUX_ARM64}"
+!endif
   WriteUninstaller "$INSTDIR\Uninstall ReqFlow.exe"
   IfErrors write_failed
   !insertmacro ReqFlowCleanupLegacy
@@ -340,6 +346,8 @@ Section "Uninstall"
   ; Deliberately leave data-dir.cfg, AppData/profile, LocalState and all data.
   Delete "$INSTDIR\ReqFlow.exe"
   Delete "$INSTDIR\build-info.json"
+  Delete "$INSTDIR\reqflow-server-linux-amd64"
+  Delete "$INSTDIR\reqflow-server-linux-arm64"
   Delete "$INSTDIR\Uninstall ReqFlow.exe"
   RMDir "$INSTDIR"
 !ifndef SANDBOX_DIR

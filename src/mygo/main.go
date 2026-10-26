@@ -72,6 +72,10 @@ func run() (int, error) {
 	if len(args) > 0 && args[0] == "--cli" {
 		return backendgo.RunCLI(args[1:], appVersion, dataDir, os.Stdout), nil
 	}
+	// REQ-237：同步服务端独立入口命令（server run / install / token 等），与桌面 GUI 互不影响。
+	if len(args) > 0 && args[0] == "server" {
+		return backendgo.RunServerCLI(args[1:], appVersion, os.Stdout), nil
+	}
 	if len(args) > 0 && args[0] == "--smoke-ui" {
 		isolated, e := os.MkdirTemp("", "reqflow-smoke-")
 		if e != nil {
@@ -165,6 +169,9 @@ func run() (int, error) {
 	backend.Native = native.call
 	backend.StartAI()
 	defer backend.StopAI()
+	// REQ-239：开机自动连接已配置的 Server Agent，并定期同步关联项目。
+	backend.StartServerAgents()
+	defer backend.StopServerAgents()
 	var shutdownApproved bool
 	native.prepareClose = func() bool {
 		var approved bool
@@ -472,7 +479,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                   const page=document.querySelector('.settings-page');const rect=page.getBoundingClientRect();
                   const footer=page.querySelector('.settings-footer').getBoundingClientRect();
                   const body=page.querySelector('.settings-body');
-                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===6&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
+                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===7&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
                   return {ok,height:innerHeight,scrollable:body.scrollHeight>body.clientHeight};
                 })()`
 				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))

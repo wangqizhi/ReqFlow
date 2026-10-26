@@ -190,6 +190,9 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 	if value, handled, e := b.InvokeAI(channel, args); handled {
 		return value, e
 	}
+	if strings.HasPrefix(channel, "server:") {
+		return b.invokeServerAgents(channel, args)
+	}
 	if channel == "ssh:list" || channel == "ssh:status" || (strings.HasPrefix(channel, "fs:") && strings.HasPrefix(desktopText(args, 0), "ssh://")) {
 		return b.desktopSSH(ctx, channel, args)
 	}
@@ -433,9 +436,14 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 			}
 		}
 	}
+	scopes := MutationProjectIDs(action)
 	r, e := b.Workspace.Mutate(action, expected)
 	if e != nil {
 		return nil, e
+	}
+	// REQ-240：项目关联 server agent 后，flow 每次变更自动推送服务端（本地保留一份）。
+	if len(scopes) > 0 {
+		b.syncAfterMutate(scopes, desktopString(action["op"]))
 	}
 	if desktopString(action["op"]) == "project" && desktopString(desktopMap(action["remote"])["url"]) != "" {
 		ps := desktopProjects(r)

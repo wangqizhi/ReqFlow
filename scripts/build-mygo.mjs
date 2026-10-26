@@ -17,9 +17,9 @@ const version = pkg.version;
 if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw Error('Invalid application version');
 if (process.platform !== 'win32' || process.arch !== 'x64') throw Error('ReqFlow currently builds Windows x64');
 
-function run(command, args, cwd = root) {
+function run(command, args, cwd = root, env = process.env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: 'inherit', windowsHide: true });
+    const child = spawn(command, args, { cwd, stdio: 'inherit', windowsHide: true, env });
     child.on('error', reject);
     child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`)));
   });
@@ -68,10 +68,22 @@ try {
   await rm(resources, { force: true });
   await rm(config, { force: true });
 }
+// REQ-237：同步服务端独立入口（reqflow-server）交叉编译 Linux amd64/arm64，
+// 供「设置 → Server Agent → SSH 自动安装」上传到 NAS / 云主机；随安装包一起分发。
+const serverBinaries = [];
+for (const arch of ['amd64', 'arm64']) {
+  const target = path.join(output, `reqflow-server-linux-${arch}`);
+  await run('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.appVersion=${version}`, '-o', target, './server'], goRoot,
+    { ...process.env, GOOS: 'linux', GOARCH: arch, CGO_ENABLED: '0' });
+  const raw = await readFile(target);
+  serverBinaries.push({ name: path.basename(target), sha256: createHash('sha256').update(raw).digest('hex'), size: raw.length });
+}
 const bytes = await readFile(executable);
 await writeFile(path.join(output, 'build-info.json'), JSON.stringify({
   name: 'ReqFlow', version, backend: 'go', runtime: 'mygo', platform: 'win32-x64',
   runtimeDependencies: ['Microsoft Edge WebView2 Runtime'],
-  executable: 'ReqFlow.exe', sha256: createHash('sha256').update(bytes).digest('hex')
+  executable: 'ReqFlow.exe', sha256: createHash('sha256').update(bytes).digest('hex'),
+  serverBinaries
 }, null, 2) + '\n');
 console.log(`Go 程序完成：${executable} (${(bytes.length / 1024 / 1024).toFixed(1)} MiB)`);
+for (const binary of serverBinaries) console.log(`同步服务端：${binary.name} (${(binary.size / 1024 / 1024).toFixed(1)} MiB)`);

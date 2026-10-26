@@ -6,7 +6,7 @@ import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CONTEXT_RULES_LIMIT, MIN_CONTEXT_RULES_LIMIT, MAX_CONTEXT_RULES_LIMIT, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
   scheduledBatch, activeAIExecution, type Item, type Project, type Workspace
 } from '../core/domain';
-import { bridge, type PublishSession } from './api';
+import { bridge, type PublishSession, type ServerAgentEntry } from './api';
 import { publishProject } from './publish';
 import { AgentTerminal, PublishTerminal, useTerminalSetting, agentNeedsInput } from './publish-terminal';
 import {
@@ -103,6 +103,8 @@ export default function App() {
   const [deleteRulesConfirm, setDeleteRulesConfirm] = useState(false);
   const [rulesLimit, setRulesLimit] = useState(DEFAULT_CONTEXT_RULES_LIMIT); // 守则字数上限（REQ-185）
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
+  const [guideSyncServer, setGuideSyncServer] = useState(''); // REQ-240：项目关联的 Server Agent
+  const [serverAgents, setServerAgents] = useState<ServerAgentEntry[]>([]);
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
   const [settingsTab, setSettingsTab] = useState('ai');
@@ -1022,6 +1024,7 @@ export default function App() {
               {p?.contextRules && <button className="btn sm" onClick={() => setRulesOpen(true)}>守则</button>}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
               <span className={'guide-flag' + (p?.deliveryGuidance ? ' on' : '')} title={p?.deliveryGuidance ? '已配置引导交付' : '未配置引导交付'}>{p?.deliveryGuidance && <Check size={12} />}引导交付</span>
+              {p?.serverAgent && <span className="guide-flag on" title={'已关联 Server Agent：' + (serverAgents.find(a => a.id === p.serverAgent!.id)?.name || p.serverAgent.id)}>远程同步</span>}
               <span className="guide-flag" title="该项目记录的全部需求数">历史需求 {p?.items.length ?? 0} 条</span>
             </div>
           </div>
@@ -1031,6 +1034,8 @@ export default function App() {
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
             setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
+            setGuideSyncServer(p!.serverAgent?.id || '');
+            void bridge.getServerAgents?.().then(r => { if (r?.ok) setServerAgents(r.servers || []); }).catch(() => {});
             setGuideTab('guide');
             setModal('guide');
           }}>编辑设置</button>
@@ -1521,7 +1526,7 @@ export default function App() {
                 </div>
                 <label className="field">标题（选填）<input value={form.title} onChange={(e) => change({ ...form, title: e.target.value })} /></label>
                 <label className="field">验收条件（选填）· 每行一项
-                  <textarea rows={3} value={form.criteria} onChange={(e) => change({ ...form, criteria: e.target.value })} />
+                  <textarea rows={2} value={form.criteria} onChange={(e) => change({ ...form, criteria: e.target.value })} />
                 </label>
                 <label className="field">交付引导
                   <textarea required rows={2} value={form.deliveryGuidance || ''} onChange={(e) => change({ ...form, deliveryGuidance: e.target.value })}
@@ -1540,7 +1545,7 @@ export default function App() {
               <>
                 {/* REQ-151：内容较多，按功能分 tab；保存按钮固定在底部，一次保存全部标签页的修改 */}
                 <div className="settings-tabs" role="tablist" aria-label="项目设置分类">
-                  {[['guide', '引导词'], ['template', '基线模板'], ['run', '验证与发布'], ['history', '版本历史']].map(([id, title]) => (
+                  {[['guide', '引导词'], ['template', '基线模板'], ['run', '验证与发布'], ['sync', '远程同步'], ['history', '版本历史']].map(([id, title]) => (
                     <button key={id} role="tab" aria-selected={guideTab === id} disabled={busy} className={guideTab === id ? 'on' : ''} onClick={() => setGuideTab(id)}>{title}</button>
                   ))}
                 </div>
@@ -1594,6 +1599,41 @@ export default function App() {
                     {publishMode === 'script' && <label className="field">发布脚本路径<input value={publishPath} onChange={e => setPublishPath(e.target.value)} placeholder="项目内相对路径，如 scripts/deploy.mjs" /></label>}
                     <p className="settings-hint">支持 mjs、js、cjs、bat、cmd、ps1、sh、py。自动检测 publish 脚本；指定脚本后，顶部「发布」按钮执行该脚本。</p>
                   </>}
+                  {guideTab === 'sync' && <>
+                    {!bridge.getServerAgents && <p className="settings-hint">远程同步仅桌面版可用。</p>}
+                    {bridge.getServerAgents && <>
+                      <label className="field">关联 Server Agent
+                        <select value={guideSyncServer} onChange={e => setGuideSyncServer(e.target.value)}>
+                          <option value="">不关联（仅使用本地数据）</option>
+                          {serverAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name} · {agent.host}:{agent.port}{agent.status?.state === 'connected' ? '（已连接）' : ''}</option>)}
+                        </select>
+                      </label>
+                      {!serverAgents.length && <p className="settings-hint">还没有服务端配置；先在「设置 → Server Agent」新增或通过 SSH 自动安装。</p>}
+                      {guideSyncServer && (() => {
+                        const agent = serverAgents.find(a => a.id === guideSyncServer);
+                        const syncState = agent?.status?.state || 'disconnected';
+                        const lastSyncAt = agent?.status?.lastSync?.[p!.id];
+                        return <>
+                          <p className="settings-hint">当前状态：{syncState === 'connected' ? '已连接' : syncState === 'cert_error' ? '证书异常，连接被阻断' : syncState === 'need_trust' ? '待确认证书指纹' : '未连接'}；最近同步 {lastSyncAt ? new Date(lastSyncAt).toLocaleString('zh-CN') : '—'}{agent?.status?.lastSyncError ? '；上次失败：' + agent.status.lastSyncError : ''}</p>
+                          <div className="settings-actions">
+                            <button type="button" className="btn" disabled={busy} onClick={async () => {
+                              if (!p) return;
+                              if (!agent?.status || agent.status.state !== 'connected') { notify('请先在「设置 → Server Agent」连接服务端', 'err'); return; }
+                              const r = await bridge.syncProjectToServer!(p.id, 'push');
+                              if (r.ok) notify('已推送 flow 快照到服务端'); else notify(r.error || '推送失败', 'err');
+                              void bridge.getServerAgents?.().then(rr => { if (rr?.ok) setServerAgents(rr.servers || []); }).catch(() => {});
+                            }}>立即推送</button>
+                            <button type="button" className="btn" disabled={busy} title="用服务端数据覆盖本项目的需求流字段；本地目录、发布与草稿设置保留" onClick={async () => {
+                              if (!p) return;
+                              const r = await bridge.syncProjectToServer!(p.id, 'pull');
+                              if (r.ok) { notify('已从服务端拉取并覆盖本地 flow 数据'); void load({ quiet: true }); } else notify(r.error || '拉取失败', 'err');
+                            }}>从服务端拉取</button>
+                          </div>
+                        </>;
+                      })()}
+                      <p className="settings-hint">关联后，本项目的需求、批次与全部步骤在每次变更时自动推送服务端，本地始终保留一份；发布等操作仍在本地进行，服务端只保存 flow 数据。解除关联后继续使用本地数据。</p>
+                    </>}
+                  </>}
                   {guideTab === 'history' && <>
                     <p className="settings-hint">项目引导词每次保存都会记录版本；载入历史版本会替换「引导词」标签页中的两个输入框，确认后仍需保存设置。</p>
                     {p!.guideHistory.length === 0 && <p className="settings-hint">还没有历史版本。</p>}
@@ -1617,6 +1657,7 @@ export default function App() {
                       if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
                       if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
                       if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
+                      if ((p!.serverAgent?.id || '') !== (guideSyncServer || '') && !await act({ op: 'projectSync', server: guideSyncServer || null }, true)) return;
                       const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
                       if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, contextRulesLimit: rulesLimit }, true)) return;
                       setModal('');
