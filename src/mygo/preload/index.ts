@@ -95,6 +95,7 @@ const channels = {
   connectServerAgent: 'server:connect',
   disconnectServerAgent: 'server:disconnect',
   installServerAgent: 'server:install',
+  updateServerAgent: 'server:update',
   uninstallServerAgent: 'server:uninstall',
 } as const;
 const api = Object.fromEntries(Object.entries(channels).map(([name, channel]) => [name, (...args: unknown[]) => window.mygo.call("ReqFlow.Invoke", channel, args)]));

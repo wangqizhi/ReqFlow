@@ -8,7 +8,7 @@ import (
 	"reqflow/mygo/backendgo"
 )
 
-var appVersion = "2.12.2"
+var appVersion = "2.12.3"
 
 func main() {
 	os.Exit(backendgo.RunServerCLI(os.Args[1:], appVersion, os.Stdout))

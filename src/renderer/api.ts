@@ -47,12 +47,15 @@ export type ServerAgentStatus = {
   lastSyncError?: string;
   fingerprint?: string;
   lastSync?: Record<string, string>;
+  version?: string;
+  lastUpdatedAt?: string;
 };
 export type ServerAgentEntry = {
   id: string; name: string; host: string; port: number;
   tlsMode: 'pin' | 'ca'; autoConnect: boolean;
   hasToken: boolean; trusted: boolean; fingerprint?: string;
   status?: ServerAgentStatus;
+  ssh?: string;
 };
 export type ServerAgentDraft = Partial<ServerAgentEntry> & { token?: string };
 
@@ -168,7 +171,8 @@ export interface ReqFlowBridge {
   resetServerAgentTrust?(id: string): Promise<{ ok: boolean; error?: string }>;
   connectServerAgent?(id: string): Promise<{ ok: boolean; kind?: string; code?: string; error?: string; fingerprint?: string }>;
   disconnectServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
-  installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; dataDir?: string; summary?: string; error?: string }>;
+  installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; dataDir?: string; ssh?: string; summary?: string; error?: string }>;
+  updateServerAgent?(info: { id: string; ssh?: string }): Promise<{ ok: boolean; version?: string; dataDir?: string; warning?: string; error?: string }>;
   uninstallServerAgent?(info: { ssh: string; cleanData: boolean; preview?: boolean; confirmedDataDir?: string }): Promise<{ ok: boolean; dataDir?: string; dataRemoved?: boolean; error?: string }>;
 }
 

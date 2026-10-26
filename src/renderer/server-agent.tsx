@@ -45,6 +45,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
   const [confirm, setConfirm] = useState<{ server: ServerAgentEntry; draft?: ServerAgentDraft; fingerprint?: string; code?: string; message?: string } | null>(null);
   const [install, setInstall] = useState({ open: false, ssh: '', port: 8787, dataDir: '' });
   const [uninstall, setUninstall] = useState({ open: false, ssh: '', cleanData: false, previewDataDir: '' });
+  const [update, setUpdate] = useState<{ server: ServerAgentEntry; ssh: string } | null>(null);
   const pollRef = useRef(false);
 
   const refresh = useCallback(async (quiet = true) => {
@@ -150,7 +151,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     if (result?.ok) {
       setInstall({ open: false, ssh: '', port: 8787, dataDir: '' });
       setEditingId(null);
-      setEditor({ name: result.name || 'ReqFlow Server', host: result.host, port: result.port || 8787, tlsMode: 'pin', autoConnect: false, token: result.token });
+      setEditor({ name: result.name || 'ReqFlow Server', host: result.host, port: result.port || 8787, tlsMode: 'pin', autoConnect: false, token: result.token, ssh: result.ssh || install.ssh.trim() });
       setTokenVisible(true);
       notify('服务端数据目录：' + result.dataDir + '；已生成配置草稿，保存后测试连接');
     }
@@ -163,6 +164,16 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     else {
       setUninstall({ open: false, ssh: '', cleanData: false, previewDataDir: '' });
       notify(result.dataRemoved ? '已卸载服务端并清理数据目录' : '已卸载服务端，数据目录已保留：' + result.dataDir);
+    }
+  }
+
+  async function runUpdate() {
+    if (!update || !update.ssh.trim()) return;
+    const result = await run('update-' + update.server.id, () => bridge.updateServerAgent!({ id: update.server.id, ssh: update.ssh.trim() }), 'Server 更新完成，版本与远程 flow 接口检查通过');
+    if (result?.ok) {
+      setUpdate(null);
+      notify('Server 已更新至 ' + result.version + '；数据目录：' + result.dataDir);
+      if (result.warning) notify(result.warning, 'err');
     }
   }
 
@@ -187,6 +198,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
           <div className="agent-server-meta">
             <span>最近连接：{timeLabel(server.status?.lastConnectedAt)}</span>
             <span>最近备份：{timeLabel(Object.values(server.status?.lastSync || {})[0])}</span>
+            {server.status?.version && <span>服务端版本：{server.status.version}</span>}
             <span title={server.fingerprint ? '已信任指纹 ' + formatFingerprint(server.fingerprint) : ''}>{server.trusted ? '已信任证书指纹' : '尚未确认指纹'}</span>
           </div>
           {failure && <p className="agent-server-error" role="alert">{failure}</p>}
@@ -201,6 +213,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
             }}>测试连接</button>
             <button className="btn sm" disabled={!!busy} onClick={() => { setEditor({ ...server, token: '' }); setEditingId(server.id); setTokenVisible(false); }}>编辑</button>
             {server.trusted && <button className="btn sm" disabled={!!busy} title="清除已保存的证书指纹，下次连接重新确认" onClick={() => void resetTrust(server)}><ShieldAlert size={14} />重置信任</button>}
+            <button className="btn sm" disabled={!!busy || !bridge.updateServerAgent} onClick={() => setUpdate({ server, ssh: server.ssh || server.host })}>{busy === 'update-' + server.id ? '更新中…' : '更新 Server'}</button>
             <button className="btn sm" disabled={!!busy} onClick={() => void run(server.id, () => bridge.deleteServerAgent!(server.id), '已删除 ' + server.name)}><Trash size={14} />删除</button>
           </div>
         </article>;
@@ -265,6 +278,19 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
         <button className="btn primary" disabled={!!busy}>{busy === 'save' ? '保存中…' : '保存服务端'}</button>
       </div>
     </form>}
+
+    {update && <div className="overlay" role="dialog" aria-modal="true" aria-label="更新 Server" style={{ zIndex: 80 }}>
+      <div className="dialog">
+        <div className="dialog-head"><h3>更新 Server · {update.server.name}</h3><button type="button" className="icon-btn" disabled={!!busy} aria-label="关闭" onClick={() => setUpdate(null)}><X size={18} /></button></div>
+        <p className="settings-hint">通过免密 SSH 更新 {update.server.host}:{update.server.port} 的服务端程序，并短暂重启服务。使用原有令牌、证书、端口和数据目录，完成后检查服务端版本及远程 flow 接口。</p>
+        <label className="field">原部署的 SSH 目标<input disabled={!!busy} value={update.ssh} onChange={e => setUpdate({ ...update, ssh: e.target.value })} placeholder="如 root@nas.lan 或 user@nas.lan:2222" /></label>
+        <p className="settings-hint">请使用原来安装 Server 的 SSH 用户和端口；更新成功后会记住该目标。</p>
+        <div className="settings-actions">
+          <button type="button" className="btn" disabled={!!busy} onClick={() => setUpdate(null)}>取消</button>
+          <button type="button" className="btn primary" disabled={!!busy || !update.ssh.trim()} onClick={() => void runUpdate()}>{busy === 'update-' + update.server.id ? '更新并检查中…' : '更新 Server'}</button>
+        </div>
+      </div>
+    </div>}
 
     {confirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认服务端证书指纹" style={{ zIndex: 80 }}>
       <div className="dialog">

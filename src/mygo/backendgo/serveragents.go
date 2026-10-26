@@ -197,7 +197,14 @@ func syncValidateAgent(value any) (map[string]any, error) {
 	if tlsMode != "pin" && tlsMode != "ca" {
 		return nil, errors.New("证书模式须为「自签 + 指纹确认」或「受信任 CA」")
 	}
-	return map[string]any{"id": id, "name": name, "host": host, "port": int64(port), "tlsMode": tlsMode, "autoConnect": v["autoConnect"] == true}, nil
+	config := map[string]any{"id": id, "name": name, "host": host, "port": int64(port), "tlsMode": tlsMode, "autoConnect": v["autoConnect"] == true}
+	if target := strings.TrimSpace(aiString(v["ssh"])); target != "" {
+		if _, _, err := syncAgentSSH(target); err != nil {
+			return nil, errors.New("SSH 更新目标无效：" + err.Error())
+		}
+		config["ssh"] = target
+	}
+	return config, nil
 }
 
 // ---- 连接与信任（REQ-238） ----
@@ -647,30 +654,9 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 	if _, err = run("chmod +x "+syncShellQuote(remoteDir+"/reqflow-server"), 15*time.Second); err != nil {
 		return nil, errors.New("设置执行权限失败：" + err.Error())
 	}
-	startCommand := syncShellQuote(remoteDir+"/reqflow-server") + " server run --config " + syncShellQuote(remoteDir+"/server-config.sqlite")
-	summary := []string{}
-	unit := syncAgentSystemdUnit(remoteDir)
-	unitPath := path.Join(home, ".config/systemd/user/reqflow-server.service")
-	installService := "mkdir -p " + syncShellQuote(path.Dir(unitPath)) + " && printf '%s' " + syncShellQuote(unit) + " > " + syncShellQuote(unitPath) + " && systemctl --user daemon-reload && systemctl --user enable reqflow-server && systemctl --user restart reqflow-server"
-	if _, err = run(installService, 20*time.Second); err == nil {
-		summary = append(summary, "已启用并启动 systemd 用户服务")
-		if _, cronErr := run(syncRemoveCronScript(remoteDir+"/reqflow-server"), 15*time.Second); cronErr != nil {
-			summary = append(summary, "清理旧 crontab 启动项失败，请手动检查")
-		}
-	} else {
-		if _, stopErr := run("systemctl --user stop reqflow-server 2>/dev/null || true\n"+syncStopExecutableScript(remoteDir+"/reqflow-server"), 20*time.Second); stopErr != nil {
-			return nil, errors.New("旧服务端未能停止，未启动新的后台进程")
-		}
-		background := startCommand + " >> " + syncShellQuote(remoteDir+"/server.log") + " 2>&1"
-		cronLine := "@reboot " + strings.ReplaceAll(background, "%", `\%`)
-		if _, cronErr := run("(crontab -l 2>/dev/null | grep -v 'reqflow-server.*run --config'; printf '%s\\n' "+syncShellQuote(cronLine)+") | crontab -", 15*time.Second); cronErr == nil {
-			summary = append(summary, "已添加 crontab @reboot 开机自启")
-		} else {
-			summary = append(summary, "无法配置开机自启，请手动配置："+startCommand)
-		}
-		if _, err = run("nohup "+background+" < /dev/null &", 15*time.Second); err != nil {
-			return nil, errors.New("服务端启动命令失败：" + err.Error())
-		}
+	summary, err := syncStartAgentDeployment(run, home, remoteDir)
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -722,7 +708,9 @@ func (b *Backend) syncUploadOverSSH(root string, configRaw []byte, localBinary s
 	if err != nil {
 		return errors.New("读取本地 reqflow-server 失败：" + err.Error())
 	}
-	_, err = withSFTP(context.Background(), root, func(c *sftp.Client, u *url.URL) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	_, err = withSFTP(ctx, root, func(c *sftp.Client, u *url.URL) (any, error) {
 		base := strings.TrimSuffix(u.Path, "/./")
 		if base == "" {
 			base = "."
@@ -733,9 +721,6 @@ func (b *Backend) syncUploadOverSSH(root string, configRaw []byte, localBinary s
 		}
 		remoteDir := path.Join(real, "reqflow-server")
 		if err = c.MkdirAll(remoteDir); err != nil {
-			return nil, err
-		}
-		if err = c.MkdirAll(path.Join(remoteDir, "data")); err != nil {
 			return nil, err
 		}
 		upload := func(name string, data []byte, mode os.FileMode) error {
@@ -796,6 +781,7 @@ func (b *Backend) invokeServerAgents(channel string, args []any) (any, error) {
 		for _, server := range servers {
 			id := aiString(server["id"])
 			entry := map[string]any{"id": id, "name": server["name"], "host": server["host"], "port": server["port"], "tlsMode": aiString(server["tlsMode"]), "autoConnect": server["autoConnect"] == true}
+			entry["ssh"] = server["ssh"]
 			secret := secrets[id]
 			entry["hasToken"] = secret.Token != ""
 			entry["trusted"] = secret.Fingerprint != ""
@@ -943,6 +929,8 @@ func (b *Backend) invokeServerAgents(channel string, args []any) (any, error) {
 		return desktopOK(map[string]any{"statuses": b.syncReadStatus()}), nil
 	case "server:install":
 		return b.syncAgentInstall(args)
+	case "server:update":
+		return b.syncAgentUpdate(args)
 	case "server:uninstall":
 		return b.syncAgentUninstall(args)
 	case "server:projectSync":
