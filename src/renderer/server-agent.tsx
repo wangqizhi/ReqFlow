@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bridge, type ServerAgentDraft, type ServerAgentEntry } from './api';
 import { Check, Eye, FolderOpen, Globe, Plus, ShieldAlert, Trash, X } from './icons';
+import { trustServerAgentDraft } from './server-agent-trust';
 
 // Server Agent 设置页（REQ-237/238/239）：管理多套远程同步服务端配置，
 // 展示连接状态（已连接 / 断开 / 证书异常 / 待确认信任）与失败原因；
@@ -41,8 +42,9 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tokenVisible, setTokenVisible] = useState(false);
   const [busy, setBusy] = useState('');
-  const [confirm, setConfirm] = useState<{ server: ServerAgentEntry; fingerprint?: string; code?: string; message?: string } | null>(null);
+  const [confirm, setConfirm] = useState<{ server: ServerAgentEntry; draft?: ServerAgentDraft; fingerprint?: string; code?: string; message?: string } | null>(null);
   const [install, setInstall] = useState({ open: false, ssh: '', port: 8787, dataDir: '' });
+  const [uninstall, setUninstall] = useState({ open: false, ssh: '', cleanData: false, previewDataDir: '' });
   const pollRef = useRef(false);
 
   const refresh = useCallback(async (quiet = true) => {
@@ -104,7 +106,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     if (r.ok) notify('连接测试通过：网络、证书与令牌全部有效');
     else {
       notify('测试失败 — ' + failureText(r.kind, r.error), 'err');
-      if (r.code === 'NEED_TRUST' && editor.name) setConfirm({ server: { ...emptyEditor, ...draft } as ServerAgentEntry, fingerprint: r.fingerprint, code: r.code, message: r.error });
+      if ((r.code === 'NEED_TRUST' || r.code === 'CERT_CHANGED') && editor.name) setConfirm({ server: { ...emptyEditor, ...draft } as ServerAgentEntry, draft, fingerprint: r.fingerprint, code: r.code, message: r.error });
     }
   }
 
@@ -112,20 +114,29 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     if (!editor) return;
     if (!editor.name?.trim() || !editor.host?.trim()) { notify('请填写名称与地址', 'err'); return; }
     const r = await run('save', () => bridge.saveServerAgent!({ ...editor, id: editingId || undefined }), '服务端配置已保存');
-    if (r?.ok !== false) { setEditor(null); setEditingId(null); setTokenVisible(false); }
+    if (r?.ok) { setEditor(null); setEditingId(null); setTokenVisible(false); }
   }
 
   async function confirmTrust() {
-    if (!confirm) return;
-    if (confirm.code === 'CERT_CHANGED') {
-      const reset = await bridge.resetServerAgentTrust!(confirm.server.id);
-      if (!reset.ok) { notify(reset.error || '重置信任失败', 'err'); return; }
+    if (!confirm || busy) return;
+    setBusy('trust');
+    let id: string;
+    try {
+      id = await trustServerAgentDraft(bridge, confirm.server.id, confirm.draft, confirm.fingerprint, savedId => {
+        setEditingId(savedId);
+        setConfirm(current => current ? { ...current, server: { ...current.server, id: savedId }, draft: current.draft ? { ...current.draft, id: savedId } : undefined } : current);
+      });
+    } catch (e: any) {
+      notify(e.message, 'err');
+      return;
+    } finally {
+      setBusy('');
+      await refresh(true);
     }
-    const r = await bridge.trustServerAgent!(confirm.server.id);
-    if (!r.ok) { notify(r.error || '确认信任失败', 'err'); setConfirm(null); return; }
     notify('已信任该证书指纹');
     setConfirm(null);
-    await run(confirm.server.id, () => bridge.connectServerAgent!(confirm.server.id), '已连接 ' + confirm.server.name);
+    if (confirm.draft) { setEditor(null); setEditingId(null); setTokenVisible(false); }
+    await run(id, () => bridge.connectServerAgent!(id), '已连接 ' + confirm.server.name);
   }
 
   async function resetTrust(server: ServerAgentEntry) {
@@ -141,12 +152,22 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
       setEditingId(null);
       setEditor({ name: result.name || 'ReqFlow Server', host: result.host, port: result.port || 8787, tlsMode: 'pin', autoConnect: false, token: result.token });
       setTokenVisible(true);
-      notify('已生成配置草稿（含访问令牌），保存后测试连接');
+      notify('服务端数据目录：' + result.dataDir + '；已生成配置草稿，保存后测试连接');
+    }
+  }
+
+  async function runUninstall(preview: boolean) {
+    const result = await run('uninstall', () => bridge.uninstallServerAgent!({ ssh: uninstall.ssh.trim(), cleanData: uninstall.cleanData, preview, confirmedDataDir: preview ? undefined : uninstall.previewDataDir }), preview ? '已读取远程部署，请核对卸载范围' : '远程服务端已卸载');
+    if (!result?.ok) return;
+    if (preview) setUninstall({ ...uninstall, previewDataDir: result.dataDir || '' });
+    else {
+      setUninstall({ open: false, ssh: '', cleanData: false, previewDataDir: '' });
+      notify(result.dataRemoved ? '已卸载服务端并清理数据目录' : '已卸载服务端，数据目录已保留：' + result.dataDir);
     }
   }
 
   return <section className="server-agent-page" aria-label="Server Agent">
-    <p className="settings-hint">Server Agent 是可部署在 NAS / 云主机上的 ReqFlow 同步服务端，保存各设备的需求流数据。在「项目设置 → 远程同步」关联后，flow 数据自动推送服务端，本地始终保留一份；发布等操作仍在本地进行。</p>
+    <p className="settings-hint">关联项目后，flow 操作直接由远程服务器执行，配置、需求和步骤保存在服务端 SQLite 中。本地保存已确认结果的备份；中断远程同步后可继续使用本地备份。</p>
     {!bridge.getServerAgents && <p className="settings-message" role="alert">Server Agent 仅桌面版可用。</p>}
     {error && <p className="settings-message" role="alert">{error}</p>}
     <div className="agent-server-list">
@@ -165,7 +186,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
           </div>
           <div className="agent-server-meta">
             <span>最近连接：{timeLabel(server.status?.lastConnectedAt)}</span>
-            <span>最近同步：{timeLabel(Object.values(server.status?.lastSync || {})[0])}</span>
+            <span>最近备份：{timeLabel(Object.values(server.status?.lastSync || {})[0])}</span>
             <span title={server.fingerprint ? '已信任指纹 ' + formatFingerprint(server.fingerprint) : ''}>{server.trusted ? '已信任证书指纹' : '尚未确认指纹'}</span>
           </div>
           {failure && <p className="agent-server-error" role="alert">{failure}</p>}
@@ -189,6 +210,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     <div className="settings-actions">
       <button className="btn" disabled={!!busy || !bridge.saveServerAgent} onClick={() => { setEditor({ ...emptyEditor }); setEditingId(null); setTokenVisible(false); }}><Plus size={16} />新增服务端</button>
       <button className="btn" disabled={!!busy || !bridge.installServerAgent} onClick={() => setInstall({ ...install, open: !install.open })}><FolderOpen size={16} />SSH 自动安装…</button>
+      <button className="btn" disabled={!!busy || !bridge.uninstallServerAgent} onClick={() => setUninstall({ ...uninstall, open: !uninstall.open })}><Trash size={16} />远程卸载…</button>
     </div>
 
     {install.open && <div className="agent-install-box">
@@ -202,6 +224,19 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
       <div className="settings-actions">
         <button className="btn primary" disabled={!!busy || !install.ssh.trim()} onClick={() => void runInstall()}>{busy === 'install' ? '安装中…' : '安装到服务器'}</button>
         <button className="btn" onClick={() => setInstall({ open: false, ssh: '', port: 8787, dataDir: '' })}>收起</button>
+      </div>
+    </div>}
+
+    {uninstall.open && <div className="agent-install-box">
+      <h3>卸载远程 Server Agent</h3>
+      <p className="settings-hint">停止服务并移除开机自启、服务端程序和部署配置。默认保留数据。卸载后，关联项目需中断远程同步才能继续编辑本地备份。</p>
+      <label className="field">SSH 目标<input disabled={!!busy} value={uninstall.ssh} onChange={e => setUninstall({ ...uninstall, ssh: e.target.value, previewDataDir: '' })} placeholder="user@nas.lan 或 user@192.168.1.10:22" /></label>
+      <label><input type="checkbox" disabled={!!busy} checked={uninstall.cleanData} onChange={e => setUninstall({ ...uninstall, cleanData: e.target.checked, previewDataDir: '' })} />同时清理远程数据目录（不可恢复）</label>
+      {uninstall.previewDataDir && <p role="alert">{uninstall.cleanData ? '将永久清理' : '将保留'}数据目录：<code>{uninstall.previewDataDir}</code></p>}
+      <div className="settings-actions">
+        <button type="button" className="btn" disabled={!!busy || !uninstall.ssh.trim()} onClick={() => void runUninstall(true)}>检查卸载范围</button>
+        {uninstall.previewDataDir && <button type="button" className="btn primary" disabled={!!busy} onClick={() => void runUninstall(false)}>{busy === 'uninstall' ? '处理中…' : uninstall.cleanData ? '确认卸载并清理数据' : '确认卸载并保留数据'}</button>}
+        <button type="button" className="btn" disabled={!!busy} onClick={() => setUninstall({ open: false, ssh: '', cleanData: false, previewDataDir: '' })}>取消</button>
       </div>
     </div>}
 
@@ -222,7 +257,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
         <input autoComplete="off" type={tokenVisible ? 'text' : 'password'} value={editor.token || ''} onChange={e => setEditor({ ...editor, token: e.target.value })} placeholder={editingId ? '留空保留已保存的令牌' : '服务端 server token 命令输出的令牌'} />
         <button type="button" className="icon-btn" aria-label={tokenVisible ? '隐藏令牌' : '显示令牌'} aria-pressed={tokenVisible} onClick={() => setTokenVisible(!tokenVisible)}><Eye />{tokenVisible && <span className="eye-slash" />}</button>
       </div></label>
-      <div className="validation-setting"><div><label htmlFor={'agent-auto-' + (editingId || 'new')}>开机自动连接</label><p>ReqFlow 启动时自动连接该服务端，并每分钟同步关联项目。</p></div>
+      <div className="validation-setting"><div><label htmlFor={'agent-auto-' + (editingId || 'new')}>开机自动连接</label><p>ReqFlow 启动时自动连接该服务端，定期更新本地备份。</p></div>
         <label className="switch"><input id={'agent-auto-' + (editingId || 'new')} type="checkbox" checked={!!editor.autoConnect} onChange={e => setEditor({ ...editor, autoConnect: e.target.checked })} /><span className="slider" /><span className="switch-state">{editor.autoConnect ? '已开启' : '已关闭'}</span></label></div>
       <div className="settings-actions">
         <button type="button" className="btn" disabled={!!busy || !bridge.testServerAgent || !editor.host?.trim()} onClick={() => void testEditor()}>测试连接</button>
@@ -246,7 +281,7 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
         {confirm.message && <p className="settings-hint">{confirm.message}</p>}
         <div className="settings-actions">
           <button className="btn" onClick={() => setConfirm(null)}>取消</button>
-          <button className="btn primary" onClick={() => void confirmTrust()}><Check size={15} />{confirm.code === 'CERT_CHANGED' ? '重置并确认新指纹' : '信任并连接'}</button>
+          <button className="btn primary" disabled={!!busy} onClick={() => void confirmTrust()}><Check size={15} />{busy === 'trust' ? '确认中…' : confirm.code === 'CERT_CHANGED' ? '重置并确认新指纹' : '信任并连接'}</button>
         </div>
       </div>
     </div>}

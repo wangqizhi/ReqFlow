@@ -207,6 +207,47 @@ func TestServerCLIPrefix(t *testing.T) {
 	}
 }
 
+func TestSyncTrustSavedDraftAndConfirmedFingerprint(t *testing.T) {
+	baseURL, token, stop := startTestSyncServer(t)
+	defer stop()
+	host, portString, _ := net.SplitHostPort(strings.TrimPrefix(baseURL, "https://"))
+	port, _ := strconv.Atoi(portString)
+	draft := map[string]any{"name": "NAS", "host": host, "port": port, "tlsMode": "pin", "token": token}
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	probe, err := b.invokeServerAgents("server:agents:test", []any{draft})
+	if err != nil || aiMap(probe)["code"] != "NEED_TRUST" {
+		t.Fatalf("draft should be testable before saving: %v, %v", probe, err)
+	}
+	fingerprint := aiString(aiMap(probe)["fingerprint"])
+	saved, err := b.invokeServerAgents("server:agents:save", []any{draft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := aiString(aiMap(saved)["id"])
+	if _, err = b.syncTrust(id, strings.Repeat("00", 32)); err == nil {
+		t.Fatal("must reject a certificate different from the confirmed fingerprint")
+	}
+	_, secret, err := b.syncAgentConfig(id)
+	if err != nil || secret.Fingerprint != "" {
+		t.Fatal("failed trust must not store a certificate")
+	}
+	if _, err = b.invokeServerAgents("server:agents:trust", []any{id, fingerprint}); err != nil {
+		t.Fatal(err)
+	}
+	connected, err := b.invokeServerAgents("server:connect", []any{id})
+	if err != nil || aiMap(connected)["ok"] != true {
+		t.Fatalf("saved and trusted draft must connect: %v, %v", connected, err)
+	}
+	defer b.syncDisconnect(id)
+	if _, err = b.syncTrust(id, strings.Repeat("00", 32)); err == nil {
+		t.Fatal("must reject changed certificate confirmation")
+	}
+	_, secret, err = b.syncAgentConfig(id)
+	if err != nil || secret.Fingerprint != fingerprint {
+		t.Fatal("failed confirmation must preserve previous trust")
+	}
+}
+
 func TestSyncAgentDoesNotInheritProxy(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
@@ -257,7 +298,7 @@ func TestSyncAgentReadinessRejectsHTTPFailure(t *testing.T) {
 
 func TestSyncAgentSystemdUnit(t *testing.T) {
 	unit := syncAgentSystemdUnit("/home/test user/reqflow-server")
-	if !strings.Contains(unit, `ExecStart="/home/test user/reqflow-server/reqflow-server" server run --config "/home/test user/reqflow-server/server-config.json"`) {
+	if !strings.Contains(unit, `ExecStart="/home/test user/reqflow-server/reqflow-server" server run --config "/home/test user/reqflow-server/server-config.sqlite"`) {
 		t.Fatalf("paths must be quoted for systemd: %s", unit)
 	}
 	if strings.Contains(unit, ">>") || strings.Contains(unit, "2>&1") {
@@ -268,9 +309,11 @@ func TestSyncAgentSystemdUnit(t *testing.T) {
 	}
 }
 
-// REQ-240：projectSync op 保存 / 解除关联，附件 dataUrl 不上传。
+// The pure domain operation retains association metadata; attachment bytes
+// belong to the authoritative flow, while machine-specific paths stay local.
 func TestProjectSyncOpAndPayload(t *testing.T) {
 	service := NewWorkspaceService(t.TempDir())
+	service.localOnly = true
 	if _, err := service.Mutate(map[string]any{"op": "project", "name": "同步项目"}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +339,7 @@ func TestProjectSyncOpAndPayload(t *testing.T) {
 	if project["serverAgent"] != nil {
 		t.Fatalf("serverAgent not cleared: %v", project["serverAgent"])
 	}
-	// payload 只包含 flow 字段且不包含本地路径 / dataUrl。
+	// Flow attachments must survive migration to a different device.
 	project["dir"] = `C:\secret\path`
 	project["items"] = []any{map[string]any{"id": "i1", "body": "b", "attachments": []any{map[string]any{"id": "a1", "label": "图片1", "name": "x.png", "dataUrl": "data:image/png;base64,AAAA"}}}}
 	payload := syncFlowPayload(project)
@@ -304,7 +347,7 @@ func TestProjectSyncOpAndPayload(t *testing.T) {
 		t.Fatal("dir should not be uploaded")
 	}
 	items := coreList(payload["items"])
-	if len(items) != 1 || strings.Contains(fmt.Sprint(items[0]), "dataUrl") || strings.Contains(fmt.Sprint(items[0]), "base64") {
-		t.Fatalf("attachment dataUrl leaked: %v", items)
+	if len(items) != 1 || !strings.Contains(fmt.Sprint(items[0]), "data:image/png;base64,AAAA") {
+		t.Fatalf("attachment data missing from remote flow: %v", items)
 	}
 }

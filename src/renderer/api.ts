@@ -164,12 +164,12 @@ export interface ReqFlowBridge {
   saveServerAgent?(config: ServerAgentDraft): Promise<{ ok: boolean; id?: string; trusted?: boolean; hasToken?: boolean; error?: string }>;
   deleteServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
   testServerAgent?(config: ServerAgentDraft): Promise<{ ok: boolean; kind?: 'network' | 'cert' | 'auth'; code?: string; error?: string; fingerprint?: string }>;
-  trustServerAgent?(id: string): Promise<{ ok: boolean; fingerprint?: string; error?: string }>;
+  trustServerAgent?(id: string, fingerprint?: string): Promise<{ ok: boolean; fingerprint?: string; error?: string }>;
   resetServerAgentTrust?(id: string): Promise<{ ok: boolean; error?: string }>;
   connectServerAgent?(id: string): Promise<{ ok: boolean; kind?: string; code?: string; error?: string; fingerprint?: string }>;
   disconnectServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
-  installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; summary?: string; error?: string }>;
-  syncProjectToServer?(project: string, mode: 'push' | 'pull'): Promise<{ ok: boolean; revision?: number; items?: number; error?: string }>;
+  installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; dataDir?: string; summary?: string; error?: string }>;
+  uninstallServerAgent?(info: { ssh: string; cleanData: boolean; preview?: boolean; confirmedDataDir?: string }): Promise<{ ok: boolean; dataDir?: string; dataRemoved?: boolean; error?: string }>;
 }
 
 declare global {

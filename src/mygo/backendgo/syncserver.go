@@ -57,7 +57,9 @@ func syncDefaultDataDir() string {
 	return filepath.Join(os.Getenv("HOME"), ".reqflow-server")
 }
 
-func syncDefaultConfigPath() string { return filepath.Join(syncDefaultDataDir(), "server-config.json") }
+func syncDefaultConfigPath() string {
+	return filepath.Join(syncDefaultDataDir(), "server-config.sqlite")
+}
 
 func syncTokenHash(token string) string {
 	digest := sha256.Sum256([]byte(token))
@@ -77,13 +79,25 @@ func syncValidToken(token string) bool {
 }
 
 func syncLoadConfig(path string) (*syncServerConfig, error) {
-	raw, err := os.ReadFile(path)
+	if cfg, err := syncReadConfigSQL(syncConfigSQLitePath(path)); err == nil {
+		return cfg, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	legacy := path
+	if filepath.Ext(path) != ".json" {
+		legacy = strings.TrimSuffix(path, filepath.Ext(path)) + ".json"
+	}
+	raw, err := os.ReadFile(legacy)
 	if err != nil {
 		return nil, err
 	}
 	var cfg syncServerConfig
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		return nil, errors.New("服务端配置文件不是有效 JSON：" + path)
+	}
+	if err = syncSaveConfig(path, &cfg); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
@@ -92,7 +106,7 @@ func syncSaveConfig(path string, cfg *syncServerConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	return aiWriteJSON(path, cfg)
+	return syncWriteConfigSQL(path, cfg)
 }
 
 // syncPrepareConfig 解析 flags+配置文件并校验；首次启动时生成令牌。
@@ -155,7 +169,7 @@ func syncPrepareConfig(flags map[string]string, configPath string, generateToken
 	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
 		return nil, err
 	}
-	if err := aiWriteJSON(filepath.Join(cfg.DataDir, "reqflow-server.json"), map[string]any{"service": syncServerRealm, "createdAt": time.Now().UTC().Format(time.RFC3339)}); err != nil {
+	if err := syncWriteConfigSQL(filepath.Join(cfg.DataDir, "deployment.sqlite"), cfg); err != nil {
 		return nil, err
 	}
 	if configPath != "" && !coreExists(configPath) {
@@ -288,18 +302,17 @@ func (s *syncServer) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *syncServer) readProject(id string) (*syncProjectRecord, error) {
-	raw, err := os.ReadFile(s.projectPath(id))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	db, err := s.openStore()
 	if err != nil {
 		return nil, err
 	}
-	var record syncProjectRecord
-	if err = json.Unmarshal(raw, &record); err != nil {
-		return nil, errors.New("服务端项目数据损坏：" + id)
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
 	}
-	return &record, nil
+	defer tx.Rollback()
+	return syncReadProjectSQL(tx, id)
 }
 
 func (s *syncServer) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -309,24 +322,50 @@ func (s *syncServer) handlePing(w http.ResponseWriter, r *http.Request) {
 func (s *syncServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	projects, _ := filepath.Glob(filepath.Join(s.cfg.DataDir, "projects", "*.json"))
-	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": syncServerRealm, "version": s.version, "dataDir": s.cfg.DataDir, "projects": len(projects)})
+	db, err := s.openStore()
+	if err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer db.Close()
+	var count int
+	if err = db.QueryRow("SELECT COUNT(*) FROM remote_projects").Scan(&count); err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": syncServerRealm, "version": s.version, "protocol": "flow-v2", "dataDir": s.cfg.DataDir, "projects": count, "storage": "sqlite"})
 }
 
 func (s *syncServer) handleProjects(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	files, _ := filepath.Glob(filepath.Join(s.cfg.DataDir, "projects", "*.json"))
+	db, err := s.openStore()
+	if err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT record FROM remote_projects ORDER BY id")
+	if err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer rows.Close()
 	list := []map[string]any{}
-	for _, file := range files {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			continue
+	for rows.Next() {
+		var raw string
+		if err = rows.Scan(&raw); err != nil {
+			s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+			return
 		}
 		var record syncProjectRecord
-		if json.Unmarshal(raw, &record) == nil {
+		if json.Unmarshal([]byte(raw), &record) == nil {
 			list = append(list, map[string]any{"id": record.ID, "name": record.Name, "revision": record.Revision, "updatedAt": record.UpdatedAt})
 		}
+	}
+	if err = rows.Err(); err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "projects": list})
 }
@@ -370,10 +409,6 @@ func (s *syncServer) handleProjectPush(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.MkdirAll(filepath.Join(s.cfg.DataDir, "projects"), 0700); err != nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "code": "ERROR", "error": err.Error()})
-		return
-	}
 	previous, err := s.readProject(body.ProjectID)
 	if err != nil {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "code": "ERROR", "error": err.Error()})
@@ -381,10 +416,13 @@ func (s *syncServer) handleProjectPush(w http.ResponseWriter, r *http.Request) {
 	}
 	revision := int64(1)
 	if previous != nil {
-		revision = previous.Revision + 1
+		s.writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "项目已由远程服务端管理，不能用本地快照覆盖"})
+		return
 	}
+	body.Project["id"] = body.ProjectID
+	body.Project["revision"] = revision
 	record := syncProjectRecord{ID: body.ProjectID, Name: desktopString(body.Project["name"]), Project: body.Project, Revision: revision, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	if err = aiWriteJSON(s.projectPath(body.ProjectID), record); err != nil {
+	if err = s.insertProject(&record); err != nil {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "code": "ERROR", "error": err.Error()})
 		return
 	}
@@ -411,23 +449,33 @@ func (s *syncServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entries := []map[string]any{}
-	_ = aiReadJSON(s.eventsPath(body.ProjectID), &entries)
+	db, err := s.openStore()
+	if err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for count, event := range body.Events {
+	for _, event := range body.Events {
 		if strings.TrimSpace(event) == "" {
 			continue
 		}
-		entries = append(entries, map[string]any{"time": now, "event": aiLimit(event, 500), "index": len(entries) + count + 1})
+		if _, err = tx.Exec("INSERT INTO remote_events(project_id,event,time) VALUES(?,?,?)", body.ProjectID, aiLimit(event, 500), now); err != nil {
+			s.writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 	}
-	if len(entries) > 500 {
-		entries = entries[len(entries)-500:]
-	}
-	if err := aiWriteJSON(s.eventsPath(body.ProjectID), entries); err != nil {
+	if err := tx.Commit(); err != nil {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "code": "ERROR", "error": err.Error()})
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(entries)})
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(body.Events)})
 }
 
 func (s *syncServer) handler() http.Handler {
@@ -443,6 +491,8 @@ func (s *syncServer) handler() http.Handler {
 		s.handleProjectPush(w, r)
 	}))
 	mux.HandleFunc("/api/sync/events", s.requireAuth(s.handleEvents))
+	mux.HandleFunc("/api/flow/mutate", s.requireAuth(s.handleFlowMutate))
+	mux.HandleFunc("/api/flow/associate", s.requireAuth(s.handleFlowAssociate))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "code": "NOT_FOUND", "error": "未知接口：" + r.URL.Path})
 	})
@@ -465,6 +515,14 @@ func startSyncServer(cfg *syncServerConfig, version string, quiet bool) (stop fu
 		return nil, "", "", fmt.Errorf("无法监听 %s：%w", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), err)
 	}
 	server := &syncServer{cfg: cfg, version: version}
+	if err = syncWriteConfigSQL(filepath.Join(cfg.DataDir, "deployment.sqlite"), cfg); err != nil {
+		listener.Close()
+		return nil, "", "", err
+	}
+	if err = server.migrateStore(); err != nil {
+		listener.Close()
+		return nil, "", "", err
+	}
 	httpServer := &http.Server{Handler: server.handler(), TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}, ReadHeaderTimeout: 15 * time.Second}
 	go func() {
 		if err := httpServer.ServeTLS(listener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -495,6 +553,7 @@ func syncRunForeground(argv []string, version string, stdout io.Writer) int {
 	if cfgPath == "" {
 		cfgPath = syncDefaultConfigPath()
 	}
+	cfgPath = syncConfigSQLitePath(cfgPath)
 	stop, addr, fingerprint, err := startSyncServer(cfg, version, false)
 	if err != nil {
 		fmt.Fprintln(stdout, "启动失败："+err.Error())
@@ -538,6 +597,9 @@ func syncParseFlags(argv []string) (map[string]string, []string) {
 func syncRunControlCommand(command string, argv []string, version string, stdout io.Writer) int {
 	flags, _ := syncParseFlags(argv)
 	cfgPath := strings.TrimSpace(flags["config"])
+	if cfgPath != "" {
+		cfgPath = syncConfigSQLitePath(cfgPath)
+	}
 	switch command {
 	case "token":
 		rotate := coreTruthy(flags["rotate"])

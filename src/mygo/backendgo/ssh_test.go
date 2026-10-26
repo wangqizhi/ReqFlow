@@ -4,10 +4,77 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/pkg/sftp"
 )
+
+func TestServerDataCleanupBoundaries(t *testing.T) {
+	left, right := net.Pipe()
+	server := sftp.NewRequestServer(left, sftp.InMemHandler())
+	go func() { _ = server.Serve() }()
+	t.Cleanup(func() { _ = server.Close(); _ = left.Close(); _ = right.Close() })
+	c, err := sftp.NewClientPipe(right, right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for _, dir := range []string{"/data/nested", "/outside", "/unrelated", "/home/user/reqflow-server"} {
+		if err = c.MkdirAll(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put := func(file string, raw []byte) {
+		t.Helper()
+		if err := syncUploadAgentFile(c, file, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("/outside/keep", []byte("user data"))
+	put("/data/nested/item", []byte("remote flow"))
+	if _, err = syncValidateCleanup(c, "/home/user", "/home/user/reqflow-server", "/unrelated"); err == nil {
+		t.Fatal("unmarked user directories must never be deleted")
+	}
+	raw, err := syncConfigBytes(&syncServerConfig{DataDir: "/data", Token: "test-token-0123456789abcdef", Port: 8787})
+	if err != nil {
+		t.Fatal(err)
+	}
+	put("/data/deployment.sqlite", raw)
+	for _, dir := range []string{"/", "/home/user", "/home/user/reqflow-server"} {
+		if _, err = syncValidateCleanup(c, "/home/user", "/home/user/reqflow-server", dir); err == nil {
+			t.Fatalf("unsafe cleanup accepted: %s", dir)
+		}
+	}
+	root, err := syncValidateCleanup(c, "/home/user", "/home/user/reqflow-server", "/data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Symlink("/outside", "/data/link"); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Symlink("/data", "/data-link"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = syncValidateCleanup(c, "/home/user", "/home/user/reqflow-server", "/data-link"); err == nil {
+		t.Fatal("symlink data root must not be recursively deleted")
+	}
+	if err = syncRemoveSFTPTree(c, root, "/outside"); err == nil {
+		t.Fatal("cleanup must stay within its selected root")
+	}
+	if err = syncRemoveSFTPTree(c, root, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Stat("/data"); !os.IsNotExist(err) {
+		t.Fatal("selected data root was not removed", err)
+	}
+	if raw, err = syncReadSFTPFile(c, "/outside/keep"); err != nil || string(raw) != "user data" {
+		t.Fatal("cleanup followed a symlink outside the data directory", err)
+	}
+	if _, err = c.Stat("/unrelated"); err != nil {
+		t.Fatal("unrelated data was deleted", err)
+	}
+}
 
 func TestSSHAddressValidation(t *testing.T) {
 	for _, root := range []string{"ssh://dev@example.com:2222/home/dev", "ssh://my-alias/", "ssh://user@[::1]:22/home/a%20b"} {

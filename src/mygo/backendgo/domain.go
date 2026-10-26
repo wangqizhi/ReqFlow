@@ -572,7 +572,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "ready", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)

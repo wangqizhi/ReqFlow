@@ -1609,29 +1609,23 @@ export default function App() {
                         </select>
                       </label>
                       {!serverAgents.length && <p className="settings-hint">还没有服务端配置；先在「设置 → Server Agent」新增或通过 SSH 自动安装。</p>}
-                      {guideSyncServer && (() => {
-                        const agent = serverAgents.find(a => a.id === guideSyncServer);
+                      {(guideSyncServer || p?.serverAgent) && (() => {
+                        const agent = serverAgents.find(a => a.id === (guideSyncServer || p?.serverAgent?.id));
                         const syncState = agent?.status?.state || 'disconnected';
                         const lastSyncAt = agent?.status?.lastSync?.[p!.id];
                         return <>
-                          <p className="settings-hint">当前状态：{syncState === 'connected' ? '已连接' : syncState === 'cert_error' ? '证书异常，连接被阻断' : syncState === 'need_trust' ? '待确认证书指纹' : '未连接'}；最近同步 {lastSyncAt ? new Date(lastSyncAt).toLocaleString('zh-CN') : '—'}{agent?.status?.lastSyncError ? '；上次失败：' + agent.status.lastSyncError : ''}</p>
-                          <div className="settings-actions">
+                          <p className="settings-hint">当前状态：{syncState === 'connected' ? '已连接' : syncState === 'cert_error' ? '证书异常，连接被阻断' : syncState === 'need_trust' ? '待确认证书指纹' : '未连接'}；最近备份 {lastSyncAt ? new Date(lastSyncAt).toLocaleString('zh-CN') : '—'}{agent?.status?.lastSyncError ? '；上次失败：' + agent.status.lastSyncError : ''}</p>
+                          {p?.serverAgent && <div className="settings-actions">
                             <button type="button" className="btn" disabled={busy} onClick={async () => {
-                              if (!p) return;
-                              if (!agent?.status || agent.status.state !== 'connected') { notify('请先在「设置 → Server Agent」连接服务端', 'err'); return; }
-                              const r = await bridge.syncProjectToServer!(p.id, 'push');
-                              if (r.ok) notify('已推送 flow 快照到服务端'); else notify(r.error || '推送失败', 'err');
-                              void bridge.getServerAgents?.().then(rr => { if (rr?.ok) setServerAgents(rr.servers || []); }).catch(() => {});
-                            }}>立即推送</button>
-                            <button type="button" className="btn" disabled={busy} title="用服务端数据覆盖本项目的需求流字段；本地目录、发布与草稿设置保留" onClick={async () => {
-                              if (!p) return;
-                              const r = await bridge.syncProjectToServer!(p.id, 'pull');
-                              if (r.ok) { notify('已从服务端拉取并覆盖本地 flow 数据'); void load({ quiet: true }); } else notify(r.error || '拉取失败', 'err');
-                            }}>从服务端拉取</button>
-                          </div>
+                              if (await act({ op: 'projectSync', server: null }, true)) {
+                                setGuideSyncServer('');
+                                notify('已中断远程同步，继续使用本地备份');
+                              }
+                            }}>中断远程同步</button>
+                          </div>}
                         </>;
                       })()}
-                      <p className="settings-hint">关联后，本项目的需求、批次与全部步骤在每次变更时自动推送服务端，本地始终保留一份；发布等操作仍在本地进行，服务端只保存 flow 数据。解除关联后继续使用本地数据。</p>
+                      <p className="settings-hint">关联后，所有 flow 操作由远程服务器执行，本地只保存已确认结果的备份。远程不可用时请先中断远程同步，再使用本地备份；发布等本机操作仍在本地执行。</p>
                     </>}
                   </>}
                   {guideTab === 'history' && <>

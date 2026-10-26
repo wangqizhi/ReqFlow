@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-type WorkspaceService struct{ store *workspaceStore }
+type WorkspaceService struct {
+	store     *workspaceStore
+	localOnly bool
+}
 
 func NewWorkspaceService(dataDir string) *WorkspaceService {
 	return &WorkspaceService{store: newWorkspaceStore(dataDir)}
@@ -73,13 +76,17 @@ func (s *WorkspaceService) Get() (map[string]any, error) {
 			return nil, e
 		}
 	}
+	record, warning := s.refreshRemote(record)
 	state := coreMap(record["data"])
 	if e = s.materializeImages(state); e != nil {
 		return nil, e
 	}
-	return map[string]any{"state": NormalizeWorkspace(state), "version": coreNum(record["version"])}, nil
+	return map[string]any{"state": NormalizeWorkspace(state), "version": coreNum(record["version"]), "warning": warning}, nil
 }
 func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64) (map[string]any, error) {
+	if result, handled, err := s.remoteMutate(action, expectedVersion); handled {
+		return result, err
+	}
 	scopes := MutationProjectIDs(action)
 	revisions, hasRevisions := action["expectedProjectVersions"]
 	revisionMap, revisionOK := revisions.(map[string]any)
@@ -211,6 +218,13 @@ func (s *WorkspaceService) ImportWorkspace(data any, replace bool) (map[string]a
 	if current != nil && !replace && len(coreList(NormalizeWorkspace(coreMap(current["data"]))["projects"])) > 0 {
 		return nil, errors.New("当前已有工作区数据；如需覆盖请使用 --replace。")
 	}
+	if !s.localOnly && current != nil {
+		for _, value := range coreList(coreMap(current["data"])["projects"]) {
+			if aiString(coreMap(coreMap(value)["serverAgent"])["id"]) != "" {
+				return nil, errors.New("恢复工作区备份前，请先中断关联项目的远程同步")
+			}
+		}
+	}
 	if e = s.materializeImages(workspace); e != nil {
 		return nil, e
 	}
@@ -228,6 +242,13 @@ func (s *WorkspaceService) WriteState(state map[string]any, expectedVersion int6
 	}
 	if record == nil || coreNum(record["version"]) != expectedVersion {
 		return nil, &VersionConflictError{}
+	}
+	if !s.localOnly {
+		var err error
+		state, err = s.remoteReplaceFlows(record, state)
+		if err != nil {
+			return nil, err
+		}
 	}
 	prior := coreList(coreMap(record["data"])["projects"])
 	replacement := coreMap(coreClone(state))

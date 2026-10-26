@@ -5,10 +5,9 @@ package backendgo
 //   单独存放，不进入工作区导出与 Git 备份。
 // - 信任模式：pin（自签证书 + 首次指纹确认，指纹变化阻断）/ ca（系统受信任 CA 证书）。
 // - 连接测试按「网络不可达 / 证书不匹配 / 令牌无效」分类返回。
-// - 项目关联 server agent 后，flow 每次变更自动推送服务端（本地保留一份）。
+// - 项目关联后，flow 在服务端执行，本地仅保留已确认结果的备份。
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -342,7 +341,7 @@ func (b *Backend) syncAgentConfig(id string) (map[string]any, syncServerSecret, 
 	return nil, syncServerSecret{}, errors.New("服务端配置不存在")
 }
 
-// syncConnect 建立连接：网络 → 证书 → 令牌逐级校验，成功后推送关联项目。
+// syncConnect 建立连接：网络 → 证书 → 令牌逐级校验，成功后更新关联项目的本地备份。
 func (b *Backend) syncConnect(id string, quiet bool) (map[string]any, error) {
 	agent, secret, err := b.syncAgentConfig(id)
 	if err != nil {
@@ -380,9 +379,9 @@ func (b *Backend) syncConnect(id string, quiet bool) (map[string]any, error) {
 	runtime.mu.Lock()
 	runtime.clients[id] = client
 	runtime.mu.Unlock()
-	b.syncUpdateStatus(id, map[string]any{"state": "connected", "error": nil, "kind": nil, "code": nil, "lastConnectedAt": time.Now().UTC().Format(time.RFC3339Nano), "fingerprint": fingerprint, "errorAt": nil})
+	b.syncUpdateStatus(id, map[string]any{"state": "connected", "paused": false, "error": nil, "kind": nil, "code": nil, "lastConnectedAt": time.Now().UTC().Format(time.RFC3339Nano), "fingerprint": fingerprint, "errorAt": nil})
 	if !quiet {
-		b.syncPushAssociated(id)
+		_, _ = b.Workspace.Get()
 	}
 	return map[string]any{"ok": true, "fingerprint": fingerprint}, nil
 }
@@ -403,20 +402,28 @@ func (b *Backend) syncDisconnect(id string) {
 }
 
 // syncTrust 确认当前证书指纹（首次信任或证书变更后重新确认）。
-func (b *Backend) syncTrust(id string) (map[string]any, error) {
+func (b *Backend) syncTrust(id string, confirmed ...string) (map[string]any, error) {
 	agent, secret, err := b.syncAgentConfig(id)
 	if err != nil {
 		return nil, err
 	}
-	client, pin, err := syncBuildClient(agent, syncServerSecret{Token: secret.Token})
+	expected := ""
+	if len(confirmed) > 0 {
+		expected = strings.ToLower(strings.TrimSpace(confirmed[0]))
+	}
+	client, pin, err := syncBuildClient(agent, syncServerSecret{Token: secret.Token, Fingerprint: expected})
 	if err != nil {
 		return nil, err
+	}
+	defer client.CloseIdleConnections()
+	if pin == nil {
+		return nil, errors.New("受信任 CA 模式无需确认证书指纹，请直接测试连接")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if _, err = syncAgentProbe(ctx, client, pin, syncAgentBaseURL(agent), secret.Token, true); err != nil {
 		var categorized *syncCategorizedError
-		if !errors.As(err, &categorized) || pin.actual == "" {
+		if !errors.As(err, &categorized) || categorized.Code != "NEED_TRUST" || pin.actual == "" {
 			return nil, err
 		}
 	}
@@ -458,29 +465,27 @@ func (b *Backend) syncResetTrust(id string) (map[string]any, error) {
 
 // ---- 项目 flow 同步（REQ-240） ----
 
-// syncFlowPayload 仅提取 flow 相关数据；本地路径、发布、草稿与验证源不上传。
+// syncFlowPayload 提取远程 flow 和附件内容；本机路径、发布与验证配置保留在本地。
 func syncFlowPayload(project map[string]any) map[string]any {
-	payload := map[string]any{}
-	for _, key := range []string{"id", "name", "description", "guidance", "guideVersion", "guideHistory", "deliveryGuidance", "aiValidation", "items", "batches", "nextNumber"} {
-		if value, ok := project[key]; ok {
-			payload[key] = value
-		}
+	payload := coreMap(coreCloneAny(project))
+	for _, key := range []string{"dir", "remote", "folderId", "hidden", "serverAgent", "verifySource", "publishScript"} {
+		delete(payload, key)
 	}
-	items := []any{}
-	for _, value := range coreList(payload["items"]) {
-		item := coreMap(coreCloneAny(value))
-		if attachments := coreList(item["attachments"]); len(attachments) > 0 {
-			light := []any{}
-			for _, attachment := range attachments {
-				a := coreMap(attachment)
-				light = append(light, map[string]any{"id": a["id"], "label": a["label"], "name": a["name"]})
+	var stripPaths func(any)
+	stripPaths = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			delete(v, "path")
+			for _, child := range v {
+				stripPaths(child)
 			}
-			item["attachments"] = light
+		case []any:
+			for _, child := range v {
+				stripPaths(child)
+			}
 		}
-		delete(item, "requirementDraft")
-		items = append(items, item)
 	}
-	payload["items"] = items
+	stripPaths(payload)
 	return payload
 }
 
@@ -489,113 +494,6 @@ func coreCloneAny(value any) any {
 	var next any
 	_ = json.Unmarshal(raw, &next)
 	return next
-}
-
-func (b *Backend) syncServerClientForProject(projectID string) (string, *http.Client, error) {
-	project, err := b.desktopProject(projectID)
-	if err != nil {
-		return "", nil, err
-	}
-	agent := coreMap(project["serverAgent"])
-	serverID := aiString(agent["id"])
-	if serverID == "" {
-		return "", nil, errors.New("项目未关联 Server Agent")
-	}
-	client := b.syncClient(serverID)
-	if client == nil {
-		return "", nil, errors.New("服务端未连接，请先在设置 → Server Agent 中连接")
-	}
-	return serverID, client, nil
-}
-
-// syncPushProject 把项目 flow 快照与本次步骤推送至服务端；本地数据保持不变。
-func (b *Backend) syncPushProject(projectID, reason string) (map[string]any, error) {
-	project, err := b.desktopProject(projectID)
-	if err != nil {
-		return nil, err
-	}
-	agent := coreMap(project["serverAgent"])
-	serverID := aiString(agent["id"])
-	if serverID == "" {
-		return nil, errors.New("项目未关联 Server Agent")
-	}
-	client := b.syncClient(serverID)
-	if client == nil {
-		// 自动同步路径：autoConnect 的服务端尝试静默重连一次。
-		config, _, cerr := b.syncAgentConfig(serverID)
-		if cerr != nil || config["autoConnect"] != true {
-			return nil, errors.New("服务端未连接，请先在设置 → Server Agent 中连接")
-		}
-		if _, cerr = b.syncConnect(serverID, true); cerr != nil {
-			b.syncUpdateStatus(serverID, map[string]any{"state": "disconnected", "error": cerr.Error(), "kind": "network"})
-			return nil, errors.New("服务端连接失败：" + cerr.Error())
-		}
-		client = b.syncClient(serverID)
-		if client == nil {
-			return nil, errors.New("服务端未连接")
-		}
-	}
-	agentConfig, secret, err := b.syncAgentConfig(serverID)
-	if err != nil {
-		return nil, err
-	}
-	baseURL := syncAgentBaseURL(agentConfig)
-	body, _ := json.Marshal(map[string]any{"projectId": projectID, "project": syncFlowPayload(project)})
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/sync/project", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+secret.Token)
-	response, err := client.Do(request)
-	if err != nil {
-		b.syncDisconnect(serverID)
-		return nil, syncClassifyRequest(err)
-	}
-	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, &syncCategorizedError{Kind: map[int]string{http.StatusUnauthorized: "auth"}[response.StatusCode], Code: fmt.Sprintf("HTTP_%d", response.StatusCode), Message: fmt.Sprintf("推送失败（HTTP %d）：%s", response.StatusCode, syncResponseError(raw))}
-	}
-	var pushed struct {
-		Revision  int64  `json:"revision"`
-		UpdatedAt string `json:"updatedAt"`
-	}
-	_ = json.Unmarshal(raw, &pushed)
-	event := strings.TrimSpace(reason)
-	if event == "" {
-		event = "推送 flow 快照"
-	}
-	events, _ := json.Marshal(map[string]any{"projectId": projectID, "events": []string{event + " · rev " + fmt.Sprint(pushed.Revision)}})
-	request, err = http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/sync/events", bytes.NewReader(events))
-	if err == nil {
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Authorization", "Bearer "+secret.Token)
-		if response, err = client.Do(request); err == nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-		}
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	b.mu.Lock()
-	status := b.syncReadStatus()
-	entry := status[serverID]
-	if entry == nil {
-		entry = map[string]any{}
-	}
-	syncs := aiMap(entry["lastSync"])
-	if syncs == nil {
-		syncs = map[string]any{}
-	}
-	syncs[projectID] = now
-	entry["lastSync"] = syncs
-	entry["lastSyncError"] = nil
-	status[serverID] = entry
-	b.syncWriteStatus(status)
-	b.mu.Unlock()
-	return map[string]any{"ok": true, "revision": pushed.Revision, "updatedAt": pushed.UpdatedAt, "syncedAt": now}, nil
 }
 
 func syncResponseError(raw []byte) string {
@@ -608,129 +506,6 @@ func syncResponseError(raw []byte) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// syncPullProject 用服务端数据覆盖本地 flow 字段；本地目录、发布与草稿设置保留。
-func (b *Backend) syncPullProject(projectID string) (map[string]any, error) {
-	serverID, client, err := b.syncServerClientForProject(projectID)
-	if err != nil {
-		return nil, err
-	}
-	agentConfig, secret, err := b.syncAgentConfig(serverID)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, syncAgentBaseURL(agentConfig)+"/api/sync/project?id="+url.QueryEscape(projectID), nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+secret.Token)
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, syncClassifyRequest(err)
-	}
-	raw, _ := io.ReadAll(io.LimitReader(response.Body, 64<<20))
-	_ = response.Body.Close()
-	if response.StatusCode == http.StatusNotFound {
-		return nil, errors.New("服务端还没有该项目数据，请先推送一次")
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, errors.New("拉取失败（HTTP " + fmt.Sprint(response.StatusCode) + "）：" + syncResponseError(raw))
-	}
-	var fetched struct {
-		Project  map[string]any `json:"project"`
-		Revision int64          `json:"revision"`
-	}
-	if err = json.Unmarshal(raw, &fetched); err != nil || fetched.Project == nil {
-		return nil, errors.New("服务端项目数据无效")
-	}
-	record, err := b.Workspace.Get()
-	if err != nil {
-		return nil, err
-	}
-	state := coreMap(coreCloneAny(record["state"]))
-	found := false
-	for _, value := range coreList(state["projects"]) {
-		project := coreMap(value)
-		if aiString(project["id"]) != projectID {
-			continue
-		}
-		found = true
-		for _, key := range []string{"name", "description", "guidance", "guideVersion", "guideHistory", "deliveryGuidance", "aiValidation", "items", "batches", "nextNumber"} {
-			if serverValue, ok := fetched.Project[key]; ok {
-				project[key] = serverValue
-			} else {
-				delete(project, key)
-			}
-		}
-	}
-	if !found {
-		return nil, errors.New("本地项目不存在")
-	}
-	if _, err = b.Workspace.WriteState(state, int64(aiNumber(record["version"]))); err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "revision": fetched.Revision, "items": len(coreList(fetched.Project["items"]))}, nil
-}
-
-// syncAssociatedProjects 返回关联到指定服务端的全部项目 ID。
-func (b *Backend) syncAssociatedProjects(serverID string) []string {
-	record, err := b.Workspace.Get()
-	if err != nil {
-		return nil
-	}
-	ids := []string{}
-	for _, value := range coreList(coreMap(record["state"])["projects"]) {
-		project := coreMap(value)
-		if aiString(coreMap(project["serverAgent"])["id"]) == serverID {
-			ids = append(ids, aiString(project["id"]))
-		}
-	}
-	return ids
-}
-
-func (b *Backend) syncPushAssociated(serverID string) {
-	for _, projectID := range b.syncAssociatedProjects(serverID) {
-		if _, err := b.syncPushProject(projectID, "连接后自动同步"); err != nil {
-			b.mu.Lock()
-			status := b.syncReadStatus()
-			if entry := status[serverID]; entry != nil {
-				entry["lastSyncError"] = err.Error()
-				status[serverID] = entry
-				b.syncWriteStatus(status)
-			}
-			b.mu.Unlock()
-		}
-	}
-}
-
-// syncAfterMutate：工作区每次成功变更后，自动推送受影响且已关联的项目（REQ-240）。
-func (b *Backend) syncAfterMutate(projectIDs []string, op string) {
-	for _, projectID := range projectIDs {
-		project, err := b.desktopProject(projectID)
-		if err != nil || aiString(coreMap(project["serverAgent"])["id"]) == "" {
-			continue
-		}
-		go func(id string) {
-			if _, err := b.syncPushProject(id, "本地变更自动推送："+op); err != nil {
-				agent, _, cerr := b.syncAgentConfig(id)
-				if cerr != nil {
-					return
-				}
-				serverID := aiString(coreMap(agent["serverAgent"])["id"])
-				b.mu.Lock()
-				status := b.syncReadStatus()
-				if entry := status[serverID]; entry != nil {
-					entry["lastSyncError"] = err.Error()
-					status[serverID] = entry
-					b.syncWriteStatus(status)
-				}
-				b.mu.Unlock()
-			}
-		}(projectID)
-	}
-}
-
 // StartServerAgents 开机自动连接（REQ-239）并定期同步；StopServerAgents 停止。
 func (b *Backend) StartServerAgents() {
 	servers, err := b.syncReadAgents()
@@ -739,7 +514,7 @@ func (b *Backend) StartServerAgents() {
 	}
 	auto := []string{}
 	for _, server := range servers {
-		if server["autoConnect"] == true {
+		if server["autoConnect"] == true && b.syncReadStatus()[aiString(server["id"])]["paused"] != true {
 			auto = append(auto, aiString(server["id"]))
 		}
 	}
@@ -762,8 +537,11 @@ func (b *Backend) StartServerAgents() {
 					continue
 				}
 				id := aiString(server["id"])
+				if b.syncReadStatus()[id]["paused"] == true {
+					continue
+				}
 				if b.syncClient(id) != nil {
-					b.syncPushAssociated(id)
+					_, _ = b.Workspace.Get()
 					continue
 				}
 				_, _ = b.syncConnect(id, true)
@@ -847,13 +625,20 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 		return nil, errors.New("无法确定远程主目录")
 	}
 	remoteDir := path.Join(home, "reqflow-server")
+	dataDir, err = syncResolveRemoteDataDir(home, dataDir)
+	if err != nil {
+		return nil, err
+	}
 	token, err := syncGenerateToken()
 	if err != nil {
 		return nil, err
 	}
-	config := map[string]any{"host": "0.0.0.0", "port": port, "dataDir": path.Join(remoteDir, "data"), "token": token}
-	configRaw, _ := json.Marshal(config)
-	if _, err = run("mkdir -p "+syncShellQuote(remoteDir+"/data"), 15*time.Second); err != nil {
+	config := &syncServerConfig{Host: "0.0.0.0", Port: port, DataDir: dataDir, Token: token}
+	configRaw, err := syncConfigBytes(config)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = run("mkdir -p "+syncShellQuote(dataDir), 15*time.Second); err != nil {
 		return nil, errors.New("创建远程目录失败：" + err.Error())
 	}
 	if err = b.syncUploadOverSSH(remote.String(), configRaw, localBinary); err != nil {
@@ -862,16 +647,22 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 	if _, err = run("chmod +x "+syncShellQuote(remoteDir+"/reqflow-server"), 15*time.Second); err != nil {
 		return nil, errors.New("设置执行权限失败：" + err.Error())
 	}
-	startCommand := syncShellQuote(remoteDir+"/reqflow-server") + " server run --config " + syncShellQuote(remoteDir+"/server-config.json")
+	startCommand := syncShellQuote(remoteDir+"/reqflow-server") + " server run --config " + syncShellQuote(remoteDir+"/server-config.sqlite")
 	summary := []string{}
 	unit := syncAgentSystemdUnit(remoteDir)
 	unitPath := path.Join(home, ".config/systemd/user/reqflow-server.service")
 	installService := "mkdir -p " + syncShellQuote(path.Dir(unitPath)) + " && printf '%s' " + syncShellQuote(unit) + " > " + syncShellQuote(unitPath) + " && systemctl --user daemon-reload && systemctl --user enable reqflow-server && systemctl --user restart reqflow-server"
 	if _, err = run(installService, 20*time.Second); err == nil {
 		summary = append(summary, "已启用并启动 systemd 用户服务")
+		if _, cronErr := run(syncRemoveCronScript(remoteDir+"/reqflow-server"), 15*time.Second); cronErr != nil {
+			summary = append(summary, "清理旧 crontab 启动项失败，请手动检查")
+		}
 	} else {
+		if _, stopErr := run("systemctl --user stop reqflow-server 2>/dev/null || true\n"+syncStopExecutableScript(remoteDir+"/reqflow-server"), 20*time.Second); stopErr != nil {
+			return nil, errors.New("旧服务端未能停止，未启动新的后台进程")
+		}
 		background := startCommand + " >> " + syncShellQuote(remoteDir+"/server.log") + " 2>&1"
-		cronLine := "@reboot " + background
+		cronLine := "@reboot " + strings.ReplaceAll(background, "%", `\%`)
 		if _, cronErr := run("(crontab -l 2>/dev/null | grep -v 'reqflow-server.*run --config'; printf '%s\\n' "+syncShellQuote(cronLine)+") | crontab -", 15*time.Second); cronErr == nil {
 			summary = append(summary, "已添加 crontab @reboot 开机自启")
 		} else {
@@ -889,7 +680,7 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 	summary = append(summary, "HTTPS 健康检查通过")
 	return map[string]any{
 		"ok": true, "name": name, "host": sshTarget, "port": int64(port), "token": token,
-		"dataDir": path.Join(remoteDir, "data"), "summary": strings.Join(summary, "；"),
+		"dataDir": dataDir, "ssh": target, "summary": strings.Join(summary, "；"),
 	}, nil
 }
 
@@ -902,7 +693,7 @@ func syncAgentSystemdUnit(remoteDir string) string {
 	quote := func(value string) string {
 		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(value) + `"`
 	}
-	return "[Unit]\nDescription=ReqFlow Server Agent\nAfter=network-online.target\n\n[Service]\nExecStart=" + quote(remoteDir+"/reqflow-server") + " server run --config " + quote(remoteDir+"/server-config.json") + "\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n"
+	return "[Unit]\nDescription=ReqFlow Server Agent\nAfter=network-online.target\n\n[Service]\nExecStart=" + quote(remoteDir+"/reqflow-server") + " server run --config " + quote(remoteDir+"/server-config.sqlite") + "\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n"
 }
 
 func syncWaitForAgent(ctx context.Context, agent map[string]any) error {
@@ -953,7 +744,7 @@ func (b *Backend) syncUploadOverSSH(root string, configRaw []byte, localBinary s
 		if err = upload("reqflow-server", raw, 0o755); err != nil {
 			return nil, errors.New("上传 reqflow-server 失败：" + err.Error())
 		}
-		if err = upload("server-config.json", configRaw, 0o600); err != nil {
+		if err = upload("server-config.sqlite", configRaw, 0o600); err != nil {
 			return nil, errors.New("上传配置失败：" + err.Error())
 		}
 		return nil, nil
@@ -1121,7 +912,7 @@ func (b *Backend) invokeServerAgents(channel string, args []any) (any, error) {
 		}
 		return map[string]any{"ok": true, "fingerprint": fingerprint}, nil
 	case "server:agents:trust":
-		result, err := b.syncTrust(strings.TrimSpace(aiString(aiArg(args, 0))))
+		result, err := b.syncTrust(strings.TrimSpace(aiString(aiArg(args, 0))), aiString(aiArg(args, 1)))
 		if err != nil {
 			return nil, err
 		}
@@ -1144,19 +935,18 @@ func (b *Backend) invokeServerAgents(channel string, args []any) (any, error) {
 		}
 		return result, nil
 	case "server:disconnect":
-		b.syncDisconnect(strings.TrimSpace(aiString(aiArg(args, 0))))
+		id := strings.TrimSpace(aiString(aiArg(args, 0)))
+		b.syncDisconnect(id)
+		b.syncUpdateStatus(id, map[string]any{"paused": true})
 		return desktopOK(nil), nil
 	case "server:status":
 		return desktopOK(map[string]any{"statuses": b.syncReadStatus()}), nil
 	case "server:install":
 		return b.syncAgentInstall(args)
+	case "server:uninstall":
+		return b.syncAgentUninstall(args)
 	case "server:projectSync":
-		projectID := strings.TrimSpace(aiString(aiArg(args, 0)))
-		mode := aiString(aiArg(args, 1))
-		if mode == "pull" {
-			return b.syncPullProject(projectID)
-		}
-		return b.syncPushProject(projectID, "手动推送 flow 快照")
+		return nil, errors.New("远程关联项目由服务端直接处理 flow 操作，无需推送或拉取")
 	}
 	return nil, errors.New("未知 Server Agent 通道")
 }

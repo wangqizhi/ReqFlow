@@ -436,14 +436,9 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 			}
 		}
 	}
-	scopes := MutationProjectIDs(action)
 	r, e := b.Workspace.Mutate(action, expected)
 	if e != nil {
 		return nil, e
-	}
-	// REQ-240：项目关联 server agent 后，flow 每次变更自动推送服务端（本地保留一份）。
-	if len(scopes) > 0 {
-		b.syncAfterMutate(scopes, desktopString(action["op"]))
 	}
 	if desktopString(action["op"]) == "project" && desktopString(desktopMap(action["remote"])["url"]) != "" {
 		ps := desktopProjects(r)
