@@ -59,7 +59,10 @@ func syncDefaultDataDir() string {
 
 func syncDefaultConfigPath() string { return filepath.Join(syncDefaultDataDir(), "server-config.json") }
 
-func syncTokenHash(token string) string { digest := sha256.Sum256([]byte(token)); return hex.EncodeToString(digest[:]) }
+func syncTokenHash(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
+}
 
 func syncGenerateToken() (string, error) {
 	raw := make([]byte, 24)
@@ -69,7 +72,9 @@ func syncGenerateToken() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-func syncValidToken(token string) bool { return regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`).MatchString(token) }
+func syncValidToken(token string) bool {
+	return regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`).MatchString(token)
+}
 
 func syncLoadConfig(path string) (*syncServerConfig, error) {
 	raw, err := os.ReadFile(path)
@@ -253,8 +258,12 @@ type syncServer struct {
 
 var syncProjectIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$`)
 
-func (s *syncServer) projectPath(id string) string      { return filepath.Join(s.cfg.DataDir, "projects", id+".json") }
-func (s *syncServer) eventsPath(id string) string       { return filepath.Join(s.cfg.DataDir, "projects", id+".events.json") }
+func (s *syncServer) projectPath(id string) string {
+	return filepath.Join(s.cfg.DataDir, "projects", id+".json")
+}
+func (s *syncServer) eventsPath(id string) string {
+	return filepath.Join(s.cfg.DataDir, "projects", id+".events.json")
+}
 
 func (s *syncServer) writeJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -574,6 +583,10 @@ func syncRunControlCommand(command string, argv []string, version string, stdout
 // RunServerCLI 是同步服务端的命令入口；桌面端 `ReqFlow.exe server ...` 与独立
 // reqflow-server 二进制共用。返回进程退出码。
 func RunServerCLI(argv []string, version string, stdout io.Writer) int {
+	// Both the desktop and standalone binary accept the documented `server` prefix.
+	if len(argv) > 0 && argv[0] == "server" {
+		argv = argv[1:]
+	}
 	command := "run"
 	rest := argv
 	if len(argv) > 0 && !strings.HasPrefix(argv[0], "--") {

@@ -9,8 +9,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +192,79 @@ func TestSyncAgentTrustFlow(t *testing.T) {
 		t.Fatal("expected network error")
 	} else if categorized := err.(*syncCategorizedError); categorized.Kind != "network" {
 		t.Fatalf("expected network kind, got %+v", categorized)
+	}
+}
+
+func TestServerCLIPrefix(t *testing.T) {
+	for _, argv := range [][]string{{"help"}, {"server", "help"}} {
+		var output bytes.Buffer
+		if code := RunServerCLI(argv, "test-version", &output); code != 0 {
+			t.Fatalf("%v failed: %s", argv, output.String())
+		}
+		if !strings.Contains(output.String(), "vtest-version") {
+			t.Fatalf("%v did not reach server CLI: %s", argv, output.String())
+		}
+	}
+}
+
+func TestSyncAgentDoesNotInheritProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	for _, mode := range []string{"pin", "ca"} {
+		client, _, err := syncBuildClient(map[string]any{"tlsMode": mode}, syncServerSecret{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.CloseIdleConnections()
+		if client.Transport.(*http.Transport).Proxy != nil {
+			t.Fatalf("%s mode must connect directly to the configured server", mode)
+		}
+	}
+}
+
+func TestSyncAgentReadiness(t *testing.T) {
+	baseURL, _, stop := startTestSyncServer(t)
+	defer stop()
+	host, port, _ := net.SplitHostPort(strings.TrimPrefix(baseURL, "https://"))
+	portNumber, _ := strconv.Atoi(port)
+	agent := map[string]any{"host": host, "port": portNumber, "tlsMode": "pin"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := syncWaitForAgent(ctx, agent); err != nil {
+		t.Fatalf("running server should be ready without saving certificate trust: %v", err)
+	}
+	stop()
+	ctxFailed, cancelFailed := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelFailed()
+	if err := syncWaitForAgent(ctxFailed, agent); err == nil {
+		t.Fatal("stopped server must not report successful installation")
+	}
+}
+
+func TestSyncAgentReadinessRejectsHTTPFailure(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	host, port, _ := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
+	portNumber, _ := strconv.Atoi(port)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := syncWaitForAgent(ctx, map[string]any{"host": host, "port": portNumber, "tlsMode": "pin"}); err == nil {
+		t.Fatal("unhealthy HTTPS service must not report successful installation")
+	}
+}
+
+func TestSyncAgentSystemdUnit(t *testing.T) {
+	unit := syncAgentSystemdUnit("/home/test user/reqflow-server")
+	if !strings.Contains(unit, `ExecStart="/home/test user/reqflow-server/reqflow-server" server run --config "/home/test user/reqflow-server/server-config.json"`) {
+		t.Fatalf("paths must be quoted for systemd: %s", unit)
+	}
+	if strings.Contains(unit, ">>") || strings.Contains(unit, "2>&1") {
+		t.Fatal("systemd ExecStart cannot contain shell redirection")
+	}
+	if !strings.Contains(syncAgentSystemdUnit("/home/100%/reqflow-server"), "100%%") {
+		t.Fatal("systemd specifiers must be escaped")
 	}
 }
 

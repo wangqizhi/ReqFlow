@@ -22,6 +22,36 @@ func TestSSHAddressValidation(t *testing.T) {
 	}
 }
 
+func TestSyncAgentUploadReplacement(t *testing.T) {
+	left, right := net.Pipe()
+	server := sftp.NewRequestServer(left, sftp.InMemHandler())
+	go func() { _ = server.Serve() }()
+	t.Cleanup(func() { _ = server.Close(); _ = left.Close(); _ = right.Close() })
+	client, err := sftp.NewClientPipe(right, right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	for _, content := range []string{"original server", "updated server"} {
+		if err := syncUploadAgentFile(client, "/reqflow-server", []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		file, err := client.Open("/reqflow-server")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil || string(raw) != content {
+			t.Fatalf("upload mismatch: %s, %v", raw, err)
+		}
+	}
+	entries, err := client.ReadDir("/")
+	if err != nil || len(entries) != 1 || entries[0].Name() != "reqflow-server" {
+		t.Fatalf("temporary uploads must be cleaned up: %+v, %v", entries, err)
+	}
+}
+
 // Exercise the actual SFTP wire protocol against a server with an isolated in-memory
 // filesystem; no external server, keys or user files are needed.
 func TestSSHDirectoryAndFileOperations(t *testing.T) {

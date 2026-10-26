@@ -62,9 +62,13 @@ func (b *Backend) syncAgentRuntime() *syncAgentRuntime {
 	return value.(*syncAgentRuntime)
 }
 
-func (b *Backend) syncAgentsPath() string     { return filepath.Join(b.DataDir, "server-agents.json") }
-func (b *Backend) syncSecretsPath() string    { return filepath.Join(b.DataDir, "server-agent-secrets.json") }
-func (b *Backend) syncStatusPath() string     { return filepath.Join(b.DataDir, "server-agent-status.json") }
+func (b *Backend) syncAgentsPath() string { return filepath.Join(b.DataDir, "server-agents.json") }
+func (b *Backend) syncSecretsPath() string {
+	return filepath.Join(b.DataDir, "server-agent-secrets.json")
+}
+func (b *Backend) syncStatusPath() string {
+	return filepath.Join(b.DataDir, "server-agent-status.json")
+}
 
 var syncAgentHostPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]*$`)
 var syncAgentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$`)
@@ -246,7 +250,9 @@ func (d *syncPinDialer) dial(ctx context.Context, network, addr string) (net.Con
 // syncBuildClient 组装带信任校验的 HTTP 客户端；pin 模式返回指纹探测器。
 func syncBuildClient(agent map[string]any, secret syncServerSecret) (*http.Client, *syncPinDialer, error) {
 	tlsMode := aiString(agent["tlsMode"])
-	transport := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	// Server Agents use an explicit endpoint and certificate pinning. Connect
+	// directly so an inherited desktop proxy cannot intercept the TLS handshake.
+	transport := &http.Transport{}
 	var pin *syncPinDialer
 	if tlsMode == "ca" {
 		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
@@ -554,7 +560,7 @@ func (b *Backend) syncPushProject(projectID, reason string) (map[string]any, err
 		return nil, &syncCategorizedError{Kind: map[int]string{http.StatusUnauthorized: "auth"}[response.StatusCode], Code: fmt.Sprintf("HTTP_%d", response.StatusCode), Message: fmt.Sprintf("推送失败（HTTP %d）：%s", response.StatusCode, syncResponseError(raw))}
 	}
 	var pushed struct {
-		Revision int64  `json:"revision"`
+		Revision  int64  `json:"revision"`
 		UpdatedAt string `json:"updatedAt"`
 	}
 	_ = json.Unmarshal(raw, &pushed)
@@ -632,8 +638,8 @@ func (b *Backend) syncPullProject(projectID string) (map[string]any, error) {
 		return nil, errors.New("拉取失败（HTTP " + fmt.Sprint(response.StatusCode) + "）：" + syncResponseError(raw))
 	}
 	var fetched struct {
-		Project map[string]any `json:"project"`
-		Revision int64         `json:"revision"`
+		Project  map[string]any `json:"project"`
+		Revision int64          `json:"revision"`
 	}
 	if err = json.Unmarshal(raw, &fetched); err != nil || fetched.Project == nil {
 		return nil, errors.New("服务端项目数据无效")
@@ -847,39 +853,76 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 	}
 	config := map[string]any{"host": "0.0.0.0", "port": port, "dataDir": path.Join(remoteDir, "data"), "token": token}
 	configRaw, _ := json.Marshal(config)
-	if _, err = run("mkdir -p "+remoteDir+"/data", 15*time.Second); err != nil {
+	if _, err = run("mkdir -p "+syncShellQuote(remoteDir+"/data"), 15*time.Second); err != nil {
 		return nil, errors.New("创建远程目录失败：" + err.Error())
 	}
 	if err = b.syncUploadOverSSH(remote.String(), configRaw, localBinary); err != nil {
 		return nil, err
 	}
-	if _, err = run("chmod +x "+remoteDir+"/reqflow-server", 15*time.Second); err != nil {
+	if _, err = run("chmod +x "+syncShellQuote(remoteDir+"/reqflow-server"), 15*time.Second); err != nil {
 		return nil, errors.New("设置执行权限失败：" + err.Error())
 	}
-	startCommand := remoteDir + "/reqflow-server server run --config " + remoteDir + "/server-config.json >> " + remoteDir + "/server.log 2>&1"
+	startCommand := syncShellQuote(remoteDir+"/reqflow-server") + " server run --config " + syncShellQuote(remoteDir+"/server-config.json")
 	summary := []string{}
-	if _, err = run("(systemctl --user enable --now reqflow-server 2>/dev/null || true)", 15*time.Second); true {
-		// systemd 用户服务通常无法在无登录会话的 SSH 中启用，先尝试写入单元供手动启用。
-		unit := "[Unit]\nDescription=ReqFlow Server Agent\nAfter=network-online.target\n\n[Service]\nExecStart=" + startCommand + "\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
-		if _, uerr := run("mkdir -p "+home+"/.config/systemd/user && cat > "+home+"/.config/systemd/user/reqflow-server.service <<'EOF'\n"+unit+"EOF", 15*time.Second); uerr == nil {
-			summary = append(summary, "已写入 systemd 用户单元 ~/.config/systemd/user/reqflow-server.service")
+	unit := syncAgentSystemdUnit(remoteDir)
+	unitPath := path.Join(home, ".config/systemd/user/reqflow-server.service")
+	installService := "mkdir -p " + syncShellQuote(path.Dir(unitPath)) + " && printf '%s' " + syncShellQuote(unit) + " > " + syncShellQuote(unitPath) + " && systemctl --user daemon-reload && systemctl --user enable reqflow-server && systemctl --user restart reqflow-server"
+	if _, err = run(installService, 20*time.Second); err == nil {
+		summary = append(summary, "已启用并启动 systemd 用户服务")
+	} else {
+		background := startCommand + " >> " + syncShellQuote(remoteDir+"/server.log") + " 2>&1"
+		cronLine := "@reboot " + background
+		if _, cronErr := run("(crontab -l 2>/dev/null | grep -v 'reqflow-server.*run --config'; printf '%s\\n' "+syncShellQuote(cronLine)+") | crontab -", 15*time.Second); cronErr == nil {
+			summary = append(summary, "已添加 crontab @reboot 开机自启")
+		} else {
+			summary = append(summary, "无法配置开机自启，请手动配置："+startCommand)
+		}
+		if _, err = run("nohup "+background+" < /dev/null &", 15*time.Second); err != nil {
+			return nil, errors.New("服务端启动命令失败：" + err.Error())
 		}
 	}
-	cronLine := "@reboot " + startCommand
-	if _, err = run("(crontab -l 2>/dev/null | grep -v 'reqflow-server server run'; echo '"+cronLine+"') | crontab -", 15*time.Second); err == nil {
-		summary = append(summary, "已添加 crontab @reboot 开机自启")
-	} else {
-		summary = append(summary, "crontab 配置失败（"+err.Error()+"），请手动配置开机启动："+startCommand)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err = syncWaitForAgent(ctx, map[string]any{"host": sshTarget, "port": int64(port), "tlsMode": "pin"}); err != nil {
+		return nil, fmt.Errorf("服务端文件已上传，但 HTTPS 健康检查失败，请检查服务状态、%d 端口放行及 systemd 日志或 %s/server.log：%w", port, remoteDir, err)
 	}
-	if _, err = run("nohup "+startCommand+" & sleep 1", 15*time.Second); err != nil {
-		summary = append(summary, "启动命令已发送（可能仍在启动中）")
-	} else {
-		summary = append(summary, "已启动服务端进程")
-	}
+	summary = append(summary, "HTTPS 健康检查通过")
 	return map[string]any{
 		"ok": true, "name": name, "host": sshTarget, "port": int64(port), "token": token,
 		"dataDir": path.Join(remoteDir, "data"), "summary": strings.Join(summary, "；"),
 	}, nil
+}
+
+func syncShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func syncAgentSystemdUnit(remoteDir string) string {
+	// systemd parses ExecStart itself; shell redirection is not supported here.
+	quote := func(value string) string {
+		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(value) + `"`
+	}
+	return "[Unit]\nDescription=ReqFlow Server Agent\nAfter=network-online.target\n\n[Service]\nExecStart=" + quote(remoteDir+"/reqflow-server") + " server run --config " + quote(remoteDir+"/server-config.json") + "\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n"
+}
+
+func syncWaitForAgent(ctx context.Context, agent map[string]any) error {
+	client, pin, err := syncBuildClient(agent, syncServerSecret{})
+	if err != nil {
+		return err
+	}
+	defer client.CloseIdleConnections()
+	for {
+		_, err = syncAgentProbe(ctx, client, pin, syncAgentBaseURL(agent), "", true)
+		var categorized *syncCategorizedError
+		if err == nil || (errors.As(err, &categorized) && categorized.Code == "NEED_TRUST") {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // syncUploadOverSSH 通过现有 SFTP 通道上传二进制与配置文件。
@@ -905,15 +948,7 @@ func (b *Backend) syncUploadOverSSH(root string, configRaw []byte, localBinary s
 			return nil, err
 		}
 		upload := func(name string, data []byte, mode os.FileMode) error {
-			file, err := c.Create(path.Join(remoteDir, name))
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			if _, err = file.Write(data); err != nil {
-				return err
-			}
-			return c.Chmod(path.Join(remoteDir, name), mode)
+			return syncUploadAgentFile(c, path.Join(remoteDir, name), data, mode)
 		}
 		if err = upload("reqflow-server", raw, 0o755); err != nil {
 			return nil, errors.New("上传 reqflow-server 失败：" + err.Error())
@@ -924,6 +959,32 @@ func (b *Backend) syncUploadOverSSH(root string, configRaw []byte, localBinary s
 		return nil, nil
 	})
 	return err
+}
+
+func syncUploadAgentFile(c *sftp.Client, target string, data []byte, mode os.FileMode) error {
+	// Linux refuses to truncate a running executable. Upload beside it and
+	// replace the directory entry only after all bytes and permissions are ready.
+	temporary := target + "." + coreUUID() + ".tmp"
+	defer c.Remove(temporary)
+	file, err := c.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = c.Chmod(temporary, mode); err != nil {
+		return err
+	}
+	if _, supported := c.HasExtension("posix-rename@openssh.com"); supported {
+		return c.PosixRename(temporary, target)
+	}
+	return c.Rename(temporary, target)
 }
 
 // ---- 通道分发 ----
