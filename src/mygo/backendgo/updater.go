@@ -164,6 +164,80 @@ func desktopVerifyInstaller(file string, asset map[string]any, expected string) 
 	return strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expected)
 }
 
+// Resolve the public latest page first; existing releases need no update.json.
+func desktopResolveLatestRelease(ctx context.Context) (string, error) {
+	response, e := desktopUpdateRequest(ctx, "https://github.com/"+desktopUpdateRepository+"/releases/latest", 30*time.Second)
+	if e != nil {
+		return "", e
+	}
+	response.Body.Close()
+	prefix := "https://github.com/" + desktopUpdateRepository + "/releases/tag/"
+	resolved := response.Request.URL.String()
+	if !strings.HasPrefix(resolved, prefix) {
+		return "", errors.New("发布版本地址无效")
+	}
+	tag := strings.TrimPrefix(resolved, prefix)
+	if !desktopVersion.MatchString(tag) {
+		return "", errors.New("发布版本信息无效")
+	}
+	return tag, nil
+}
+
+// Fetch the release checksum plus installer size and validate the asset is downloadable.
+func desktopResolveAsset(ctx context.Context, tag, version string) (map[string]any, string, string, error) {
+	base := "https://github.com/" + desktopUpdateRepository + "/releases/download/" + tag + "/"
+	name := "ReqFlow-Setup-" + version + ".exe"
+	checksumURL := base + "SHA256SUMS-" + version + ".txt"
+	response, e := desktopUpdateRequest(ctx, checksumURL, 30*time.Second)
+	if e != nil {
+		return nil, "", "", e
+	}
+	raw, e := io.ReadAll(io.LimitReader(response.Body, 256*1024))
+	response.Body.Close()
+	if e != nil {
+		return nil, "", "", e
+	}
+	expected := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) == 2 && strings.TrimPrefix(parts[1], "*") == name && desktopHashPattern.MatchString(parts[0]) {
+			expected = parts[0]
+			break
+		}
+	}
+	if expected == "" {
+		return nil, "", "", errors.New("新版本缺少 SHA256 校验信息")
+	}
+	response, e = desktopUpdateRequest(ctx, base+name, 30*time.Second)
+	if e != nil {
+		return nil, "", "", e
+	}
+	size := response.ContentLength
+	response.Body.Close()
+	asset := map[string]any{"name": name, "browser_download_url": base + name, "size": size, "digest": "sha256:" + expected}
+	if !desktopValidAsset(asset, version) {
+		return nil, "", "", errors.New("新版本安装包大小无效")
+	}
+	return asset, checksumURL, expected, nil
+}
+
+// Verify a previously downloaded installer on disk and return its metadata.
+func (b *Backend) desktopSavedInstaller(directory, metadata string) (string, map[string]any, string, string, bool) {
+	saved, e := desktopReadJSON(metadata, nil)
+	if e != nil || saved == nil {
+		return "", nil, "", "", false
+	}
+	m := desktopMap(saved)
+	version := desktopString(m["version"])
+	asset := desktopMap(m["asset"])
+	hash := desktopString(m["hash"])
+	target := filepath.Join(directory, desktopString(asset["name"]))
+	if desktopNewer(version, b.Version) && desktopValidAsset(asset, version) && desktopVerifyInstaller(target, asset, hash) {
+		return version, asset, hash, target, true
+	}
+	return "", nil, "", "", false
+}
+
 func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, error) {
 	if channel == "update:state" {
 		return b.desktopUpdateState(), nil
@@ -192,70 +266,49 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 			return state, nil
 		}
 		b.desktopUpdateSet(map[string]any{"phase": "checking"})
-		if saved, e := desktopReadJSON(metadata, nil); e == nil && saved != nil {
-			m := desktopMap(saved)
-			version := desktopString(m["version"])
-			asset := desktopMap(m["asset"])
-			hash := desktopString(m["hash"])
-			target := filepath.Join(directory, desktopString(asset["name"]))
-			if desktopNewer(version, b.Version) && desktopValidAsset(asset, version) && desktopVerifyInstaller(target, asset, hash) {
-				b.desktopAsset, b.desktopInstaller, b.desktopExpectedHash = asset, target, hash
-				b.desktopUpdateSet(map[string]any{"phase": "ready", "version": version, "progress": 100})
-				return b.desktopUpdateState(), nil
-			}
+		if version, asset, hash, target, ok := b.desktopSavedInstaller(directory, metadata); ok {
+			b.desktopAsset, b.desktopInstaller, b.desktopExpectedHash = asset, target, hash
+			b.desktopUpdateSet(map[string]any{"phase": "ready", "version": version, "progress": 100})
+			return b.desktopUpdateState(), nil
 		}
-		// Resolve the public latest page first; existing releases need no update.json.
-		response, e := desktopUpdateRequest(ctx, "https://github.com/"+desktopUpdateRepository+"/releases/latest", 30*time.Second)
+		tag, e := desktopResolveLatestRelease(ctx)
 		if e != nil {
 			return fail(e, "check"), nil
 		}
-		response.Body.Close()
-		prefix := "https://github.com/" + desktopUpdateRepository + "/releases/tag/"
-		resolved := response.Request.URL.String()
-		if !strings.HasPrefix(resolved, prefix) {
-			return fail(errors.New("发布版本地址无效"), "check"), nil
-		}
-		tag := strings.TrimPrefix(resolved, prefix)
 		version := strings.TrimPrefix(tag, "v")
-		if !desktopVersion.MatchString(tag) {
-			return fail(errors.New("发布版本信息无效"), "check"), nil
+		if !desktopNewer(version, b.Version) {
+			b.desktopUpdateSet(map[string]any{"phase": "latest", "version": b.Version})
+			return b.desktopUpdateState(), nil
+		}
+		asset, checksumURL, expected, e := desktopResolveAsset(ctx, tag, version)
+		if e != nil {
+			return fail(e, "check"), nil
+		}
+		b.desktopAsset, b.desktopExpectedHash, b.desktopChecksum = asset, expected, checksumURL
+		b.desktopUpdateSet(map[string]any{"phase": "available", "version": version})
+		return b.desktopUpdateState(), nil
+	case "update:recheck":
+		// REQ-257：安装界面的「重新检测」强制查询 GitHub 最新版本；已下载的安装包不再短路，
+		// 发现更新的版本时回到 available，用户可直接下载新版安装包。
+		b.desktopUpdateSet(map[string]any{"phase": "checking"})
+		tag, e := desktopResolveLatestRelease(ctx)
+		if e != nil {
+			return fail(e, "check"), nil
+		}
+		version := strings.TrimPrefix(tag, "v")
+		if savedVersion, asset, hash, target, ok := b.desktopSavedInstaller(directory, metadata); ok && !desktopNewer(version, savedVersion) {
+			// 已下载的安装包就是最新（或更新）版本，继续安装
+			b.desktopAsset, b.desktopInstaller, b.desktopExpectedHash = asset, target, hash
+			b.desktopUpdateSet(map[string]any{"phase": "ready", "version": savedVersion, "progress": 100})
+			return b.desktopUpdateState(), nil
 		}
 		if !desktopNewer(version, b.Version) {
 			b.desktopUpdateSet(map[string]any{"phase": "latest", "version": b.Version})
 			return b.desktopUpdateState(), nil
 		}
-		base := "https://github.com/" + desktopUpdateRepository + "/releases/download/" + tag + "/"
-		name := "ReqFlow-Setup-" + version + ".exe"
-		checksumURL := base + "SHA256SUMS-" + version + ".txt"
-		response, e = desktopUpdateRequest(ctx, checksumURL, 30*time.Second)
+		asset, checksumURL, expected, e := desktopResolveAsset(ctx, tag, version)
 		if e != nil {
 			return fail(e, "check"), nil
-		}
-		raw, e := io.ReadAll(io.LimitReader(response.Body, 256*1024))
-		response.Body.Close()
-		if e != nil {
-			return fail(e, "check"), nil
-		}
-		expected := ""
-		for _, line := range strings.Split(string(raw), "\n") {
-			parts := strings.Fields(line)
-			if len(parts) == 2 && strings.TrimPrefix(parts[1], "*") == name && desktopHashPattern.MatchString(parts[0]) {
-				expected = parts[0]
-				break
-			}
-		}
-		if expected == "" {
-			return fail(errors.New("新版本缺少 SHA256 校验信息"), "check"), nil
-		}
-		response, e = desktopUpdateRequest(ctx, base+name, 30*time.Second)
-		if e != nil {
-			return fail(e, "check"), nil
-		}
-		size := response.ContentLength
-		response.Body.Close()
-		asset := map[string]any{"name": name, "browser_download_url": base + name, "size": size, "digest": "sha256:" + expected}
-		if !desktopValidAsset(asset, version) {
-			return fail(errors.New("新版本安装包大小无效"), "check"), nil
 		}
 		b.desktopAsset, b.desktopExpectedHash, b.desktopChecksum = asset, expected, checksumURL
 		b.desktopUpdateSet(map[string]any{"phase": "available", "version": version})

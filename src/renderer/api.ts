@@ -94,6 +94,8 @@ export interface ReqFlowBridge {
   detectLocalAgents?(): Promise<{ ok: boolean; agents?: LocalAgent[]; error?: string }>;
   updateState?(): Promise<UpdateState>;
   checkUpdate?(): Promise<UpdateState>;
+  /** 安装界面强制重新检测最新版本（REQ-257）：已下载的安装包不短路，可直接发现更新的版本。 */
+  recheckUpdate?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<UpdateState>;
   openProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;

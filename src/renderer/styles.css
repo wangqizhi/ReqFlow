@@ -389,6 +389,9 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .update-spinning { animation: none; } }
 .update-button { white-space: nowrap; flex-shrink: 0; }
+/* REQ-257：安装界面安装按钮宽度减半，同行并排重新检测按钮 */
+.update-ready-row { display: flex; gap: 8px; }
+.update-ready-row > .btn { flex: 1 1 0; min-width: 0; justify-content: center; }
 .update-control small { color: var(--side-ink); font-size: 12px; overflow-wrap: anywhere; }
 .update-control .update-error { color: #fca5a5; }
 .update-control progress { width: 100%; height: 5px; accent-color: var(--accent); }

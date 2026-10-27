@@ -1,4 +1,6 @@
 (async () => {
+  const checks = {};
+  try {
   const waitFor = async predicate => {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
@@ -15,7 +17,6 @@
     el.click();
     await new Promise(resolve => setTimeout(resolve, 60));
   };
-  const checks = {};
   let completionProject;
   await waitFor(() => document.querySelector('.desktop-app'));
   for (const channel of ['app:info', 'workspace:get', 'ai:settings:get', 'storage:status']) {
@@ -327,6 +328,7 @@
       await click(button('插件/MOD/AGENT'));
       await click(modsMenu('实验室'));
       const toggle = document.querySelector('[aria-label="启用 Terminal"]');
+      if (!toggle) throw Error('terminalSetting(' + enabled + ') toggle missing after ' + lastAction + '; completed checks: ' + Object.keys(checks).join(','));
       if (toggle.checked !== enabled) await click(toggle);
       await waitFor(() => toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled));
       checks.terminalSetting = { ok: toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled) };
@@ -335,55 +337,64 @@
     const terminalVeil = () => document.querySelector('.publish-terminal-body > .terminal-loading');
     const veilVisible = () => { const el = terminalVeil(); return !!el && getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).opacity !== '0'; };
     await terminalSetting(true);
+    // REQ-258：PowerShell 与发布终端合并为一个「终端」按钮，默认展开 PowerShell；启动发布前不出现发布页签
+    await switchProject('发布终端UI检查');
     await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
     checks.terminalDefaultCollapsed = { ok: !document.querySelector('.publish-terminal') };
     await click(document.querySelector('.publish-terminal-reopen'));
-    await waitFor(() => !!document.querySelector('.publish-terminal .xterm') && !veilVisible());
-    checks.terminalImmediate = { ok: !!document.querySelector('.publish-terminal .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
-    await switchProject('发布终端UI检查');
+    await waitFor(() => !!document.querySelector('.publish-terminal .xterm'));
+    const publishTabPanel = () => document.querySelector('.terminal-tab-panel[aria-label="发布"]');
+    const publishTabButton = () => [...document.querySelectorAll('.terminal-tab')].find(el => el.textContent.startsWith('发布'));
+    checks.terminalImmediate = { ok: !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
+    checks.terminalPublishTabOnDemand = { ok: !publishTabPanel() && !publishTabButton() };
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
-    await waitFor(() => !!document.querySelector('.publish-terminal'));
+    await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     checks.terminalPublishAutoOpen = { ok: !document.querySelector('.publish-terminal-reopen') };
-    const terminalText = () => document.querySelector('.publish-terminal .xterm')?.textContent || '';
+    const terminalText = () => publishTabPanel()?.querySelector('.xterm')?.textContent || '';
     await waitFor(() => terminalText().includes('stream-first'));
-    checks.terminalLive = { ok: document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成' && !terminalText().includes('stream-last') };
-    const terminalRunId = document.querySelector('.publish-terminal').dataset.runId;
+    checks.terminalLive = { ok: publishTabPanel().querySelector('[role="status"]').textContent !== '发布完成' && !terminalText().includes('stream-last') };
+    const terminalRunId = publishTabPanel().querySelector('.publish-terminal').dataset.runId;
     const elapsedStart = document.querySelector('.terminal-elapsed').textContent;
     await new Promise(resolve => setTimeout(resolve, 1100));
-    checks.terminalRunning = { ok: !!document.querySelector('.terminal-spinner') && document.querySelector('.publish-terminal').getAttribute('aria-busy') === 'true' && document.querySelector('.terminal-elapsed').textContent !== elapsedStart };
+    checks.terminalRunning = { ok: !!publishTabPanel().querySelector('.terminal-spinner') && publishTabPanel().querySelector('.publish-terminal').getAttribute('aria-busy') === 'true' && document.querySelector('.terminal-elapsed').textContent !== elapsedStart };
+    // REQ-258：收起发布终端后回退到仍打开的 PowerShell；重新打开发布页签后收起 PowerShell，让发布面板成为唯一终端
+    await click(publishTabPanel().querySelector('[aria-label="收起终端"]'));
+    checks.terminalCollapseFallback = { ok: !publishTabPanel() && !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.publish-terminal-reopen') };
+    await waitFor(() => !!publishTabButton());
+    await click(publishTabButton());
+    await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
+    await click(document.querySelector('[aria-label="收起 PowerShell 终端"]'));
     const dockHeight = document.querySelector('.main').getBoundingClientRect().height;
-    await click(document.querySelector('[aria-label="在独立窗口打开终端"]'));
-    await waitFor(() => !document.querySelector('.publish-terminal'));
+    await click(publishTabPanel().querySelector('[aria-label="在独立窗口打开终端"]'));
+    await waitFor(() => !publishTabPanel());
     const detached = await window.reqflow.getPublishTerminal(terminalRunId);
-    checks.terminalDetached = { ok: detached.ok && detached.detached && document.querySelector('.main').getBoundingClientRect().height > dockHeight + 100 && !document.querySelector('.publish-terminal-reopen') };
+    checks.terminalDetached = { ok: detached.ok && detached.detached && document.querySelector('.main').getBoundingClientRect().height > dockHeight + 100 && document.querySelectorAll('.publish-terminal-reopen').length === 1 };
     await window.reqflow.closePublishTerminal(terminalRunId);
-    await waitFor(() => !!document.querySelector('.publish-terminal'));
+    await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     checks.terminalReattached = { ok: !button('终端') && !!document.querySelector('.terminal-elapsed') };
-    await click(document.querySelector('[aria-label="收起终端"]'));
-    checks.terminalCollapse = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-terminal-reopen') };
+    await click(publishTabPanel().querySelector('[aria-label="收起终端"]'));
+    checks.terminalCollapse = { ok: !publishTabPanel() && document.querySelectorAll('.publish-terminal-reopen').length === 1 };
     await terminalSetting(false);
     await terminalSetting(true);
     await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
     checks.terminalReenable = { ok: !document.querySelector('.publish-terminal') };
+    // REQ-258：重新展开默认回到 PowerShell，再切「发布」页签查看输出
     await click(document.querySelector('.publish-terminal-reopen'));
-    try { await waitFor(() => !!document.querySelector('.publish-terminal')); }
-    catch {
-      // 若首次点击与终端状态轮询竞争导致未展开，再点一次重开按钮后继续。
-      const reopen = document.querySelector('.publish-terminal-reopen');
-      if (reopen) await click(reopen);
-      await waitFor(() => !!document.querySelector('.publish-terminal'));
-    }
+    await waitFor(() => !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm'));
+    await waitFor(() => !!publishTabButton());
+    await click(publishTabButton());
+    await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     await waitFor(() => terminalText().includes('stream-last') && terminalText().includes('stream-stderr'));
-    await waitFor(() => document.querySelector('.publish-terminal [role="status"]').textContent === '发布完成');
+    await waitFor(() => publishTabPanel().querySelector('[role="status"]').textContent === '发布完成');
     checks.terminalComplete = { ok: !document.querySelector('.publish-dialog') && terminalText().includes('stream-first') };
     const elapsedEnd = document.querySelector('.terminal-elapsed').textContent;
     await new Promise(resolve => setTimeout(resolve, 1100));
-    checks.terminalTimerStopped = { ok: !document.querySelector('.terminal-spinner') && document.querySelector('.publish-terminal').getAttribute('aria-busy') === 'false' && document.querySelector('.terminal-elapsed').textContent === elapsedEnd };
-    const terminalBody = document.querySelector('.publish-terminal-body');
+    checks.terminalTimerStopped = { ok: !publishTabPanel().querySelector('.terminal-spinner') && publishTabPanel().querySelector('.publish-terminal').getAttribute('aria-busy') === 'false' && document.querySelector('.terminal-elapsed').textContent === elapsedEnd };
+    const terminalBody = publishTabPanel().querySelector('.publish-terminal-body');
     terminalBody.style.maxWidth = 'calc(100% - 40px)';
     await waitFor(() => veilVisible());
-    const contentHidden = () => getComputedStyle(document.querySelector('.publish-terminal-content')).visibility === 'hidden';
+    const contentHidden = () => getComputedStyle(publishTabPanel().querySelector('.publish-terminal-content')).visibility === 'hidden';
     checks.terminalResizeLoading = { ok: contentHidden() };
     // 连续多次尺寸变化（类似窗口最大化时的多帧 WM_SIZE）期间，遮罩必须持续覆盖，不能露出中间帧。
     for (const width of ['calc(100% - 28px)', 'calc(100% - 56px)', 'calc(100% - 84px)']) {
@@ -397,11 +408,14 @@
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await waitFor(() => !veilVisible());
     await switchProject(originalProject);
-    await waitFor(() => document.querySelector('.publish-terminal .terminal-status')?.textContent === '就绪 · 等待发布');
-    checks.terminalIsolation = { ok: !terminalText().includes('stream-first') && !terminalText().includes('stream-last') };
+    // REQ-258：未启动发布的项目没有发布页签，发布输出不跨项目泄漏
+    checks.terminalIsolation = { ok: !publishTabPanel() && !publishTabButton() && !terminalText().includes('stream-first') && !terminalText().includes('stream-last') };
     await switchProject('发布终端UI检查');
     await waitFor(() => terminalText().includes('stream-last'));
     checks.terminalIsolation.ok &&= terminalText().includes('stream-first');
+    // 收起隐藏中的 PowerShell，让发布面板成为唯一终端，实验室开关与后续 surface 检查只针对发布终端
+    const shellCollapse = document.querySelector('[aria-label="收起 PowerShell 终端"]');
+    if (shellCollapse) await click(shellCollapse);
     await terminalSetting(false);
     checks.terminalOff = { ok: !document.querySelector('.publish-terminal') && !!document.querySelector('.publish-dialog') };
     await click(document.querySelector('.publish-dialog [aria-label="关闭"]'));
@@ -470,15 +484,19 @@
     const actionsBottom = toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom;
     const searchBottom = toolbar.querySelector('.search').getBoundingClientRect().bottom;
     checks.scheduleToolbar = { ok: toolbar.getBoundingClientRect().top >= document.querySelector('.list-scroll').getBoundingClientRect().bottom && [...toolbar.querySelectorAll('button')].every(el => el.getBoundingClientRect().bottom < innerHeight) };
-    // REQ-139：批次与日期筛选在列表上方，底部工具栏只有一行（操作与筛选同行、无排期筛选块）
+    // REQ-139：批次与日期筛选在列表上方；2.13.4 起排期页操作键多于一行宽度，操作组可换行到筛选组下方，但不得高于筛选组或越出窗口
     const scheduleHeader = document.querySelector('.requirements > .list-header');
-    checks.listHeader = { ok: !!scheduleHeader && !!scheduleHeader.querySelector('.gen-count') && !!scheduleHeader.querySelector('[aria-label="排期日期范围"]') && scheduleHeader.getBoundingClientRect().bottom <= document.querySelector('.list-scroll').getBoundingClientRect().top + 1 && !toolbar.querySelector('.workspace-schedule-filters') && Math.abs(toolbar.querySelector('.workspace-actions').getBoundingClientRect().top - toolbar.querySelector('.workspace-filters').getBoundingClientRect().top) < 1 };
+    const headerRect = scheduleHeader?.getBoundingClientRect();
+    checks.listHeader = { ok: !!scheduleHeader && !!scheduleHeader.querySelector('.gen-count') && !!scheduleHeader.querySelector('[aria-label="排期日期范围"]') && headerRect.bottom <= document.querySelector('.list-scroll').getBoundingClientRect().top + 1 && !toolbar.querySelector('.workspace-schedule-filters') && toolbar.querySelector('.workspace-actions').getBoundingClientRect().top >= toolbar.querySelector('.workspace-filters').getBoundingClientRect().top - 1 && toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom <= innerHeight, header: !!scheduleHeader, genCount: !!scheduleHeader?.querySelector('.gen-count'), dateRange: !!scheduleHeader?.querySelector('[aria-label="排期日期范围"]'), above: scheduleHeader ? headerRect.bottom <= document.querySelector('.list-scroll').getBoundingClientRect().top + 1 : null, scheduleFilters: !!toolbar.querySelector('.workspace-schedule-filters') };
     checks.workspaceHeading = { ok: document.querySelector('.eyebrow').getBoundingClientRect().top <= 16 && document.querySelector('.title-actions > button').getBoundingClientRect().top >= document.querySelector('.top').getBoundingClientRect().bottom };
-    checks.sharedToolbar = { ok: true };
+    // 工具栏底部在各页签保持稳定；排期页操作组可换行，其余页签单行不得低于排期页基线
+    checks.sharedToolbar = { ok: true, failures: [] };
     for (const phase of ['需求池', '待验证', '归档', '排期']) {
       await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith(phase)));
       const current = document.querySelector('.workspace-toolbar');
-      checks.sharedToolbar.ok &&= Math.abs(current.querySelector('.workspace-actions').getBoundingClientRect().bottom - actionsBottom) < 1 && Math.abs(current.querySelector('.search').getBoundingClientRect().bottom - searchBottom) < 1 && current.getBoundingClientRect().top >= document.querySelector('.list-scroll').getBoundingClientRect().bottom;
+      const rowAligned = Math.abs(current.getBoundingClientRect().bottom - toolbar.getBoundingClientRect().bottom) < 1 && current.querySelector('.search').getBoundingClientRect().bottom <= current.getBoundingClientRect().bottom && current.getBoundingClientRect().top >= document.querySelector('.list-scroll').getBoundingClientRect().bottom;
+      if (!rowAligned) checks.sharedToolbar.failures.push({ phase, toolbarBottom: current.getBoundingClientRect().bottom, baselineBottom: toolbar.getBoundingClientRect().bottom, searchBottom: current.querySelector('.search').getBoundingClientRect().bottom, toolbarTop: current.getBoundingClientRect().top, listBottom: document.querySelector('.list-scroll').getBoundingClientRect().bottom });
+      checks.sharedToolbar.ok &&= rowAligned;
       // REQ-140：需求池排序固定在列表上方，滚动列表时位置不变
       if (phase === '需求池') {
         const sort = document.querySelector('.requirement-sort');
@@ -801,4 +819,5 @@
     checks.advancedLayout = { ok: dialog.scrollHeight <= dialog.clientHeight + 1 && buttons.every(el => el.getBoundingClientRect().bottom < innerHeight), images: 12, scrollHeight: dialog.scrollHeight, clientHeight: dialog.clientHeight };
   }
   return { ok: Object.values(checks).every(check => check.ok) && controls === 2 && dragRegion === 'drag' && controlsDragRegion === 'no-drag', title: document.title, sidebarProjects, controls, dragRegion, controlsDragRegion, checks };
+  } catch (error) { throw Error('COMPLETED:' + Object.keys(checks).join(',') + ' :: ' + (error && error.stack || error)); }
 })()

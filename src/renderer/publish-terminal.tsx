@@ -45,6 +45,27 @@ function elapsedTime(start: number, end: number) {
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   return (seconds >= 3600 ? String(Math.floor(seconds / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(seconds / 60) % 60).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
 }
+// REQ-256：终端选中即复制。交互终端里 Ctrl+C 需要发送中断信号，复制操作改由选区完成。
+async function copyTextToClipboard(text: string) {
+  try { await navigator.clipboard.writeText(text); return; } catch { /* WebView 未授权时退回隐藏文本框 */ }
+  try {
+    const helper = document.createElement('textarea');
+    helper.value = text;
+    helper.setAttribute('readonly', '');
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.select();
+    document.execCommand('copy');
+    helper.remove();
+  } catch { /* 复制失败不影响终端继续使用 */ }
+}
+function copySelectionOnSelect(terminal: Terminal) {
+  return terminal.onSelectionChange(() => {
+    const selection = terminal.getSelection();
+    if (selection) void copyTextToClipboard(selection);
+  });
+}
 export function PublishTerminal({ runId, project, session, onClose, onDetach, tabs }: { runId: string; project: string; session: PublishSession; tabs?: ReactNode; onClose(): void; onDetach?(): Promise<void> }) {
   const container = useRef<HTMLDivElement>(null);
   const veil = useRef<HTMLDivElement>(null);
@@ -106,6 +127,8 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(content);
+    // REQ-256：选中即复制
+    const selectionSub = copySelectionOnSelect(terminal);
     let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
     let cycleTimer: ReturnType<typeof setTimeout> | undefined, drainTimer: ReturnType<typeof setTimeout> | undefined, frame = 0;
     let renderSub: { dispose(): void } | undefined, renderFallback: ReturnType<typeof setTimeout> | undefined;
@@ -209,7 +232,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
     return () => {
       disposed = true; generation++;
       clearTimeout(timer); clearTimeout(cycleTimer); clearTimeout(drainTimer); clearTimeout(renderFallback); clearTimeout(veilHideTimer);
-      cancelAnimationFrame(frame); renderSub?.dispose(); resize.disconnect(); window.removeEventListener('resize', waitForSettledSize); terminal.dispose();
+      cancelAnimationFrame(frame); renderSub?.dispose(); resize.disconnect(); window.removeEventListener('resize', waitForSettledSize); selectionSub.dispose(); terminal.dispose();
       veilApi.current = null;
     };
   }, [runId, project]);
@@ -285,6 +308,8 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     let reportedNeedsInput: boolean | undefined, reportedDone: boolean | undefined;
     const terminal = new Terminal({ disableStdin: logOnly, cursorBlink: !logOnly, scrollback: 20000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
+    // REQ-256：选中即复制
+    const selectionSub = copySelectionOnSelect(terminal);
     // A native scrollbar remains visible, including when xterm auto-hides its own.
     const scrollbar = historyScroll.current!, spacer = historySize.current!;
     const syncScroll = () => {
@@ -324,7 +349,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
       if (!disposed) timer = setTimeout(() => void poll(), 100);
     };
     terminal.focus(); void poll();
-    return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); terminal.dispose(); };
+    return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); selectionSub.dispose(); terminal.dispose(); };
   }, [runId]);
   return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content agent-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
 }

@@ -17,6 +17,7 @@ const channels = {
   installLocalAgent: 'agents:install',
   updateState: 'update:state',
   checkUpdate: 'update:check',
+  recheckUpdate: 'update:recheck',
   downloadUpdate: 'update:download',
   installUpdate: 'update:install',
   windowControl: 'window:control',
