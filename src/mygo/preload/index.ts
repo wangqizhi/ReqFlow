@@ -67,6 +67,7 @@ const channels = {
   optimizeCommitMessage: 'ai:commit:optimize',
   optimizeGuidance: 'ai:guidance:optimize',
   saveAISettings: 'ai:settings:save',
+  testAISettings: 'ai:settings:test',
   getWorkspace: 'workspace:get',
   getLocalWorkspace: 'workspace:local',
   apply: 'workspace:apply',

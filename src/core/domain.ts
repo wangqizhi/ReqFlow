@@ -905,7 +905,7 @@ async function applyOperation(s: Workspace, a: any) {
   }
   if (a.op === 'revert') {
     // 单条退回待执行：不必取消整个批次，退回后即可编辑；同批次其他需求不受影响
-    if (i.status !== 'in_progress') throw new Error('需求不在执行中');
+    if (i.status !== 'in_progress' && !(i.status === 'ready' && scheduledBatch(p, i))) throw new Error('需求不在执行中');
     i.status = 'ready';
     i.history.unshift({ event: '退回待执行', time: now, note: String(a.note || '') });
     return;

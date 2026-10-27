@@ -54,6 +54,20 @@ func TestCompletionNoteLifecycle(t *testing.T) {
 	}
 }
 
+func TestRevertDraftScheduledItem(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "排期需求"})
+	i := coreMap(coreList(p["items"])[0])
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	if ScheduledBatch(p, i) == nil {
+		t.Fatal("item not scheduled")
+	}
+	coreTestApply(t, s, map[string]any{"op": "revert", "project": p["id"], "id": i["id"]})
+	if i["status"] != "ready" || ScheduledBatch(p, i) != nil {
+		t.Fatal("item still scheduled after revert")
+	}
+}
+
 func TestVerificationVersionLifecycle(t *testing.T) {
 	s, p := coreTestState()
 	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "验证版本"})

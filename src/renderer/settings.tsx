@@ -338,6 +338,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
             {!!reasoningLevels.length && <div className="field"><span>思考等级</span><div className="segmented" role="group" aria-label="CLI 思考等级">{(['none', ...reasoningLevels.filter(level => level !== 'none')] as AIReasoningEffort[]).map(level => <button key={level} className={(form.reasoningEffort || 'none') === level ? 'on' : ''} type="button" disabled={busy || !loaded} aria-pressed={(form.reasoningEffort || 'none') === level} onClick={() => setForm({ ...form, reasoningEffort: level })}>{reasoningLabels[level]}</button>)}</div>{!reasoningLevels.includes('none') && <p className="settings-hint">此模型不能完全关闭思考；选择关闭时使用模型支持的最低等级。</p>}</div>}
             <p className="settings-hint">复用本机 CLI 登录与供应商配置。请先在终端完成登录；选择后保存即可用于所有 AI 优化与内容生成。仅显示可读取的周/月额度快照。</p>
           </>}
+          <div className="settings-actions"><button type="button" className="btn" disabled={busy || !loaded || !bridge.testAISettings} onClick={() => void perform(() => bridge.testAISettings!(form), '连接成功，模型已回复 OK')}>测试连接</button></div>
         </form>}
         {tab === 'template' && <form onSubmit={(e) => {
           e.preventDefault();

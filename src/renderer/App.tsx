@@ -76,6 +76,8 @@ export default function App() {
   const [scheduleMode, setScheduleMode] = useState('through');
   const [scheduleDate, setScheduleDate] = useState(localDate());
   const [selected, setSelected] = useState<string[]>([]);
+  const [globalSelected, setGlobalSelected] = useState<string[]>([]);
+  const [bulkConfirm, setBulkConfirm] = useState<'project' | 'global' | null>(null);
   const [batchId, setBatchId] = useState('');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -645,6 +647,7 @@ export default function App() {
   const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => itemExecuting(i, agentSessions[project.id])).map(item => ({ project, item })));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
+  const actionEligible = (i: Item) => tab === 'generate' ? allInProgress.some(x => x.id === i.id) : tab === 'executing' ? !!activeAIExecution(i) : bulkEligible(i);
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
   const executingItems = (p?.items || []).filter(i => executing(i));
@@ -854,6 +857,29 @@ export default function App() {
       notify('已退回需求池，可编辑后重新排期');
     }
   }
+  async function bulkAction() {
+    const items = visible.filter(i => selected.includes(i.id) && actionEligible(i));
+    if (!items.length) return;
+    let count = 0;
+    for (const item of items) {
+      const action = tab === 'executing' ? { op: 'executionRelease', id: item.id, run: item.aiExecution?.runId, note: '用户批量释放任务' } : { op: 'revert', id: item.id };
+      if (!await act(action, true)) break;
+      count++;
+    }
+    setSelected([]);
+    notify(`已${tab === 'executing' ? '释放' : '退回'} ${count} / ${items.length} 条需求`, count === items.length ? undefined : 'err');
+  }
+  async function bulkReleaseGlobal() {
+    const entries = globalExecuting.filter(({ project, item }) => globalSelected.includes(project.id + ':' + item.id) && activeAIExecution(item));
+    if (!entries.length) return;
+    let count = 0;
+    for (const { project, item } of entries) {
+      if (!await act({ op: 'executionRelease', project: project.id, id: item.id, run: item.aiExecution?.runId, note: '用户批量释放任务' }, true)) break;
+      count++;
+    }
+    setGlobalSelected([]);
+    notify(`已释放 ${count} / ${entries.length} 条任务`, count === entries.length ? undefined : 'err');
+  }
   function changeTab(v: string) {
     setTab(v);
     void load({ quiet: true }); // REQ-076：切换模块时立即刷新 flow 状态
@@ -867,7 +893,7 @@ export default function App() {
       setArchiveOpenYear(latest?.[1] || '');
       setArchiveOpenMonth(latest?.[2] || '');
     }
-    if (v !== 'feature' && v !== 'generate') setSelected([]);
+    setSelected([]);
   }
 
   async function copyPrompt(items: Item[]) {
@@ -1053,10 +1079,11 @@ export default function App() {
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
         }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="execution-list">
+          {globalExecuting.some(({ item }) => !!activeAIExecution(item)) && <div className="settings-actions"><label className="check-label"><input type="checkbox" checked={globalExecuting.filter(({ item }) => !!activeAIExecution(item)).every(({ project, item }) => globalSelected.includes(project.id + ':' + item.id))} onChange={e => setGlobalSelected(e.target.checked ? globalExecuting.filter(({ item }) => !!activeAIExecution(item)).map(({ project, item }) => project.id + ':' + item.id) : [])} />全选可释放任务</label><button className="btn" disabled={busy || !globalSelected.length} onClick={() => setBulkConfirm('global')}>批量释放 · 已选 {globalSelected.length} 条</button></div>}
           {!globalExecuting.length && <div className="empty">暂无执行中的任务</div>}
           {globalExecuting.map(({ project, item: i }) => {
             const session = agentSessions[project.id];
-            return <article className="req-card" key={project.id + ':' + i.id}><div className="card-body">
+            return <article className="req-card" key={project.id + ':' + i.id}>{activeAIExecution(i) && <div className="card-selection"><input type="checkbox" aria-label={'选择 ' + (i.title || i.number)} checked={globalSelected.includes(project.id + ':' + i.id)} onChange={e => setGlobalSelected(e.target.checked ? [...globalSelected, project.id + ':' + i.id] : globalSelected.filter(id => id !== project.id + ':' + i.id))} /></div>}<div className="card-body">
               <div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>{project.name}</button><code>{i.number}</code><span className={'badge ' + i.type}>{labels[i.type]}</span><span className="priority">{i.priority}</span><span className="status executing">执行中</span><span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(project).some(x => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}</div>
               {i.title && <strong className="item-title">{i.title}</strong>}<p className="body-copy">{i.body || '暂无详细说明'}</p>
               {!!i.attachments?.length && <p className="muted">参考图片 · {i.attachments.map(a => a.label).join('、')}</p>}
@@ -1240,7 +1267,7 @@ export default function App() {
                   </article>
                 ) : (
                   <article key={i.id} className={'req-card' + (selected.includes(i.id) ? ' chosen' : '')}>
-                    {tab === 'feature' && eligible(i) && (
+                    {['feature', 'generate', 'executing'].includes(tab) && actionEligible(i) && (
                       <div className="card-selection">
                         <input type="checkbox" checked={selected.includes(i.id)} aria-label={'选择 ' + (i.title || i.number)}
                           onChange={(e) => setSelected(e.target.checked ? [...selected, i.id] : selected.filter((id) => id !== i.id))} />
@@ -1334,9 +1361,10 @@ export default function App() {
                   onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(bulkEligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
                   <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
                 {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
+                  <label className="check-label"><input type="checkbox" checked={visible.filter(actionEligible).length > 0 && visible.filter(actionEligible).every(i => selected.includes(i.id))} onChange={e => setSelected(e.target.checked ? visible.filter(actionEligible).map(i => i.id) : [])} />全选需求</label><button className="btn" disabled={busy || !selected.length} onClick={() => setBulkConfirm('project')}>批量退回 · 已选 {selected.length} 条</button>
                   <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
                   <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · 当前 {inProgress.length} 条</button></>}
-                {tab === 'executing' && <><strong>执行中</strong><span className="gen-count">{visible.length} 条任务正在由 AI 执行</span></>}
+                {tab === 'executing' && <><strong>执行中</strong><span className="gen-count">{visible.length} 条任务正在由 AI 执行</span><label className="check-label"><input type="checkbox" checked={visible.filter(actionEligible).length > 0 && visible.filter(actionEligible).every(i => selected.includes(i.id))} onChange={e => setSelected(e.target.checked ? visible.filter(actionEligible).map(i => i.id) : [])} />全选任务</label><button className="btn" disabled={busy || !selected.length} onClick={() => setBulkConfirm('project')}>批量释放 · 已选 {selected.length} 条</button></>}
                 {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
                 {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
                   <button className={archiveView === 'items' ? 'on' : ''} aria-pressed={archiveView === 'items'} onClick={() => { setArchiveView('items'); setArchiveBatchId(''); }}>归档需求</button>
@@ -1384,6 +1412,7 @@ export default function App() {
       </>}
       </div>
 
+      {bulkConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认批量操作"><div className="dialog"><div className="dialog-head"><h3>确认批量{bulkConfirm === 'global' || tab === 'executing' ? '释放' : '退回'}</h3></div><p>将处理选中的 {bulkConfirm === 'global' ? globalSelected.length : selected.length} 条需求。{(bulkConfirm === 'global' || tab === 'executing') && '释放任务后，原执行者将无法回写。'}</p><div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setBulkConfirm(null)}>取消</button><button className="btn primary" disabled={busy} onClick={() => { const target = bulkConfirm; setBulkConfirm(null); void (target === 'global' ? bulkReleaseGlobal() : bulkAction()); }}>确认</button></div></div></div>}
       {releaseItem && <div className="overlay" role="dialog" aria-modal="true" aria-label="释放 AI 任务" onClick={e => { if (e.target === e.currentTarget && !busy) setReleaseItem(null); }}>
         <div className="dialog"><div className="dialog-head"><h3>释放 AI 任务</h3><button className="icon-btn" disabled={busy} aria-label="关闭释放确认" onClick={() => setReleaseItem(null)}><X /></button></div>
           <p>确认 {releaseItem.number} 的 {releaseItem.aiExecution && clientLabels[releaseItem.aiExecution.client]} 已停止执行后释放。释放后其他 AI 可以领取，原运行记录将不能再提交完成。</p>

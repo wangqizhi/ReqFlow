@@ -486,6 +486,19 @@ func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 	case "ai:settings:save":
 		result, err := b.saveAISettings(aiArg(args, 0))
 		return result, true, err
+	case "ai:settings:test":
+		s, err := ValidateAISettings(aiArg(args, 0))
+		if err != nil {
+			return nil, true, err
+		}
+		response, err := RequestAI(s, "请只回复 OK。", "测试连接，请回复 OK。", nil)
+		if err != nil {
+			return nil, true, err
+		}
+		if !strings.EqualFold(strings.Trim(strings.TrimSpace(response), ".!。！"), "ok") {
+			return nil, true, errors.New("模型已响应，但未返回 OK，请检查模型配置")
+		}
+		return map[string]any{"ok": true}, true, nil
 	case "ai:logs:get":
 		b.mu.Lock()
 		defer b.mu.Unlock()

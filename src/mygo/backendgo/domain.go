@@ -1468,7 +1468,7 @@ func coreApplyOperation(s, a map[string]any) error {
 		coreHistory(i, map[string]any{"event": "更新完成说明", "time": now, "summary": summary, "version": i["version"]})
 		return nil
 	case "revert":
-		if i["status"] != "in_progress" {
+		if i["status"] != "in_progress" && !(i["status"] == "ready" && ScheduledBatch(p, i) != nil) {
 			return errors.New("需求不在执行中")
 		}
 		i["status"] = "ready"

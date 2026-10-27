@@ -136,6 +136,7 @@ export interface ReqFlowBridge {
   getPublishLogSettings?(): Promise<{ ok: boolean; settings?: PublishLogSettings; error?: string }>;
   savePublishLogSettings?(settings: PublishLogSettings): Promise<{ ok: boolean; error?: string }>;
   saveAISettings(settings: AISettings): Promise<{ ok: boolean; error?: string }>;
+  testAISettings?(settings: AISettings): Promise<{ ok: boolean; error?: string }>;
   optimizeCommitMessage?(project: string, message: string): Promise<{ ok: boolean; message?: string; error?: string }>;
   // REQ-151：AI 优化项目引导词 / 交付引导词，携带最近提交与差异统计上下文；返回优化后文本供对比编辑
   optimizeGuidance?(project: string, kind: 'guidance' | 'delivery', text: string): Promise<{ ok: boolean; text?: string; contextNote?: string; error?: string }>;

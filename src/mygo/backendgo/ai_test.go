@@ -56,6 +56,33 @@ func TestRequestAIOpenAIAndAnthropic(t *testing.T) {
 	}
 }
 
+func TestAISettingsConnectionTestUsesDraftAndChecksReply(t *testing.T) {
+	reply := "OK"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		if body["model"] != "draft-model" {
+			t.Error("draft model was not used")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
+	}))
+	defer server.Close()
+	b := &Backend{}
+	settings := map[string]any{"provider": "test", "url": server.URL, "apiKey": "test", "model": "draft-model", "format": "openai"}
+	result, handled, err := b.InvokeAI("ai:settings:test", []any{settings})
+	if err != nil || !handled || coreMap(result)["ok"] != true {
+		t.Fatalf("connection test failed: %v", err)
+	}
+	reply = "no"
+	_, _, err = b.InvokeAI("ai:settings:test", []any{settings})
+	if err == nil {
+		t.Fatal("unexpected response accepted")
+	}
+}
+
 func TestAIRejectsRedirectAndMalformedContent(t *testing.T) {
 	for _, mode := range []string{"redirect", "status", "empty", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
