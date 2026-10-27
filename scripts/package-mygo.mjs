@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+import { scanReleaseFiles } from './defender-scan.mjs';
 
 export const legacyRuntimeFiles = [
   'chrome_100_percent.pak', 'chrome_200_percent.pak', 'chrome_elf.dll',
@@ -65,6 +66,8 @@ export async function packageMyGO() {
   const sourceHash = await sha256(source);
   if (info.version !== version || info.backend !== 'go' || info.runtime !== 'mygo' || info.sha256 !== sourceHash) throw Error('Go 构建信息或哈希不匹配，请先 npm run build');
   const serverDefines = await serverBinaryDefines(path.dirname(source), info);
+  const executableScan = await scanReleaseFiles([source]);
+  if (executableScan[0].sha256 !== sourceHash) throw Error('主程序在构建校验后发生变化，请重新构建打包');
   const release = path.join(root, 'release');
   const setupName = `ReqFlow-Setup-${version}.exe`;
   const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-go-package-'));
@@ -80,8 +83,11 @@ export async function packageMyGO() {
       `/DLEGACY_CLEANUP_INCLUDE=${include}`, path.join(root, 'build/installer-go.nsi')]);
     const assets = {};
     for (const name of [setupName]) assets[name] = { sha256: await sha256(path.join(release, name)), size: (await stat(path.join(release, name))).size };
+    const installerScan = await scanReleaseFiles([path.join(release, setupName)]);
+    if (installerScan[0].sha256 !== assets[setupName].sha256) throw Error('安装包在校验后发生变化，请重新打包');
     await writeFile(path.join(release, `packaging-manifest-${version}.json`), JSON.stringify({
       version, backend: 'go', runtime: 'mygo', executable: { path: 'win-unpacked/ReqFlow.exe', sha256: sourceHash }, serverBinaries: info.serverBinaries, assets,
+      defenderScans: [...executableScan, ...installerScan],
       cleanup: { mode: 'explicit-files-only', recursiveDelete: false, preservesData: true, files: legacyRuntimeFiles }
     }, null, 2) + '\n');
     await writeFile(path.join(release, `SHA256SUMS-${version}.txt`), Object.entries(assets).map(([name, value]) => `${value.sha256}  ${name}`).join('\n') + '\n');

@@ -2,6 +2,7 @@
 import { releaseRepository, prepareReleaseGit } from './release-git.mjs';
 import { verifyReleaseVersion } from './release-version.mjs';
 import { traceStep } from './release-trace.mjs';
+import { scanReleaseFiles } from './defender-scan.mjs';
 import { readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -129,6 +130,7 @@ async function main() {
   console.log(`附件：${[...names, path.basename(sumsFile), path.basename(updateFile)].join(', ')}`);
   console.log(`说明：${notes.file}；新建状态：${options.draft ? '草稿' : '公开发布'}`);
   if (options['dry-run']) { console.log(notes.body); console.log(sums.trim()); console.log('预览完成；未上传。'); return; }
+  await traceStep('Defender 检查实际发布文件', () => scanReleaseFiles([path.join(root, 'release/win-unpacked/ReqFlow.exe'), ...assets]));
   traceStep('检查 GitHub 登录', () => gh(['auth', 'status', '--hostname', 'github.com'], { capture: true }));
   prepareReleaseGit(version);
   // --verify-tag 阻止 gh 默认在远程默认分支上自动创建一个可能不匹配产物的标签。
