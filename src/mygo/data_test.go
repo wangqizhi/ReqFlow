@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"unicode/utf16"
 )
@@ -73,5 +78,55 @@ func TestPortableDetectionAndNavigation(t *testing.T) {
 	}
 	if localNavigation("http://mygo.localhost.evil/") || allowedExternal("javascript:alert(1)") || !allowedExternal("codex://threads/new") {
 		t.Fatal("desktop origin policy")
+	}
+}
+
+func TestDesktopInstanceLease(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows desktop handles")
+	}
+	if file := os.Getenv("REQFLOW_TEST_INSTANCE_FILE"); file != "" {
+		release, err := registerDesktopInstance(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		fmt.Println("ready")
+		io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	file := filepath.Join(t.TempDir(), "requirements.sqlite")
+	release, err := registerDesktopInstance(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if otherDesktopInstance(file) {
+		t.Fatal("self counted as another desktop")
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDesktopInstanceLease$")
+	cmd.Env = append(os.Environ(), "REQFLOW_TEST_INSTANCE_FILE="+file)
+	stdout, _ := cmd.StdoutPipe()
+	stdin, _ := cmd.StdinPipe()
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	if line, _ := bufio.NewReader(stdout).ReadString('\n'); line != "ready\n" {
+		t.Fatalf("child not ready: %q", line)
+	}
+	if !otherDesktopInstance(file) {
+		t.Fatal("live second desktop not detected")
+	}
+	// A different data directory must not prevent the last instance closing.
+	if otherDesktopInstance(filepath.Join(t.TempDir(), "requirements.sqlite")) {
+		t.Fatal("unrelated workspace counted")
+	}
+	// Abrupt exit releases the OS handle, even when its stale marker remains.
+	stdin.Close()
+	cmd.Process.Kill()
+	cmd.Wait()
+	if otherDesktopInstance(file) {
+		t.Fatal("stale desktop marker counted")
 	}
 }

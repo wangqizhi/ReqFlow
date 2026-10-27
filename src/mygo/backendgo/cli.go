@@ -124,6 +124,7 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 		dataDir = coreString(a["data-dir"])
 	}
 	service := NewWorkspaceService(dataDir)
+	service.completionVersion = version
 	var result map[string]any
 	var e error
 	if coreTruthy(a["help"]) {
@@ -159,6 +160,7 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 	}
 	return code
 }
+
 // projectVersion 读取项目目录 package.json 的版本号，作为完成需求的可验证版本；读不到时留空。
 func (s *WorkspaceService) projectVersion(project string) string {
 	r, e := s.localService().Get()
@@ -166,7 +168,10 @@ func (s *WorkspaceService) projectVersion(project string) string {
 		return ""
 	}
 	p := coreFind(coreList(coreMap(r["state"])["projects"]), project)
-	dir := coreString(p["dir"])
+	return versionInDirectory(coreString(p["dir"]))
+}
+
+func versionInDirectory(dir string) string {
 	if dir == "" || !filepath.IsAbs(dir) {
 		return ""
 	}

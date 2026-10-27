@@ -6,6 +6,10 @@ import (
 )
 
 func prepareShutdown(workspace *backendgo.WorkspaceService) bool {
+	// A secondary desktop must never release another desktop's shared claims.
+	if otherDesktopInstance(workspace.DataFile()) {
+		return true
+	}
 	actions, err := workspace.ActiveExecutionActions()
 	if err != nil {
 		showStartupError("无法检查执行中任务，已取消关闭：" + err.Error())

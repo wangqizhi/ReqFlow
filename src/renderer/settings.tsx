@@ -3,10 +3,10 @@ import { bridge } from './api';
 import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI, AIReasoningEffort } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
-import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
+import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CORE_PROMPT_TEMPLATE } from '../core/domain';
 import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -128,7 +128,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const [leaveConfirm, setLeaveConfirm] = useState(false);
   const [savedAI, setSavedAI] = useState('');
   const [savedBackup, setSavedBackup] = useState('');
-  const [savedTemplates, setSavedTemplates] = useState({ baseline: '', publish: '' });
+  const [savedTemplates, setSavedTemplates] = useState({ baseline: '', publish: '', core: '' });
   const [savedPublishLogging, setSavedPublishLogging] = useState(true);
   const profiles = form.profiles || [];
   function draftProfiles(): AISettings[] {
@@ -178,7 +178,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const [publishLogLoaded, setPublishLogLoaded] = useState(false);
   const [baselineTpl, setBaselineTpl] = useState(''); // 全局基准需求模板（REQ-071）
   const [publishTpl, setPublishTpl] = useState('');
+  const [coreTpl, setCoreTpl] = useState('');
+  const templateOp = (kind: string) => kind === 'core' ? 'globalCorePromptTemplate' : kind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate';
   const [templateKind, setTemplateKind] = useState('baseline');
+  const templateText = templateKind === 'core' ? coreTpl : templateKind === 'publish' ? publishTpl : baselineTpl;
   const [templateVersion, setTemplateVersion] = useState<number | null>(null); // 保存时做乐观并发校验
   useEffect(() => {
     bridge.getWorkspace().then((r) => {
@@ -186,7 +189,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
       // REQ-071 验证退回：默认模板要直接预填成可编辑的正文，而不是灰色占位文字
       setBaselineTpl(r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE);
       setPublishTpl(r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE);
-      setSavedTemplates({ baseline: r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE, publish: r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE });
+      setCoreTpl(r.state.corePromptTemplate || DEFAULT_CORE_PROMPT_TEMPLATE);
+      setSavedTemplates({ baseline: r.state.baselineTemplate || DEFAULT_BASELINE_TEMPLATE, publish: r.state.publishTemplate || DEFAULT_PUBLISH_TEMPLATE, core: r.state.corePromptTemplate || DEFAULT_CORE_PROMPT_TEMPLATE });
       setTemplateVersion(r.version);
     }).catch(() => { /* 读取失败时模板tab仍可查看，保存时报错 */ });
   }, []);
@@ -252,12 +256,14 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   async function saveCurrentTab(): Promise<boolean> {
     if (tab === 'ai') return perform(async () => { const r = await bridge.saveAISettings(configuration()); if (r.ok) setSavedAI(fingerprint(configuration())); return r; }, 'AI 配置已保存，当前供应商已生效');
     if (tab === 'template') return perform(async () => {
-      const r = await bridge.apply({ op: templateKind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text: templateKind === 'publish' ? publishTpl : baselineTpl, expectedVersion: templateVersion === null ? undefined : templateVersion });
+      const r = await bridge.apply({ op: templateOp(templateKind), text: templateText, expectedVersion: templateVersion === null ? undefined : templateVersion });
       if (!r.ok) throw Error(r.error || '保存失败');
       setTemplateVersion(r.version);
-      setSavedTemplates(previous => ({ ...previous, [templateKind]: templateKind === 'publish' ? publishTpl : baselineTpl }));
+      const effective = templateText.trim() || (templateKind === 'core' ? DEFAULT_CORE_PROMPT_TEMPLATE : templateKind === 'publish' ? DEFAULT_PUBLISH_TEMPLATE : DEFAULT_BASELINE_TEMPLATE);
+      if (templateKind === 'core') setCoreTpl(effective); else if (templateKind === 'publish') setPublishTpl(effective); else setBaselineTpl(effective);
+      setSavedTemplates(previous => ({ ...previous, [templateKind]: effective }));
       return r;
-    }, templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
+    }, templateKind === 'core' ? '核心需求模板已保存' : templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
     if (tab === 'logs') return perform(async () => {
       const aiResult = await bridge.saveAISettings(configuration());
       if (!aiResult.ok) return aiResult;
@@ -274,7 +280,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   }
   const aiDirty = loaded && fingerprint(configuration()) !== savedAI;
   const backupDirty = backupLoaded && fingerprint(backup) !== savedBackup;
-  const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish);
+  const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish || coreTpl !== savedTemplates.core);
   const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
   const dirty = aiDirty || backupDirty || templateDirty || logDirty;
   useImperativeHandle(ref, () => ({ requestLeave() { if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
@@ -290,9 +296,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
       if (aiDirty) { const r = await bridge.saveAISettings(configuration()); if (!r.ok) return r; setSavedAI(fingerprint(configuration())); }
       if (templateDirty) {
         let version = templateVersion;
-        for (const [kind, text, saved] of [['baseline', baselineTpl, savedTemplates.baseline], ['publish', publishTpl, savedTemplates.publish]]) {
+        for (const [kind, text, saved] of [['baseline', baselineTpl, savedTemplates.baseline], ['publish', publishTpl, savedTemplates.publish], ['core', coreTpl, savedTemplates.core]]) {
           if (text === saved) continue;
-          const r = await bridge.apply({ op: kind === 'publish' ? 'globalPublishTemplate' : 'globalBaselineTemplate', text, expectedVersion: version });
+          const r = await bridge.apply({ op: templateOp(kind), text, expectedVersion: version });
           if (!r.ok) return r;
           version = r.version; setTemplateVersion(version); setSavedTemplates(previous => ({ ...previous, [kind]: text }));
         }
@@ -304,7 +310,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置">
-      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、需求模板、远程同步服务端、备份与本机数据</p></div>
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -344,9 +350,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
           e.preventDefault();
           if (!busy && tabReady) void saveAndFinish();
         }}>
-          <div className="segmented" role="group" aria-label="需求模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
-          <p className="settings-hint">{templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
-          <label className="field">{templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateKind === 'publish' ? publishTpl : baselineTpl} disabled={busy || templateVersion === null} onChange={(e) => templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
+          <div className="segmented" role="group" aria-label="提示词模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求'], ['core', '核心需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
+          <p className="settings-hint">{templateKind === 'core' ? '指派给 CLI 时使用此核心提示词。占位词：{{requirement_count}} 数量、{{requirement_ids}} 编号及 ID、{{project_name}} 名称、{{project_dir}} 目录、{{project_description}} 背景、{{guidance_version}} 引导词版本、{{guidance}} 引导词、{{context_rules}} 项目守则、{{requirements}} 需求及验收、{{delivery_guidance}} 交付引导。保存后对下一次指派生效。' : templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
+          <label className="field">{templateKind === 'core' ? '核心需求模板' : templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateText} disabled={busy || templateVersion === null} onChange={(e) => templateKind === 'core' ? setCoreTpl(e.target.value) : templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
           <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存设置」。</p>
         </form>}
         {tab === 'logs' && <>

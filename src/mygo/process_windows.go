@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"unsafe"
 )
@@ -41,4 +44,42 @@ func confirmForceShutdown(message string) bool {
 	title := syscall.StringToUTF16Ptr("ReqFlow · 确认强制关闭")
 	r, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x134)
 	return r == 6
+}
+
+// An exclusive handle is the liveness signal, released by Windows even on crash.
+func registerDesktopInstance(dataFile string) (func(), error) {
+	dir := filepath.Join(filepath.Dir(dataFile), "desktop-instances")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	file := filepath.Join(dir, fmt.Sprintf("%d.lock", os.Getpid()))
+	handle, err := syscall.CreateFile(syscall.StringToUTF16Ptr(file), syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.OPEN_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, err
+	}
+	return func() { syscall.CloseHandle(handle); os.Remove(file) }, nil
+}
+func otherDesktopInstance(dataFile string) bool {
+	dir := filepath.Join(filepath.Dir(dataFile), "desktop-instances")
+	// CLI and installer helper processes are not desktop instances. They must
+	// retain their existing final-shutdown checks rather than bypassing them.
+	if _, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%d.lock", os.Getpid()))); err != nil {
+		return false
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if entry.Name() == fmt.Sprintf("%d.lock", os.Getpid()) || filepath.Ext(entry.Name()) != ".lock" {
+			continue
+		}
+		file := filepath.Join(dir, entry.Name())
+		h, err := syscall.CreateFile(syscall.StringToUTF16Ptr(file), syscall.GENERIC_READ, 0, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+		if err == syscall.Errno(32) {
+			return true
+		}
+		if err == nil {
+			syscall.CloseHandle(h)
+			os.Remove(file)
+		}
+	}
+	return false
 }

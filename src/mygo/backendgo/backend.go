@@ -38,7 +38,9 @@ type Backend struct {
 }
 
 func NewBackend(dataDir, appDir, version string) *Backend {
-	return &Backend{DataDir: dataDir, AppDir: appDir, Version: version, Workspace: NewWorkspaceService(dataDir), desktopUpdate: map[string]any{"phase": "idle"}, desktopCheckouts: make(map[string]bool)}
+	workspace := NewWorkspaceService(dataDir)
+	workspace.completionVersion = version
+	return &Backend{DataDir: dataDir, AppDir: appDir, Version: version, Workspace: workspace, desktopUpdate: map[string]any{"phase": "idle"}, desktopCheckouts: make(map[string]bool)}
 }
 
 func desktopMap(v any) map[string]any {

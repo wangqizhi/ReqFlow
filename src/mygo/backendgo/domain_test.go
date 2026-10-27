@@ -2,6 +2,8 @@ package backendgo
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -330,5 +332,101 @@ func TestDeferPoolItem(t *testing.T) {
 	coreTestApply(t, s, map[string]any{"op": "submit", "project": p["id"], "batch": coreMap(coreList(p["batches"])[0])["id"]})
 	if Apply(s, a) == nil {
 		t.Fatal("executing item accepted delay change")
+	}
+}
+
+func TestCompletionAutomaticallyRecordsVersion(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(fmtBool(remote), func(t *testing.T) {
+			b := NewBackend(t.TempDir(), t.TempDir(), "2.13.5")
+			r := coreTestGet(t, b.Workspace)
+			pid := coreMap(coreList(coreMap(r["state"])["projects"])[0])["id"]
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"version":"7.8.9"}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": pid, "dir": dir}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if remote {
+				base, token, stop := startTestSyncServer(t)
+				defer stop()
+				var sid string
+				b, _, sid = syncFixtureBackend(t, base, token)
+				r = coreTestGet(t, b.Workspace)
+				pid = coreMap(coreList(coreMap(r["state"])["projects"])[0])["id"]
+				if _, err := b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": pid, "dir": dir}, nil); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := b.Workspace.Mutate(map[string]any{"op": "projectSync", "project": pid, "server": sid}, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, err := b.Workspace.Mutate(map[string]any{"op": "item", "project": pid, "body": "automatic version"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := coreFind(coreList(coreMap(r["state"])["projects"]), pid)
+			id := coreMap(coreList(p["items"])[0])["id"]
+			if _, err = b.Workspace.Mutate(map[string]any{"op": "generate", "project": pid, "ids": []any{id}}, nil); err != nil {
+				t.Fatal(err)
+			}
+			r, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": pid, "id": id}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := coreFind(coreList(coreFind(coreList(coreMap(r["state"])["projects"]), pid)["items"]), id)
+			if i["verificationVersion"] != "7.8.9" {
+				t.Fatalf("missing automatic version: %v", i)
+			}
+		})
+	}
+}
+func fmtBool(remote bool) string {
+	if remote {
+		return "remote"
+	}
+	return "local"
+}
+
+func TestCorePromptTemplateSaveRenderReset(t *testing.T) {
+	s, p := coreTestState()
+	template := "项目 {{project_name}} / {{requirement_count}} / {{requirement_ids}}\n{{project_prompt}}"
+	coreTestApply(t, s, map[string]any{"op": "globalCorePromptTemplate", "text": template})
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "literal {{requirement_ids}}"})
+	got := renderCorePrompt(coreString(NormalizeWorkspace(s)["corePromptTemplate"]), p, coreList(p["items"]), []string{"REQ-1"})
+	if !strings.Contains(got, " / 1 / REQ-1") || !strings.Contains(got, "literal {{requirement_ids}}") {
+		t.Fatal(got)
+	}
+	coreTestApply(t, s, map[string]any{"op": "globalCorePromptTemplate", "text": " "})
+	if coreString(s["corePromptTemplate"]) != "" {
+		t.Fatal("reset failed")
+	}
+	if got = renderCorePrompt("", p, coreList(p["items"]), []string{"REQ-1"}); !strings.HasPrefix(got, "使用 ReqFlow Agent") {
+		t.Fatal(got)
+	}
+}
+
+func TestOnlyUnfinishedOwnedTasksBlockDesktopClose(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "2.13.5")
+	r := coreTestGet(t, b.Workspace)
+	pid := coreMap(coreList(coreMap(r["state"])["projects"])[0])["id"]
+	r, err := b.Workspace.Mutate(map[string]any{"op": "item", "project": pid, "body": "owned task"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := coreString(coreMap(coreList(coreFind(coreList(coreMap(r["state"])["projects"]), pid)["items"])[0])["id"])
+	b.agentRuns = map[string]*agentRun{"test": {agent: "codex", project: coreString(pid), items: []string{id}}}
+	if !b.HasRunningAgentTasks() {
+		t.Fatal("unfinished owned task must be protected")
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "generate", "project": pid, "ids": []any{id}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": pid, "id": id}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if b.HasRunningAgentTasks() {
+		t.Fatal("idle terminal must not block close after completion")
 	}
 }

@@ -10,8 +10,9 @@ import (
 )
 
 type WorkspaceService struct {
-	store     *workspaceStore
-	localOnly bool
+	store             *workspaceStore
+	localOnly         bool
+	completionVersion string
 }
 
 func NewWorkspaceService(dataDir string) *WorkspaceService {
@@ -84,6 +85,17 @@ func (s *WorkspaceService) Get() (map[string]any, error) {
 	return map[string]any{"state": NormalizeWorkspace(state), "version": coreNum(record["version"]), "warning": warning}, nil
 }
 func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64) (map[string]any, error) {
+	if coreString(action["op"]) == "complete" && coreString(action["verificationVersion"]) == "" {
+		copied := map[string]any{}
+		for k, v := range action {
+			copied[k] = v
+		}
+		action = copied
+		action["verificationVersion"] = s.projectVersion(coreString(action["project"]))
+		if coreString(action["verificationVersion"]) == "" {
+			action["verificationVersion"] = s.completionVersion
+		}
+	}
 	if result, handled, err := s.remoteMutate(action, expectedVersion); handled {
 		if err == nil {
 			result = s.remoteVerificationVersion(action, result)

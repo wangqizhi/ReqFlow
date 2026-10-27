@@ -109,7 +109,7 @@ export type Project = {
 };
 
 export type ContextPrompt = { id: string; title: string; body: string; tags: string[]; projectId?: string; feature?: string; code?: string; files?: string[] };
-export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; contextPrompts?: ContextPrompt[] };
+export type Workspace = { projects: Project[]; folders?: { id: string; name: string }[]; baselineTemplate?: string; publishTemplate?: string; corePromptTemplate?: string; contextPrompts?: ContextPrompt[] };
 
 export const DEFAULT_DELIVERY = '说明改动、测试命令和结果、未解决的问题。';
 export const DEFAULT_CONTEXT_RULES_LIMIT = 500;
@@ -280,6 +280,7 @@ export function normalizeWorkspace(s: Workspace) {
   // 全局基准模板（REQ-071）：留空视为未设置，项目回退到默认模板
   if (typeof s.baselineTemplate === 'string' && s.baselineTemplate.trim()) s.baselineTemplate = s.baselineTemplate.trim();
   else s.baselineTemplate = undefined;
+  s.corePromptTemplate = typeof s.corePromptTemplate === 'string' && s.corePromptTemplate.trim() ? s.corePromptTemplate.trim() : undefined;
   s.publishTemplate = typeof s.publishTemplate === 'string' && s.publishTemplate.trim() ? s.publishTemplate.trim() : undefined;
   if (s.publishTemplate === LEGACY_PUBLISH_TEMPLATE) s.publishTemplate = DEFAULT_PUBLISH_TEMPLATE;
   for (const p of s.projects) {
@@ -445,6 +446,11 @@ async function applyOperation(s: Workspace, a: any) {
   if (a.op === 'globalBaselineTemplate') {
     const text = String(a.text || '').trim();
     s.baselineTemplate = text || undefined;
+    return;
+  }
+
+  if (a.op === 'globalCorePromptTemplate') {
+    s.corePromptTemplate = String(a.text || '').trim() || undefined;
     return;
   }
 
@@ -1018,3 +1024,5 @@ export function refreshContextRules(s: Workspace) {
     project.contextRules = truncateContextText(sections.join('\n'), limit);
   }
 }
+
+export const DEFAULT_CORE_PROMPT_TEMPLATE = '使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 {{requirement_count}} 条需求：{{requirement_ids}}，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n# 项目：{{project_name}}\n\n## 项目上下文\n{{project_description}}\n\n## 引导词 · v{{guidance_version}} - 请开发过程中严格执行引导词中的要求。\n{{guidance}}{{context_rules}}\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n{{requirements}}{{delivery_guidance}}';

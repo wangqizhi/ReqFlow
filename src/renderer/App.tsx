@@ -1,6 +1,7 @@
 // ReqFlow 主界面 —— 移植自线上 app/page.tsx 的完整工作台逻辑，
 // 交互与状态流与线上一致；新增「帮助 / CLI 参考」入口。
 
+import appPackage from '../../package.json';
 import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CONTEXT_RULES_LIMIT, MIN_CONTEXT_RULES_LIMIT, MAX_CONTEXT_RULES_LIMIT, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
@@ -1299,7 +1300,7 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
-                      {i.status === 'pending_verification' && i.verificationVersion && <p className="verification-version">在版本：{i.verificationVersion} 及以上验证</p>}
+                      {i.status === 'pending_verification' && <p className="verification-version">在版本：{i.verificationVersion || appPackage.version} 及以上验证</p>}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'

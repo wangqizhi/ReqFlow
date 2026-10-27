@@ -173,7 +173,11 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 		if b.agentRuns == nil {
 			b.agentRuns = map[string]*agentRun{}
 		}
-		prompt := fmt.Sprintf("使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 %d 条需求：%s，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。\n\n%s", len(items), strings.Join(labels, "、"), BuildPrompt(p, items))
+		workspace, err := b.Workspace.Get()
+		if err != nil {
+			return nil, err
+		}
+		prompt := renderCorePrompt(coreString(coreMap(workspace["state"])["corePromptTemplate"]), p, items, labels)
 		for id, r := range b.agentRuns {
 			r.mu.Lock()
 			done := r.done
@@ -417,4 +421,43 @@ func queueDshPrompt(run *agentRun, prompt string) error {
 		_ = os.Remove(name)
 	}
 	return err
+}
+
+// Only this process's live task terminals need their owning desktop to stay open.
+func (b *Backend) HasRunningAgentTasks() bool {
+	workspace, err := b.Workspace.Get()
+	projects := coreList(coreMap(workspace["state"])["projects"])
+	b.agentMu.Lock()
+	defer b.agentMu.Unlock()
+	for _, r := range b.agentRuns {
+		r.mu.Lock()
+		active := !r.done && r.agent != "shell"
+		r.mu.Unlock()
+		if !active {
+			continue
+		}
+		if err != nil {
+			return true
+		}
+		p := coreFind(projects, r.project)
+		for _, id := range r.items {
+			i := coreFind(coreList(p["items"]), id)
+			if i != nil && coreIn(coreString(i["status"]), "ready", "in_progress") && !coreTruthy(i["archived"]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+const DefaultCorePromptTemplate = `使用 ReqFlow Agent 执行当前项目需求。仅领取并执行以下 {{requirement_count}} 条需求：{{requirement_ids}}，其他需求不属于本轮。完成后通过 ReqFlow Agent 回写待验证，保留人工验收。
+
+` + DefaultProjectPromptTemplate
+
+func renderCorePrompt(template string, p map[string]any, items []any, labels []string) string {
+	if strings.TrimSpace(template) == "" {
+		template = DefaultCorePromptTemplate
+	}
+	// One pass: placeholder-like text in user input must remain literal.
+	return buildPromptTemplate(template, p, items, []string{"{{requirement_count}}", fmt.Sprint(len(items)), "{{requirement_ids}}", strings.Join(labels, "、"), "{{project_prompt}}", BuildPrompt(p, items)})
 }

@@ -155,7 +155,7 @@ func mergeBackupWorkspace(local, incoming map[string]any) (map[string]any, map[s
 			state[key] = entries
 		}
 	}
-	for _, key := range []string{"baselineTemplate", "publishTemplate"} {
+	for _, key := range []string{"baselineTemplate", "publishTemplate", "corePromptTemplate"} {
 		if !coreHas(state, key) && coreHas(incoming, key) {
 			state[key] = incoming[key]
 		}

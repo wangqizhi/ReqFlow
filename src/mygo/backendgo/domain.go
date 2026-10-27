@@ -311,7 +311,7 @@ func NormalizeWorkspace(s map[string]any) map[string]any {
 		folders = append([]any{map[string]any{"id": "default", "name": "default"}}, folders...)
 	}
 	s["folders"] = folders
-	for _, k := range []string{"baselineTemplate", "publishTemplate"} {
+	for _, k := range []string{"baselineTemplate", "publishTemplate", "corePromptTemplate"} {
 		v, ok := s[k].(string)
 		if ok && strings.TrimSpace(v) != "" {
 			s[k] = strings.TrimSpace(v)
@@ -460,7 +460,24 @@ func RequirementSettings(p, i map[string]any) map[string]any {
 	}
 	return map[string]any{"aiValidation": false, "deliveryGuidance": delivery}
 }
+
+const DefaultProjectPromptTemplate = `# 项目：{{project_name}}
+
+## 项目上下文
+{{project_description}}
+
+## 引导词 · v{{guidance_version}} - 请开发过程中严格执行引导词中的要求。
+{{guidance}}{{context_rules}}
+
+## 本轮目标
+实现以下需求，按列出的顺序执行。
+
+{{requirements}}{{delivery_guidance}}`
+
 func BuildPrompt(p map[string]any, items []any) string {
+	return buildPromptTemplate(DefaultProjectPromptTemplate, p, items, nil)
+}
+func buildPromptTemplate(template string, p map[string]any, items []any, extra []string) string {
 	sections := []string{}
 	type group struct {
 		text string
@@ -551,11 +568,12 @@ func BuildPrompt(p map[string]any, items []any) string {
 	if text := coreString(p["contextRules"]); text != "" {
 		rules = "\n\n## 项目守则（自动生成）\n" + text
 	}
-	r := "# 项目：" + coreString(p["name"]) + "\n\n## 项目上下文\n" + coreString(p["description"]) + "\n\n## 引导词 · v" + coreString(p["guideVersion"]) + " - 请开发过程中严格执行引导词中的要求。\n" + guidance + rules + "\n\n## 本轮目标\n实现以下需求，按列出的顺序执行。\n\n" + strings.Join(sections, "\n\n")
+	delivery := ""
 	if len(tail) > 0 {
-		r += "\n\n" + strings.Join(tail, "\n\n")
+		delivery = "\n\n" + strings.Join(tail, "\n\n")
 	}
-	return r
+	replacements := []string{"{{project_name}}", coreString(p["name"]), "{{project_dir}}", coreString(p["dir"]), "{{project_description}}", coreString(p["description"]), "{{guidance_version}}", coreString(p["guideVersion"]), "{{guidance}}", guidance, "{{context_rules}}", rules, "{{requirements}}", strings.Join(sections, "\n\n"), "{{delivery_guidance}}", delivery}
+	return strings.NewReplacer(append(replacements, extra...)...).Replace(template)
 }
 
 const ReleaseNotesGuidance = "## 版本交付与发布说明\n" +
@@ -929,8 +947,11 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		s["projects"] = append(projects, p)
 		return nil
-	case "globalBaselineTemplate", "globalPublishTemplate":
+	case "globalBaselineTemplate", "globalPublishTemplate", "globalCorePromptTemplate":
 		k := "baselineTemplate"
+		if op == "globalCorePromptTemplate" {
+			k = "corePromptTemplate"
+		}
 		if op == "globalPublishTemplate" {
 			k = "publishTemplate"
 		}

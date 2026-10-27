@@ -138,6 +138,11 @@ func run() (int, error) {
 	if len(args) > 1 && args[0] == "--smoke-ui" {
 		reportPath = args[1]
 	}
+	unregister, err := registerDesktopInstance(backend.Workspace.DataFile())
+	if err != nil {
+		return 1, err
+	}
+	defer unregister()
 	logDir := filepath.Join(dataDir, "logs")
 	_ = os.MkdirAll(logDir, 0700)
 	if file, e := os.OpenFile(filepath.Join(logDir, "reqflow.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); e == nil {
@@ -172,9 +177,13 @@ func run() (int, error) {
 	// REQ-239：开机自动连接已配置的 Server Agent，并定期同步关联项目。
 	backend.StartServerAgents()
 	defer backend.StopServerAgents()
-	var shutdownApproved bool
+	shutdownApproved := reportPath != ""
 	native.prepareClose = func() bool {
 		var approved bool
+		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {
+			showStartupError("此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。")
+			return false
+		}
 		mygo.RunOnMain(func() {
 			approved = prepareShutdown(backend.Workspace)
 			shutdownApproved = approved
@@ -182,6 +191,17 @@ func run() (int, error) {
 		return approved
 	}
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		// The smoke runner uses an isolated workspace and must report failures without
+		// waiting for an interactive shutdown confirmation over its fixture claims.
+		if reportPath != "" {
+			shutdownApproved = true
+			return
+		}
+		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {
+			e.PreventDefault()
+			showStartupError("此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。")
+			return
+		}
 		shutdownApproved = prepareShutdown(backend.Workspace)
 		if !shutdownApproved {
 			e.PreventDefault()
