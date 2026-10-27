@@ -51,7 +51,7 @@ func TestImportProjectCloneAndDetect(t *testing.T) {
 	if raw, err := os.ReadFile(filepath.Join(target, "README.md")); err != nil || string(raw) != "keep" {
 		t.Fatalf("clone failed: %s %v", raw, err)
 	}
-	value, err = b.desktopGit(context.Background(), "git:import", []any{target})
+	value, err = b.desktopGit(context.Background(), "git:import", []any{target, nil, true})
 	if err != nil || desktopMap(value)["name"] != "import" {
 		t.Fatalf("detect failed: %v %v", value, err)
 	}
@@ -70,8 +70,20 @@ func TestImportProjectCloneAndDetect(t *testing.T) {
 	}
 	occupied := t.TempDir()
 	os.WriteFile(filepath.Join(occupied, "keep.txt"), []byte("keep"), 0600)
-	if _, err = b.desktopGit(context.Background(), "git:import", []any{occupied, settings}); err == nil {
-		t.Fatal("must reject occupied directory")
+	value, err = b.desktopGit(context.Background(), "git:import", []any{occupied, settings})
+	if err != nil || !coreTruthy(desktopMap(value)["needsConfirmation"]) {
+		t.Fatal("must confirm occupied directory", value, err)
+	}
+	value, err = b.desktopGit(context.Background(), "git:import", []any{occupied, settings, true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup := coreString(desktopMap(value)["backup"])
+	if raw, err := os.ReadFile(filepath.Join(backup, "keep.txt")); err != nil || string(raw) != "keep" {
+		t.Fatal("backup lost", err)
+	}
+	if _, err := os.Stat(filepath.Join(occupied, "README.md")); err != nil {
+		t.Fatal(err)
 	}
 }
 

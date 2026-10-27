@@ -2,7 +2,6 @@ import { FileDiff } from './file-diff';
 // ReqFlow 主界面 —— 移植自线上 app/page.tsx 的完整工作台逻辑，
 // 交互与状态流与线上一致；新增「帮助 / CLI 参考」入口。
 
-import appPackage from '../../package.json';
 import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CONTEXT_RULES_LIMIT, MIN_CONTEXT_RULES_LIMIT, MAX_CONTEXT_RULES_LIMIT, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
@@ -70,6 +69,7 @@ export default function App() {
   }
   // REQ-205：指派 Agent 的交互终端会话；item 为正在执行的需求，needsInput 表示终端可能在等待输入
   const [agentSessions, setAgentSessions] = useState<Record<string, AgentSession>>({});
+  const [previousAgents, setPreviousAgents] = useState<Record<string, AgentSession[]>>({});
   // REQ-212：指派终端在独立窗口打开时隐藏停靠终端，窗口关闭后恢复
   const [agentDetached, setAgentDetached] = useState<Record<string, boolean>>({});
   const [executionClock, setExecutionClock] = useState(Date.now());
@@ -166,7 +166,7 @@ export default function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [terminalSettingEnabled] = useTerminalSetting();
   const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
-  const [terminalTabs, setTerminalTabs] = useState<Record<string, 'agent' | 'publish' | 'shell'>>({});
+  const [terminalTabs, setTerminalTabs] = useState<Record<string, string>>({});
   const [shellSessions, setShellSessions] = useState<Record<string, { runId: string; open: boolean; done: boolean }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
@@ -438,7 +438,7 @@ export default function App() {
         setSaved('保存中…');
       }
       const initialDraft = JSON.stringify(workspaceRef.current?.projects.find(pr => pr.id === action.project)?.requirementDraft);
-      const canRebase = action.op === 'requirementDraft' || (action.op === 'item' && !action.id);
+      const canRebase = action.op === 'requirementDraft' || (action.op === 'executionRelease' && !!action.run) || (action.op === 'item' && !action.id);
       const save = async () => {
         const scopes = mutationProjectIds(action);
         const expectedProjectVersions = scopes ? Object.fromEntries(scopes.map(id => [id, workspaceRef.current?.projects.find(pr => pr.id === id)?.revision ?? 0])) : undefined;
@@ -452,14 +452,14 @@ export default function App() {
       let r = await save();
       if (!r.ok && r.code === 'VERSION_CONFLICT') {
         // Refresh concurrency metadata without touching the local form. Only a
-        // new requirement/draft can merge unrelated Agent status changes.
+        // new requirement/draft or run-scoped release can merge unrelated changes.
         const latest = await bridge.getWorkspace();
         if (!latest.ok) throw Error(latest.error);
         const project = latest.state.projects.find(pr => pr.id === action.project);
         const sameDraft = project && JSON.stringify(project.requirementDraft) === initialDraft;
         setData(latest.state); workspaceRef.current = latest.state;
         setVersion(latest.version); versionRef.current = latest.version;
-        if (canRebase && sameDraft) r = await save();
+        if (canRebase && (sameDraft || action.op === 'executionRelease')) r = await save();
       }
       if (!r.ok) throw Error(r.error);
       if (r.version >= versionRef.current) { setData(r.state); workspaceRef.current = r.state; setVersion(r.version); versionRef.current = r.version; }
@@ -502,7 +502,7 @@ export default function App() {
     clearTimeout(autoRef.current);
     setEditing(i || null);
     setForm(i
-      ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n') }
+      ? { ...i, ...requirementSettings(p!, i), criteria: i.criteria.join('\n'), failureNotes: Object.fromEntries(unresolvedFailures(i).map(f => [f.time, f.note])) }
       : p!.requirementDraft || defaultRequirementForm());
     setAdvanced(false); setNewMenu(false);
     setModal('item');
@@ -577,6 +577,8 @@ export default function App() {
       if (!result?.ok || !result.runId) throw Error(result?.error || '当前桌面版不支持交互终端');
       // 重复指派同一需求会复用已有会话，以后端返回的实际 Agent 为准
       const actual = result.agent && TERMINAL_AGENTS.includes(result.agent) ? result.agent : agent;
+      const oldSession = agentSessions[projectId];
+      if (oldSession && oldSession.runId !== result.runId) setPreviousAgents(history => ({ ...history, [projectId]: [...(history[projectId] || []).filter(s => s.runId !== oldSession.runId), oldSession] }));
       setAgentSessions(sessions => {
         const previous = sessions[projectId];
         const ids = result.items || items.map(item => item.id);
@@ -844,7 +846,7 @@ export default function App() {
     completingRef.current = true; setCompleting(true);
     try {
       for (const item of request.items) {
-        if (!await act({ op: 'complete', id: item.id }, true)) { setCompleteConfirm(null); return; }
+        if (!await act({ op: 'complete', id: item.id, manualConfirmation: true }, true)) { setCompleteConfirm(null); return; }
       }
       setCompleteConfirm(null); setTab('pending_verification'); setSelected([]);
       notify(`已提交 ${request.items.length} 条需求进入待验证`);
@@ -983,7 +985,7 @@ export default function App() {
   // 活动页签优先取上次选择，但只落在实际打开的会话上；所选页签已关闭时回退到仍打开的终端，避免全部隐藏
   const shellTabOpen = !!shellSession?.open, agentTabOpen = !!agentSession?.open && !agentTerminalDetached, publishTabOpen = publishTabVisible && !!terminalSession?.terminalOpen;
   const terminalPreference = terminalTabs[p?.id || ''];
-  const activeTerminalTab = terminalPreference === 'shell' && shellTabOpen ? 'shell' : terminalPreference === 'agent' && agentTabOpen ? 'agent' : terminalPreference === 'publish' && publishTabOpen ? 'publish' : shellTabOpen ? 'shell' : agentTabOpen ? 'agent' : 'publish';
+  const activeTerminalTab = previousAgents[p?.id || '']?.some(s => s.runId === terminalPreference) ? terminalPreference : terminalPreference === 'shell' && shellTabOpen ? 'shell' : terminalPreference === 'agent' && agentTabOpen ? 'agent' : terminalPreference === 'publish' && publishTabOpen ? 'publish' : shellTabOpen ? 'shell' : agentTabOpen ? 'agent' : 'publish';
   // REQ-243：展开 PowerShell；会话已退出时在项目目录重新启动一个
   async function openShell() {
     if (!p || !shellSession) return;
@@ -1013,6 +1015,7 @@ export default function App() {
   const terminalPanelOpen = !!shellSession?.open || (!!agentSession?.open && !agentTerminalDetached) || (terminalEnabled && !terminalDetached && !!terminalSession?.terminalRunId && !!terminalSession.terminalOpen);
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
           {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell' && shellSession.open} onClick={() => void openShell()}>PowerShell{shellSession.done ? ' · 已退出' : ''}</button>}
+          {(previousAgents[p.id] || []).map((session, index) => <button key={session.runId} className="terminal-tab" role="tab" aria-selected={activeTerminalTab === session.runId} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: session.runId })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(session.agent)} · {index + 1}</button>)}
           {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {publishTabVisible && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
@@ -1325,7 +1328,7 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
-                      {i.status === 'pending_verification' && <p className="verification-version">在版本：{i.verificationVersion || appPackage.version} 及以上验证</p>}
+                      {i.status === 'pending_verification' && <p className="verification-version">在版本：{i.verificationVersion || '项目版本未提供'}{i.verificationVersion ? ' 及以上验证' : ''}</p>}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
@@ -1363,6 +1366,7 @@ export default function App() {
                         )}
                         {i.status === 'archived' && <button className="btn" disabled={busy} onClick={() => { setEditing(i); setNote(''); setModal('regress'); }}>重新打开</button>}
                         </>}
+                        {activeAIExecution(i) && <button className="btn primary" disabled={busy} onClick={() => submitItem(i)}>提交验证</button>}
                         {activeAIExecution(i) && <button className="btn" disabled={busy} onClick={() => setReleaseItem(i)}>释放任务</button>}
                         <button className="btn" onClick={() => { setEditing(i); setModal('detail'); }}>查看详情</button>
                       </div>
@@ -1421,6 +1425,7 @@ export default function App() {
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {mode !== 'EXECUTING' && p && (shellSession || (agentSession && !agentTerminalDetached) || publishTabVisible) && <>
         {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={minimizeTerminals} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
+        {(previousAgents[p.id] || []).map(session => <div key={session.runId} className="terminal-tab-panel" role="tabpanel" aria-label={agentName(session.agent) + ' 历史会话'} style={{ display: agentSession?.open && activeTerminalTab === session.runId ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} runId={session.runId} project={p.name} agent={agentName(session.agent)} onClose={minimizeTerminals} /></div>)}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
             onClose={minimizeTerminals}
@@ -1633,6 +1638,7 @@ export default function App() {
                   notify('需求已待执行，可直接排期');
                 }
               }}>
+                {editing && unresolvedFailures(editing).map(f => <label className="field" key={f.time}>退回理由<textarea value={form.failureNotes?.[f.time] ?? f.note} onChange={e => change({ ...form, failureNotes: { ...form.failureNotes, [f.time]: e.target.value } })} /></label>)}
                 <div className="choice-row">
                   <div className="field inline"><span>类型</span>
                     <div className="segmented" role="group" aria-label="需求类型">

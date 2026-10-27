@@ -430,3 +430,21 @@ func TestOnlyUnfinishedOwnedTasksBlockDesktopClose(t *testing.T) {
 		t.Fatal("idle terminal must not block close after completion")
 	}
 }
+
+func TestEditRejectedReason(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "original"})
+	i := coreMap(coreList(p["items"])[0])
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": p["id"], "id": i["id"]})
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": p["id"], "id": i["id"], "pass": false, "note": "old reason"})
+	failures := UnresolvedFailures(i)
+	stamp := coreString(coreMap(failures[0])["time"])
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "id": i["id"], "body": "updated", "failureNotes": map[string]any{stamp: "updated reason"}})
+	if coreMap(UnresolvedFailures(i)[0])["note"] != "updated reason" || i["body"] != "updated" {
+		t.Fatal(i)
+	}
+	if !strings.Contains(BuildPrompt(p, []any{i}), "updated reason") {
+		t.Fatal("prompt lost edited rejection reason")
+	}
+}

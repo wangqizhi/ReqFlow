@@ -99,3 +99,50 @@ func TestAIExecutionExclusiveClaim(t *testing.T) {
 		t.Fatal(item)
 	}
 }
+
+// Manual confirmation and release remain available after project guidance changes.
+func TestAIExecutionRecoveryAfterGuidanceChange(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(map[bool]string{false: "release", true: "manualComplete"}[complete], func(t *testing.T) {
+			s := NewWorkspaceService(t.TempDir())
+			r := coreTestGet(t, s)
+			p := coreMap(coreList(coreMap(r["state"])["projects"])[0])
+			pid := p["id"]
+			mutate := func(a map[string]any) map[string]any {
+				t.Helper()
+				a["project"] = pid
+				r, err := s.Mutate(a, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return coreMap(coreList(coreMap(r["state"])["projects"])[0])
+			}
+			p = mutate(map[string]any{"op": "item", "body": "recover"})
+			i := coreMap(coreList(p["items"])[0])
+			id := i["id"]
+			p = mutate(map[string]any{"op": "generate", "ids": []any{id}})
+			b := coreMap(coreList(p["batches"])[0])
+			run := coreUUID()
+			mutate(map[string]any{"op": "executionClaim", "run": run, "client": "codex", "claims": []any{map[string]any{"id": id, "version": i["version"], "batchId": b["id"], "hash": b["hash"]}}})
+			mutate(map[string]any{"op": "guidance", "text": "changed guidance"})
+			if complete {
+				p = mutate(map[string]any{"op": "complete", "id": id, "manualConfirmation": true})
+				i = coreMap(coreList(p["items"])[0])
+				if i["status"] != "pending_verification" || coreMap(i["aiExecution"])["outcome"] != "completed" {
+					t.Fatal(i)
+				}
+			} else {
+				p = mutate(map[string]any{"op": "executionRelease", "id": id, "run": run})
+				i = coreMap(coreList(p["items"])[0])
+				if i["status"] != "ready" || ActiveAIExecution(i) != nil {
+					t.Fatal(i)
+				}
+				mutate(map[string]any{"op": "item", "id": id, "body": "editable again"})
+				mutate(map[string]any{"op": "generate", "ids": []any{id}})
+			}
+			if _, err := s.Mutate(map[string]any{"op": "complete", "project": pid, "id": id, "run": run}, nil); err == nil {
+				t.Fatal("old run completed")
+			}
+		})
+	}
+}

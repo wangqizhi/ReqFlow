@@ -10,6 +10,7 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
   const [mode, setMode] = useState<'choose' | 'local' | 'import'>('choose');
   const [importRemote, setImportRemote] = useState<RemoteSettings>({ ...emptyRemote });
   const [importDir, setImportDir] = useState('');
+  const [confirmImport, setConfirmImport] = useState(false);
   const [folderId, setFolderId] = useState(folders[0]?.id || 'default');
   const [newFolder, setNewFolder] = useState(false);
   const [folderName, setFolderName] = useState('');
@@ -36,14 +37,15 @@ export function ProjectCreate({ submit, disabled, folders }: { submit(input: Pro
   if (mode === 'choose') return <div className="settings-actions"><button className="btn primary" onClick={() => setMode('import')}>导入项目</button><button className="btn" onClick={() => setMode('local')}>从本地创建</button></div>;
   if (mode === 'import') return <div className="project-create">
     <p className="settings-hint">填写 GitHub / GitLab 地址并选择空文件夹，或选择已有仓库根目录自动识别。使用本机 Git 凭据检查 clone 与 push 权限，不会实际推送。</p>
-    <RemoteFields value={importRemote} change={setImportRemote} disabled={busy} />
+    <RemoteFields value={importRemote} change={value => { setImportRemote(value); setConfirmImport(false); }} disabled={busy} />
     <label className="field">本地文件夹<input value={importDir} readOnly /></label>
-    <div className="settings-actions"><button className="btn" disabled={busy || !bridge.pickDir} onClick={() => perform(async () => { const r = await bridge.pickDir!(); if (!r.ok) throw Error(r.error); if (r.dir) setImportDir(r.dir); })}><FolderOpen />选择本地文件夹</button>
+    <div className="settings-actions"><button className="btn" disabled={busy || !bridge.pickDir} onClick={() => perform(async () => { const r = await bridge.pickDir!(); if (!r.ok) throw Error(r.error); if (r.dir) { setImportDir(r.dir); setConfirmImport(false); } })}><FolderOpen />选择本地文件夹</button>
     <button className="btn primary" disabled={busy || !importDir || !bridge.importProject} onClick={() => perform(async () => {
-      const r = await bridge.importProject!(importDir, importRemote.url.trim() ? validateRemote(importRemote) : undefined);
+      const r = await bridge.importProject!(importDir, importRemote.url.trim() ? validateRemote(importRemote) : undefined, confirmImport);
+      if (r.needsConfirmation) { setConfirmImport(true); setMessage('所选文件夹内已有内容，覆盖可能丢失数据。继续后已有内容会保留为同级备份；匹配的仓库直接关联。确认继续？'); return; }
       if (!r.ok || !r.remote || !r.dir) throw Error(r.error || '导入失败');
-      setDir(r.dir); setName(r.name || ''); setRemote(r.remote); setBindRemote(true); setCreateDirectory(false); setMode('local'); setMessage('仓库已导入并关联，请确认项目信息后创建');
-    })}>{working ? '检查权限并导入中…' : '导入并关联'}</button><button className="btn" disabled={busy} onClick={() => { setMode('local'); setMessage(''); }}>从本地创建</button></div>
+      if (!await submit({ name: r.name || '导入项目', description: '', dir: r.dir, createDirectory: false, remote: r.remote, folderId })) throw Error('仓库已准备好，但项目保存失败，请重试');
+    })}>{working ? '检查权限并导入中…' : confirmImport ? '确认继续导入' : '导入并创建项目'}</button><button className="btn" disabled={busy} onClick={() => { setMode('local'); setMessage(''); }}>从本地创建</button></div>
     {message && <p className="settings-message project-create-error" role="alert">{message}</p>}
   </div>;
   return <form className="project-create" onSubmit={(e) => { e.preventDefault(); void perform(async () => {

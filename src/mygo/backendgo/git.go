@@ -249,6 +249,13 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		if err != nil {
 			return nil, err
 		}
+		occupied, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		if len(occupied) > 0 && !coreTruthy(desktopArg(args, 2)) {
+			return desktopOK(map[string]any{"needsConfirmation": true}), nil
+		}
 		settings := map[string]any{}
 		if desktopArg(args, 1) != nil {
 			settings, err = ValidateRemote(desktopArg(args, 1))
@@ -280,6 +287,12 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		if err != nil {
 			return nil, fmt.Errorf("无法 clone / 无读取权限，请检查本机凭据或从本地创建：%w", err)
 		}
+		for _, line := range strings.Split(refs, "\n") {
+			if strings.HasPrefix(line, "ref: refs/heads/") {
+				settings["branch"] = strings.TrimPrefix(strings.Fields(line)[1], "refs/heads/")
+				break
+			}
+		}
 		probe, err := os.MkdirTemp("", "reqflow-import-permission-")
 		if err != nil {
 			return nil, err
@@ -296,12 +309,6 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 			return nil, err
 		}
 		if len(entries) == 0 {
-			for _, line := range strings.Split(refs, "\n") {
-				if strings.HasPrefix(line, "ref: refs/heads/") {
-					settings["branch"] = strings.TrimPrefix(strings.Fields(line)[1], "refs/heads/")
-					break
-				}
-			}
 			if _, err = b.desktopCheckout(dir, settings, false); err != nil {
 				return nil, fmt.Errorf("导入失败，请检查目录与 clone 权限，或从本地创建：%w", err)
 			}
@@ -309,7 +316,23 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 			top, e := desktopGitRun(ctx, []string{"rev-parse", "--show-toplevel"}, dir)
 			origin, _ := desktopGitRun(ctx, []string{"config", "--get", "remote.origin.url"}, dir)
 			if e != nil || !desktopSamePath(dir, strings.TrimSpace(top)) || strings.TrimSpace(origin) != url {
-				return nil, errors.New("请选择空目录或 origin 匹配的仓库根目录；不会覆盖已有文件")
+				stage, err := os.MkdirTemp(filepath.Dir(dir), ".reqflow-import-")
+				if err != nil {
+					return nil, err
+				}
+				if _, err = b.desktopCheckout(stage, settings, false); err != nil {
+					return nil, err
+				}
+				backup := stage + "-backup"
+				if err = os.Rename(dir, backup); err != nil {
+					return nil, err
+				}
+				if err = os.Rename(stage, dir); err != nil {
+					_ = os.Rename(backup, dir)
+					return nil, err
+				}
+				name := strings.TrimSuffix(filepath.Base(strings.TrimRight(url, "/")), ".git")
+				return desktopOK(map[string]any{"dir": dir, "name": name, "remote": settings, "backup": backup}), nil
 			}
 			branch, e := desktopGitRun(ctx, []string{"symbolic-ref", "--short", "HEAD"}, dir)
 			if e != nil {

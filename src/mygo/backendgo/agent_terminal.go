@@ -183,6 +183,9 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			done := r.done
 			r.mu.Unlock()
 			if r.project == project && !done && r.agent != "shell" {
+				if dshAssignmentsFinished(p, r.items) {
+					continue
+				}
 				// A rejected/edited requirement is a new round. Retire its old TUI
 				// before the renderer's asynchronous stop request reaches us.
 				if !agentHasCurrentAssignments(p, r) {

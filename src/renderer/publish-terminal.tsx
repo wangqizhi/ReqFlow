@@ -47,7 +47,7 @@ function elapsedTime(start: number, end: number) {
 }
 // REQ-256：终端选中即复制。交互终端里 Ctrl+C 需要发送中断信号，复制操作改由选区完成。
 async function copyTextToClipboard(text: string) {
-  try { await navigator.clipboard.writeText(text); return; } catch { /* WebView 未授权时退回隐藏文本框 */ }
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* WebView 未授权时退回隐藏文本框 */ }
   try {
     const helper = document.createElement('textarea');
     helper.value = text;
@@ -56,14 +56,15 @@ async function copyTextToClipboard(text: string) {
     helper.style.opacity = '0';
     document.body.appendChild(helper);
     helper.select();
-    document.execCommand('copy');
+    const copied = document.execCommand('copy');
     helper.remove();
-  } catch { /* 复制失败不影响终端继续使用 */ }
+    return copied;
+  } catch { return false; }
 }
-function copySelectionOnSelect(terminal: Terminal) {
+function copySelectionOnSelect(terminal: Terminal, notify: (message: string) => void) {
   return terminal.onSelectionChange(() => {
     const selection = terminal.getSelection();
-    if (selection) void copyTextToClipboard(selection);
+    if (selection) void copyTextToClipboard(selection).then(ok => notify(ok ? '已复制选中内容' : '复制失败，请重试'));
   });
 }
 export function PublishTerminal({ runId, project, session, onClose, onDetach, tabs }: { runId: string; project: string; session: PublishSession; tabs?: ReactNode; onClose(): void; onDetach?(): Promise<void> }) {
@@ -74,6 +75,8 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
   const current = useRef(session);
   current.current = session;
   const [readError, setReadError] = useState('');
+  const [copyMessage, setCopyMessage] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setCopyMessage(''), 2000); return () => clearTimeout(timer); }, [copyMessage]);
   const [detachError, setDetachError] = useState(''), [detaching, setDetaching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now);
@@ -128,7 +131,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
     terminal.loadAddon(fit);
     terminal.open(content);
     // REQ-256：选中即复制
-    const selectionSub = copySelectionOnSelect(terminal);
+    const selectionSub = copySelectionOnSelect(terminal, setCopyMessage);
     let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
     let cycleTimer: ReturnType<typeof setTimeout> | undefined, drainTimer: ReturnType<typeof setTimeout> | undefined, frame = 0;
     let renderSub: { dispose(): void } | undefined, renderFallback: ReturnType<typeof setTimeout> | undefined;
@@ -239,7 +242,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
   return <section className="publish-terminal" aria-label="终端" aria-busy={session.running || loading || detaching} data-run-id={runId}>
     <header><strong>Terminal · {project}</strong>
       {!session.idle && <span className={'terminal-indicator ' + (session.running ? 'running' : session.result?.ok ? 'success' : 'failure')} aria-label={session.running ? '发布运行中' : session.result?.ok ? '发布成功' : '发布失败'}>{session.running ? <RefreshCw size={14} className="terminal-spinner" /> : session.result?.ok ? <Check size={14} /> : <X size={14} />}</span>}
-      <span className="terminal-status" role="status">{detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
+      <span className="terminal-status" role="status">{copyMessage || detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
       <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><Minus size={16} /></button></header>{tabs}
@@ -288,9 +291,12 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
   const container = useRef<HTMLDivElement>(null);
   const historyScroll = useRef<HTMLDivElement>(null);
   const historySize = useRef<HTMLDivElement>(null);
+  const historyView = useRef<HTMLPreElement>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [copyMessage, setCopyMessage] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setCopyMessage(''), 2000); return () => clearTimeout(timer); }, [copyMessage]);
   const [stopping, setStopping] = useState(false);
   // REQ-212：最大化到独立窗口时不中断会话，窗口关闭后主界面恢复停靠终端。
   const [detaching, setDetaching] = useState(false);
@@ -309,19 +315,41 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     const terminal = new Terminal({ disableStdin: logOnly, cursorBlink: !logOnly, scrollback: 20000, fontSize: 13, screenReaderMode: false, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
     // REQ-256：选中即复制
-    const selectionSub = copySelectionOnSelect(terminal);
+    const selectionSub = copySelectionOnSelect(terminal, setCopyMessage);
     // A native scrollbar remains visible, including when xterm auto-hides its own.
     const scrollbar = historyScroll.current!, spacer = historySize.current!;
     let syncingTop = -1;
+    let frames: string[] = [], previousFrame = '';
+    const history = historyView.current!;
+    const showHistory = () => {
+      if (terminal.buffer.active.type !== 'alternate') { history.hidden = true; return; }
+      const index = Math.round(scrollbar.scrollTop / Math.max(1, scrollbar.clientHeight));
+      history.hidden = index >= frames.length;
+      if (!history.hidden) history.textContent = frames[index] || '';
+    };
     const syncScroll = () => {
       const buffer = terminal.buffer.active;
       const range = Math.max(1, scrollbar.clientHeight);
+      if (buffer.type === 'alternate') {
+        const frame = Array.from({ length: terminal.rows }, (_, row) => buffer.getLine(row)?.translateToString(true) || '').join('\n');
+        if (frame !== previousFrame) {
+          const atBottom = scrollbar.scrollTop >= scrollbar.scrollHeight - range - 2;
+          if (previousFrame) frames.push(previousFrame);
+          if (frames.length > 1000) frames.shift();
+          previousFrame = frame;
+          spacer.style.height = `${range * (frames.length + 1)}px`;
+          if (atBottom) { syncingTop = frames.length * range; scrollbar.scrollTop = syncingTop; }
+        }
+        showHistory(); return;
+      }
+      history.hidden = true;
       spacer.style.height = `${scrollbar.clientHeight + buffer.baseY * range / Math.max(1, terminal.rows)}px`;
       const top = buffer.viewportY * range / Math.max(1, terminal.rows);
       if (Math.abs(scrollbar.scrollTop - top) > 1) { syncingTop = top; scrollbar.scrollTop = top; }
     };
     const scrollHistory = () => {
       if (Math.abs(scrollbar.scrollTop - syncingTop) <= 1) { syncingTop = -1; return; }
+      if (terminal.buffer.active.type === 'alternate') { showHistory(); return; }
       terminal.scrollToLine(Math.round(scrollbar.scrollTop * Math.max(1, terminal.rows) / Math.max(1, scrollbar.clientHeight)));
     };
     scrollbar.addEventListener('scroll', scrollHistory);
@@ -357,7 +385,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); selectionSub.dispose(); terminal.dispose(); };
   }, [runId]);
-  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><Minus size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content agent-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
+  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{copyMessage || error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><Minus size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content agent-terminal-content" ref={container} /><pre className="agent-history-view" ref={historyView} hidden /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
 }
 
 // 指派终端的独立窗口（REQ-212）：与主窗口共享同一个后端会话，关闭窗口不结束会话。

@@ -275,7 +275,7 @@ createInterface({ input: process.stdin }).on('line', line => {
 	waitFor("继续：追加指派第一行")
 	waitFor("追加指派第二行")
 	waitFor("实例轮次：2，会话：2")
-	// Reassign after completion through the real desktop API, preserving the PTY.
+	// Reassign after completion into a new PTY, keeping the old session available.
 	b := NewBackend(t.TempDir(), root, "test")
 	state := coreTestGet(t, b.Workspace)
 	pid := coreString(coreMap(coreList(coreMap(state["state"])["projects"])[0])["id"])
@@ -309,11 +309,14 @@ createInterface({ input: process.stdin }).on('line', line => {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if desktopMap(result)["runId"] != "existing-dsh" || len(b.agentRuns) != 1 {
-		t.Fatal("reassignment restarted the runtime", result)
+	if desktopMap(result)["runId"] == "existing-dsh" || len(b.agentRuns) != 2 {
+		t.Fatal("reassignment must open a new terminal", result)
 	}
-	waitFor("复用指派任务")
-	waitFor("实例轮次：3，会话：2")
+	nextRun := b.agentRuns[coreString(desktopMap(result)["runId"])]
+	nextRun.close()
+	if b.agentRuns["existing-dsh"].pty != pty {
+		t.Fatal("old terminal was replaced")
+	}
 	if dshAssignmentsFinished(p, []string{next}) {
 		t.Fatal("unfinished assignment allowed another batch")
 	}

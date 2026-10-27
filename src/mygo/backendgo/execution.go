@@ -98,7 +98,7 @@ func guardAIExecution(p, a map[string]any) error {
 			return errors.New("AI 任务已释放或结束，不能使用旧运行记录提交完成")
 		}
 		if e := ActiveAIExecution(i); e != nil {
-			if op == "complete" && e["runId"] == a["run"] {
+			if op == "complete" && (e["runId"] == a["run"] || (coreTruthy(a["manualConfirmation"]) && coreString(a["run"]) == "")) {
 				continue
 			}
 			return errors.New("需求正在由 " + coreString(e["client"]) + " 执行，请先释放任务")

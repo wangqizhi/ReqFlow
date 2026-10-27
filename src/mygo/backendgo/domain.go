@@ -1266,6 +1266,9 @@ func coreApplyOperation(s, a map[string]any) error {
 		if coreString(a["run"]) != "" && ActiveAIExecution(i)["runId"] != a["run"] {
 			return errors.New("AI 任务属于另一运行记录")
 		}
+		if ScheduledBatch(p, i) == nil {
+			i["status"] = "ready"
+		}
 		finishAIExecution(i, now, "released")
 		coreHistory(i, map[string]any{"event": "释放 AI 任务", "time": now, "note": coreString(a["note"]), "execution": coreClone(i["aiExecution"])})
 		return nil
@@ -1420,6 +1423,11 @@ func coreApplyOperation(s, a map[string]any) error {
 			batch := ScheduledBatch(p, i)
 			if batch == nil || batch["id"] != a["batch"] || coreExecutor(i) != "ai" || !coreIn(coreString(i["status"]), "ready", "in_progress") || coreTruthy(i["archived"]) || !coreSafeInt(a["version"]) || coreNum(a["version"]) != coreNum(i["version"]) {
 				return errors.New("AI 排期任务或版本已变化")
+			}
+			i["executionVersion"] = i["version"]
+		} else if coreTruthy(a["manualConfirmation"]) && ActiveAIExecution(i) != nil {
+			if coreTruthy(i["archived"]) || !coreIn(coreString(i["status"]), "ready", "in_progress") || coreNum(ActiveAIExecution(i)["version"]) != coreNum(i["version"]) {
+				return errors.New("需求版本或状态已变化")
 			}
 			i["executionVersion"] = i["version"]
 		} else if i["status"] != "in_progress" {
@@ -1644,6 +1652,15 @@ func coreApplyItem(p, a map[string]any, now string) error {
 		snapshot := coreMap(coreClone(i))
 		delete(snapshot, "history")
 		coreHistory(i, map[string]any{"event": "编辑", "time": now, "snapshot": snapshot})
+		if coreHas(a, "failureNotes") {
+			notes := coreMap(a["failureNotes"])
+			for _, entry := range coreFailureEntries(i) {
+				h := coreMap(entry)
+				if !coreTruthy(h["resolved"]) && coreHas(notes, coreString(h["time"])) {
+					h["note"] = strings.TrimSpace(coreString(notes[coreString(h["time"])]))
+				}
+			}
+		}
 		i["version"] = coreNum(i["version"]) + 1
 	} else {
 		i = map[string]any{"id": coreUUID(), "number": fmt.Sprintf("REQ-%03d", coreNum(p["nextNumber"])), "version": int64(1), "history": []any{map[string]any{"event": "创建", "time": now}}}

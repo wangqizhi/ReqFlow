@@ -153,7 +153,7 @@ export interface ReqFlowBridge {
   openProjectDir?(dir: string): Promise<{ ok: boolean; error?: string }>;
   // 文件浏览仅桌面版提供；浏览器 mock 预览下为 undefined，界面做降级提示
   pickDir?(): Promise<{ ok: boolean; dir?: string; error?: string }>;
-  importProject?(dir: string, remote?: RemoteSettings): Promise<{ ok: boolean; dir?: string; name?: string; remote?: RemoteSettings; error?: string }>;
+  importProject?(dir: string, remote?: RemoteSettings, overwrite?: boolean): Promise<{ ok: boolean; needsConfirmation?: boolean; dir?: string; name?: string; remote?: RemoteSettings; error?: string }>;
   prepareDir?(dir: string, remote?: RemoteSettings): Promise<{ ok: boolean; dir?: string; error?: string; warning?: string; summary?: string }>;
   listDir?(root: string, rel: string): Promise<{ ok: true; entries: FileEntry[] } | { ok: false; error: string }>;
   readFile?(root: string, rel: string): Promise<{ ok: true; content: string; size: number } | { ok: false; error: string }>;
