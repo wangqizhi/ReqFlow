@@ -92,9 +92,6 @@ func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64)
 		}
 		action = copied
 		action["verificationVersion"] = s.projectVersion(coreString(action["project"]))
-		if coreString(action["verificationVersion"]) == "" {
-			action["verificationVersion"] = s.completionVersion
-		}
 	}
 	if result, handled, err := s.remoteMutate(action, expectedVersion); handled {
 		if err == nil {

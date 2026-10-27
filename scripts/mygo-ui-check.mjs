@@ -76,7 +76,7 @@ try {
   });
   child.stderr.on('data', value => { stderr += value; });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 90_000);
+    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 180_000);
     child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`MyGO exited ${code}: ${stderr}`)); });
   });
@@ -92,7 +92,7 @@ try {
   const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
   assert.equal(schedule.ok, true, JSON.stringify(schedule));
   await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
-  for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'milestones', 'directory', 'content', 'projects', 'guide', 'ssh', 'settings-api', 'settings-cli', 'settings-data', 'mods-protocol', 'mods-agents', 'mods-lab']) {
+  for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'milestones', 'directory', 'content', 'projects', 'guide', 'ssh', 'project-import', 'settings-api', 'settings-cli', 'settings-data', 'mods-protocol', 'mods-agents', 'mods-lab']) {
     const suffix = `.${surface}-${height}`;
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
     assert.equal(layout.ok, true, JSON.stringify(layout));

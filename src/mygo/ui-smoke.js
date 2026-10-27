@@ -266,6 +266,9 @@
     const remoteHeading = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '远程项目');
     checks.remoteProjectSection = { ok: !remoteHeading && !collaboration };
     await click(newProject);
+    await waitFor(() => !!button('导入项目'));
+    checks.projectCreateChoices = { ok: !!button('从本地创建') && !!button('导入项目') };
+    await click(button('从本地创建'));
     await waitFor(() => !!document.querySelector('.project-create'));
     await click(button('连接远程服务器'));
     await waitFor(() => !!document.querySelector('.ssh-directory'));

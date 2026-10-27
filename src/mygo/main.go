@@ -496,14 +496,24 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 				}
 
 			}
-			for _, surface := range []string{"projects", "guide", "ssh"} {
+			for _, surface := range []string{"projects", "guide", "ssh", "project-import"} {
 				code := `(async()=>{
                   document.querySelector('.overlay')?.click();
                   await new Promise(r=>setTimeout(r,80));
-                  const projects=SURFACE==='projects',ssh=SURFACE==='ssh';
-                  const trigger=projects?document.querySelector('[aria-label="管理项目"]'):[...document.querySelectorAll('button')].find(b=>b.textContent===(ssh?'新建项目':'编辑设置'));
+                  const projects=SURFACE==='projects',ssh=SURFACE==='ssh',importing=SURFACE==='project-import';
+                  const trigger=projects?document.querySelector('[aria-label="管理项目"]'):[...document.querySelectorAll('button')].find(b=>b.textContent===(ssh||importing?'新建项目':'编辑设置'));
                   trigger.click();await new Promise(r=>setTimeout(r,100));
-                  if(ssh){[...document.querySelectorAll('button')].find(b=>b.textContent==='连接远程服务器').click();await new Promise(r=>setTimeout(r,80));}
+                  if(importing){
+                    const choice=[...document.querySelectorAll('button')].find(b=>b.textContent==='导入项目');
+                    if(!choice||![...document.querySelectorAll('button')].some(b=>b.textContent==='从本地创建'))throw Error('Missing project creation choices');
+                    choice.click();await new Promise(r=>setTimeout(r,80));
+                    const dialog=document.querySelector('.dialog'),rect=dialog.getBoundingClientRect();
+                    const action=[...dialog.querySelectorAll('button')].find(b=>b.textContent==='导入并关联');
+                    action.scrollIntoView({block:'nearest'});
+                    const button=action.getBoundingClientRect();
+                    return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&button.top>=0&&button.bottom<=innerHeight+1&&action.disabled,height:innerHeight};
+                  }
+                  if(ssh){[...document.querySelectorAll('button')].find(b=>b.textContent==='从本地创建').click();await new Promise(r=>setTimeout(r,80));[...document.querySelectorAll('button')].find(b=>b.textContent==='连接远程服务器').click();await new Promise(r=>setTimeout(r,80));}
                   else if(!projects){document.querySelector('.guidance-view').click();await new Promise(r=>setTimeout(r,80));}
                   const dialog=document.querySelector(projects?'.project-manager':ssh?'.ssh-directory':'.project-guide-dialog');
                   const rect=dialog.getBoundingClientRect();

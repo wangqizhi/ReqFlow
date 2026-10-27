@@ -78,6 +78,7 @@ const channels = {
   openProjectDir: 'dir:open',
   pickDir: 'dir:pick',
   prepareDir: 'dir:prepare',
+  importProject: 'git:import',
   listDir: 'fs:list',
   readFile: 'fs:read',
   readImage: 'fs:readImage',

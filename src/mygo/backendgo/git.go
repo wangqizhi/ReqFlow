@@ -244,6 +244,85 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		}
 		return desktopOK(r), nil
 	}
+	if channel == "git:import" {
+		dir, err := desktopPrepareDirectory(root, false)
+		if err != nil {
+			return nil, err
+		}
+		settings := map[string]any{}
+		if desktopArg(args, 1) != nil {
+			settings, err = ValidateRemote(desktopArg(args, 1))
+			if err != nil {
+				return nil, err
+			}
+		}
+		if desktopString(settings["url"]) == "" {
+			top, e := desktopGitRun(ctx, []string{"rev-parse", "--show-toplevel"}, dir)
+			if e != nil || !desktopSamePath(dir, strings.TrimSpace(top)) {
+				return nil, errors.New("请选择已有仓库根目录，或填写 GitHub / GitLab 地址后选择空目录")
+			}
+			url, e := desktopGitRun(ctx, []string{"config", "--get", "remote.origin.url"}, dir)
+			if e != nil {
+				return nil, errors.New("未找到 origin，请填写远程仓库地址")
+			}
+			branch, _ := desktopGitRun(ctx, []string{"symbolic-ref", "--short", "HEAD"}, dir)
+			provider := "github"
+			if !strings.Contains(strings.ToLower(url), "github.com") {
+				provider = "gitlab"
+			}
+			settings, err = ValidateRemote(map[string]any{"provider": provider, "url": strings.TrimSpace(url), "branch": strings.TrimSpace(branch), "sshKeyPath": ""})
+			if err != nil {
+				return nil, err
+			}
+		}
+		url := desktopString(settings["url"])
+		refs, err := RunRemoteGit([]string{"ls-remote", "--symref", "--", url, "HEAD"}, dir, settings)
+		if err != nil {
+			return nil, fmt.Errorf("无法 clone / 无读取权限，请检查本机凭据或从本地创建：%w", err)
+		}
+		probe, err := os.MkdirTemp("", "reqflow-import-permission-")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(probe)
+		if _, err = desktopGitRun(ctx, []string{"init", "--bare", probe}, dir); err != nil {
+			return nil, err
+		}
+		if _, err = RunRemoteGit([]string{"push", "--dry-run", "--all", "--", url}, probe, settings); err != nil {
+			return nil, fmt.Errorf("无法 push / 无写入权限，请检查本机凭据或从本地创建：%w", err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			for _, line := range strings.Split(refs, "\n") {
+				if strings.HasPrefix(line, "ref: refs/heads/") {
+					settings["branch"] = strings.TrimPrefix(strings.Fields(line)[1], "refs/heads/")
+					break
+				}
+			}
+			if _, err = b.desktopCheckout(dir, settings, false); err != nil {
+				return nil, fmt.Errorf("导入失败，请检查目录与 clone 权限，或从本地创建：%w", err)
+			}
+		} else {
+			top, e := desktopGitRun(ctx, []string{"rev-parse", "--show-toplevel"}, dir)
+			origin, _ := desktopGitRun(ctx, []string{"config", "--get", "remote.origin.url"}, dir)
+			if e != nil || !desktopSamePath(dir, strings.TrimSpace(top)) || strings.TrimSpace(origin) != url {
+				return nil, errors.New("请选择空目录或 origin 匹配的仓库根目录；不会覆盖已有文件")
+			}
+			branch, e := desktopGitRun(ctx, []string{"symbolic-ref", "--short", "HEAD"}, dir)
+			if e != nil {
+				return nil, errors.New("当前仓库处于游离 HEAD，请先切换分支或从本地创建")
+			}
+			settings["branch"] = strings.TrimSpace(branch)
+		}
+		name := strings.TrimSuffix(strings.TrimRight(url, "/"), ".git")
+		if i := strings.LastIndexAny(name, "/:"); i >= 0 {
+			name = name[i+1:]
+		}
+		return desktopOK(map[string]any{"dir": dir, "name": name, "remote": settings}), nil
+	}
 	if channel == "git:available" {
 		_, e := exec.LookPath("git")
 		return desktopOK(map[string]any{"available": e == nil}), nil
