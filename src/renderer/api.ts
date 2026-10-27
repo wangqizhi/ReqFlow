@@ -140,6 +140,8 @@ export interface ReqFlowBridge {
   // REQ-151：AI 优化项目引导词 / 交付引导词，携带最近提交与差异统计上下文；返回优化后文本供对比编辑
   optimizeGuidance?(project: string, kind: 'guidance' | 'delivery', text: string): Promise<{ ok: boolean; text?: string; contextNote?: string; error?: string }>;
   getWorkspace(): Promise<WorkspaceResult>;
+  /** 只读本地备份，不触发远程刷新；用于独立窗口快速首屏。 */
+  getLocalWorkspace?(): Promise<WorkspaceResult>;
   apply(action: any): Promise<WorkspaceResult>;
   appInfo(): Promise<{ version: string; dataFile: string; platform: string }>;
   showDataFile?(): Promise<unknown>;

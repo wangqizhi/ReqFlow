@@ -78,6 +78,13 @@ func TestVerificationVersionLifecycle(t *testing.T) {
 	if _, ok := i["verificationVersion"]; ok {
 		t.Fatal("old build version carried into new completion")
 	}
+	// REQ-242：完成时由宿主写入可验证版本，无需用户填写。
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": p["id"], "id": i["id"], "pass": false, "note": "再做"})
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": p["id"], "id": i["id"], "verificationVersion": "2.13.1"})
+	if i["verificationVersion"] != "2.13.1" {
+		t.Fatal(i)
+	}
 }
 
 func coreTestApply(t *testing.T, s map[string]any, a map[string]any) {

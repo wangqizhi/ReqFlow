@@ -12,7 +12,7 @@ export function installDraggableOverlays() {
     if (e.button !== 0 || !(e.target instanceof Element) || e.target.closest('button,input,textarea,select,a,summary,[role=button]')) return;
     const handle = e.target.closest<HTMLElement>(handles);
     const surface = handle?.closest<HTMLElement>(surfaces);
-    if (!handle || !surface) return;
+    if (!handle || !surface || (surface.classList.contains('fb') && document.body.classList.contains('browser-window'))) return;
     const p = positions.get(surface) || { x: 0, y: 0 };
     active = { surface, handle, id: e.pointerId, px: e.clientX, py: e.clientY, ...p, rect: surface.getBoundingClientRect() };
     surface.classList.add('overlay-dragging');

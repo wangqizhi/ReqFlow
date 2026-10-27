@@ -4,7 +4,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { pendingCommitItems, buildCommitMessage, type Project } from '../core/domain';
-import { Maximize2 } from './icons';
+import { Maximize2, Minimize2 } from './icons';
 import { bridge, type FileEntry, type GitChange, type GitStatusInfo } from './api';
 import { renderMarkdown } from './markdown';
 import { ProjectRemoteOverlay } from './project-remote';
@@ -259,6 +259,16 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     ...(git?.changes || []).filter((c) => c.index === '?')
   ];
 
+  // REQ-241：独立窗口无系统标题栏，最大化按钮按窗口是否占满工作区切换图标。
+  const standalone = new URLSearchParams(location.search).has('browser');
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!standalone) return;
+    const check = () => setMaximized(window.outerWidth >= screen.availWidth && window.outerHeight >= screen.availHeight);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [standalone]);
   // Esc 关闭（右键菜单 → 提交信息编辑 → 整个浮层，逐层退）；设置浮层内自身处理 Esc 并阻断冒泡，
   // 焦点不在浮层内时由这里兜底关闭设置浮层
   useEffect(() => {
@@ -488,7 +498,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
         </div>
       )}
       <div className="fb">
-        {new URLSearchParams(location.search).has('browser') && <button className="fb-maximize icon-btn" title="最大化" aria-label="最大化浏览窗口" onClick={() => void bridge.maximizeProjectBrowser?.(project.id)}><Maximize2 size={18} /></button>}
+        {standalone && <button className="fb-maximize" title={maximized ? '还原' : '最大化'} aria-label={maximized ? '还原浏览窗口' : '最大化浏览窗口'} onClick={() => void bridge.maximizeProjectBrowser?.(project.id)}>{maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>}
         <button className="fb-close" title="关闭（Esc）" aria-label="关闭浏览项目" onClick={onClose}>
           <X size={19} />
         </button>

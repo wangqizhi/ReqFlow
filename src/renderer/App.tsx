@@ -29,7 +29,7 @@ import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnl
 import { ModsPage, modsTabs } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
-import { itemExecuting, sessionOwnsItem, type AgentSession } from './agent-session';
+import { continuePrompt, itemExecuting, sessionOwnsItem, stalledSessionItems, type AgentSession } from './agent-session';
 
 const labels: Record<string, string> = {
   feature: '新需求', improvement: '优化', bug: '修复',
@@ -311,8 +311,20 @@ export default function App() {
       setError(e.message);
     }
   }
+  // REQ-249：启动先读本地备份立即显示项目，Server Agent 远程刷新在后台异步进行，不阻塞首屏。
+  const [remoteSyncing, setRemoteSyncing] = useState(false);
+  const initialSyncRef = useRef<Promise<void> | null>(null);
   useEffect(() => {
-    load();
+    void (async () => {
+      const local = await bridge.getLocalWorkspace?.().catch(() => null);
+      if (local?.ok && !workspaceRef.current) {
+        setData(local.state); workspaceRef.current = local.state; setVersion(local.version); versionRef.current = local.version;
+      }
+      if (!local?.ok) { await load(); return; }
+      if (!local.state.projects.some(pr => pr.serverAgent?.id)) { initialSyncRef.current = load({ quiet: true }); return; }
+      setRemoteSyncing(true);
+      initialSyncRef.current = load({ quiet: true }).finally(() => setRemoteSyncing(false));
+    })();
     bridge.appInfo().then((i) => setAppVersion(i.version)).catch(() => { /* 取不到版本号时仅不显示 */ });
   }, []);
 
@@ -415,6 +427,12 @@ export default function App() {
     try {
       // 默认作用于当前项目；操作显式携带 project 时（如删除其他项目）以传入值为准
       const action = { project: p?.id, ...a };
+      // REQ-249：关联 Server Agent 的项目在启动同步完成前先等待连接，避免基于旧备份提交冲突。
+      if (initialSyncRef.current && workspaceRef.current?.projects.find(pr => pr.id === action.project)?.serverAgent?.id) {
+        setSaved('正在连接 Server Agent…');
+        await initialSyncRef.current;
+        setSaved('保存中…');
+      }
       const initialDraft = JSON.stringify(workspaceRef.current?.projects.find(pr => pr.id === action.project)?.requirementDraft);
       const canRebase = action.op === 'requirementDraft' || (action.op === 'item' && !action.id);
       const save = async () => {
@@ -672,6 +690,51 @@ export default function App() {
       notify('本次指派需求已归档、移除或进入新版本，' + agentName(session.agent) + ' 终端保留执行输出');
     }
   }, [data, agentSessions]);
+  // REQ-243：进入本地项目即在项目目录默认启动一个 PowerShell 会话，无需手动点击；退出后不自动重启。
+  const shellStartedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!p?.dir || isSSH(p.dir) || !bridge.startShell || shellStartedRef.current.has(p.id)) return;
+    const projectId = p.id;
+    shellStartedRef.current.add(projectId);
+    void bridge.startShell(projectId).then(r => {
+      if (r.ok && r.runId) setShellSessions(s => ({ ...s, [projectId]: { runId: r.runId!, open: false, done: false } }));
+      else shellStartedRef.current.delete(projectId);
+    }).catch(() => { shellStartedRef.current.delete(projectId); });
+  }, [p?.id, p?.dir]);
+  // REQ-248：部分需求已转待验证而其余仍卡在执行中时，终端空闲后推动 Agent 继续一次；
+  // 会话已结束仍未完成的需求释放独占领取，退回排期表等待重新执行。
+  const agentNudgedRef = useRef(new Set<string>());
+  const agentReleasedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!data) return;
+    for (const [projectId, session] of Object.entries(agentSessions)) {
+      const project = data.projects.find(project => project.id === projectId);
+      if (!project) continue;
+      const { finished, stalled } = stalledSessionItems(project.items, session);
+      if (!stalled.length) continue;
+      if (!session.done) {
+        const key = session.runId + ':' + finished.map(i => i.id).sort().join(',');
+        if (!finished.length || !session.needsInput || agentNudgedRef.current.has(key) || !bridge.writeAgent || agentLogOnly(session.agent)) continue;
+        agentNudgedRef.current.add(key);
+        void bridge.writeAgent(session.runId, continuePrompt(stalled)).then(r => {
+          if (r.ok) notify(agentName(session.agent) + ' 已完成部分需求，已推动继续执行其余 ' + stalled.length + ' 条');
+        }).catch(() => { /* 会话可能刚结束，交由结束分支释放 */ });
+        continue;
+      }
+      const releasable = stalled.filter(i => i.aiExecution?.runId && !agentReleasedRef.current.has(i.id + ':' + i.aiExecution.runId));
+      if (!releasable.length) continue;
+      void (async () => {
+        let released = 0;
+        for (const item of releasable) {
+          agentReleasedRef.current.add(item.id + ':' + item.aiExecution!.runId);
+          const project = data.projects.find(project => project.id === projectId)!;
+          const r = await bridge.apply({ op: 'executionRelease', project: projectId, id: item.id, run: item.aiExecution!.runId, note: agentName(session.agent) + ' 会话已结束但需求未完成，自动退回排期表', expectedProjectVersions: { [projectId]: project.revision || 0 }, expectedProjectSignatures: { [projectId]: await projectConcurrencyToken(project) } });
+          if (r.ok) released++;
+        }
+        if (released) { notify(agentName(session.agent) + ' 会话已结束，' + released + ' 条未完成需求已退回排期表，可重新执行'); void load({ quiet: true }); }
+      })();
+    }
+  }, [data, agentSessions]);
   // REQ-212：指派终端最大化到独立窗口后，主界面不再渲染停靠终端，并轮询窗口是否仍然打开
   const agentTerminalRunId = agentSession?.runId;
   useEffect(() => {
@@ -887,7 +950,6 @@ export default function App() {
   const activeTerminalTab = shellSession?.open && terminalTabs[p?.id || ''] === 'shell' ? 'shell' : agentSession?.open && (!terminalSession?.terminalOpen || terminalTabs[p?.id || ''] !== 'publish') ? 'agent' : 'publish';
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
           {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell'} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>PowerShell</button>}
-          {bridge.startShell && !isSSH(p.dir) && <button className="terminal-tab" title="在当前项目目录打开 PowerShell" disabled={!p.dir || (!!shellSession && !shellSession.done)} onClick={async () => { const r = await bridge.startShell!(p.id); if (!r.ok || !r.runId) { notify(r.error || '启动 Shell 失败', 'err'); return; } setShellSessions(s => ({ ...s, [p.id]: { runId: r.runId!, open: true, done: false } })); setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); }}>＋ Shell</button>}
           {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
@@ -958,7 +1020,9 @@ export default function App() {
       <main className={"main" + (mode === 'FLOW' ? ' flow-main' : '')}>
         <header className="top">
           <div className="save">
-            <Check size={14} />{saved}
+            {remoteSyncing
+              ? <span className="remote-syncing" role="status"><RefreshCw size={14} className="terminal-loading-spinner" />正在连接 Server Agent…</span>
+              : <><Check size={14} />{saved}</>}
             <button className="icon-btn" aria-label="刷新数据" title="数据每 15 秒自动刷新，点击立即刷新" onClick={() => void load()}><RefreshCw size={15} /></button>
           </div>
           {windowBar}
@@ -1196,10 +1260,7 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
-                      {i.status === 'pending_verification' && <label className="field">验证版本
-                        <input key={i.id + ':' + i.version + ':' + (i.verificationVersion || '')} defaultValue={i.verificationVersion || ''} maxLength={100} placeholder="填写版本号，如 2.12.6" onBlur={e => { const value = e.target.value.trim(); if (value !== (i.verificationVersion || '')) void act({ op: 'verificationVersion', id: i.id, version: i.version, value }, true); }} />
-                        {i.verificationVersion && <span>在版本：{i.verificationVersion} 及以上验证</span>}
-                      </label>}
+                      {i.status === 'pending_verification' && i.verificationVersion && <p className="verification-version">在版本：{i.verificationVersion} 及以上验证</p>}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
@@ -1294,7 +1355,12 @@ export default function App() {
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {p && (shellSession || (agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
         {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={done => setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false, done } }))} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
-        {shellSession && !shellSession.open && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>打开 PowerShell</button>}
+        {shellSession && !shellSession.open && <button className="publish-terminal-reopen" onClick={async () => {
+          // 已退出的 Shell 重新在项目目录启动一个新会话
+          if (shellSession.done && bridge.startShell) { const r = await bridge.startShell(p.id); if (!r.ok || !r.runId) { notify(r.error || '启动 PowerShell 失败', 'err'); return; } setShellSessions(s => ({ ...s, [p.id]: { runId: r.runId!, open: true, done: false } })); }
+          else setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }));
+          setTerminalTabs(t => ({ ...t, [p.id]: 'shell' }));
+        }}>打开 PowerShell</button>}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
             onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}

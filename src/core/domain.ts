@@ -875,6 +875,8 @@ async function applyOperation(s: Workspace, a: any) {
     finishAIExecution(i, now, 'completed');
     i.status = 'pending_verification';
     delete i.verificationVersion;
+    const verificationVersion = String(a.verificationVersion || '').trim();
+    if (verificationVersion && [...verificationVersion].length <= 100 && !/[\r\n]/.test(verificationVersion)) i.verificationVersion = verificationVersion;
     i.link = String(a.link || '');
     if (completionNote) {
       i.completionNote = completionNote;

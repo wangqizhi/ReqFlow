@@ -159,6 +159,30 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 	}
 	return code
 }
+// projectVersion 读取项目目录 package.json 的版本号，作为完成需求的可验证版本；读不到时留空。
+func (s *WorkspaceService) projectVersion(project string) string {
+	r, e := s.localService().Get()
+	if e != nil {
+		return ""
+	}
+	p := coreFind(coreList(coreMap(r["state"])["projects"]), project)
+	dir := coreString(p["dir"])
+	if dir == "" || !filepath.IsAbs(dir) {
+		return ""
+	}
+	raw, e := os.ReadFile(filepath.Join(dir, "package.json"))
+	if e != nil {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(raw, &pkg) != nil {
+		return ""
+	}
+	return strings.TrimSpace(pkg.Version)
+}
+
 func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, version string) (map[string]any, error) {
 	switch command {
 	case "context list":
@@ -407,6 +431,12 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 				n = -1
 			}
 			action["version"] = n
+		}
+		if command == "complete" {
+			action["verificationVersion"] = coreString(a["verify-version"])
+			if action["verificationVersion"] == "" {
+				action["verificationVersion"] = s.projectVersion(coreString(a["project"]))
+			}
 		}
 		if command == "verify" {
 			v := coreString(a["pass"])

@@ -257,6 +257,13 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return desktopOK(r), nil
+	case "workspace:local":
+		// 浏览窗口先读本地备份即可显示，不等待 Server Agent 网络刷新。
+		r, e := b.Workspace.localService().Get()
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(r), nil
 	case "workspace:apply":
 		return b.desktopApply(desktopMap(desktopArg(args, 0)))
 	case "storage:status":
@@ -398,6 +405,9 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 		if _, e := b.desktopSSH(context.Background(), "ssh:status", []any{action["dir"]}); e != nil {
 			return nil, e
 		}
+	}
+	if desktopString(action["op"]) == "complete" && desktopString(action["verificationVersion"]) == "" {
+		action["verificationVersion"] = b.Workspace.projectVersion(desktopString(action["project"]))
 	}
 	if desktopString(action["op"]) == "project" {
 		if strings.TrimSpace(desktopString(action["name"])) == "" {

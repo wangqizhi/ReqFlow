@@ -1416,6 +1416,10 @@ func coreApplyOperation(s, a map[string]any) error {
 		finishAIExecution(i, now, "completed")
 		i["status"] = "pending_verification"
 		delete(i, "verificationVersion")
+		// REQ-242：完成时记录包含该实现的版本，告诉验证人员从哪个版本起可以验证。
+		if v := strings.TrimSpace(coreString(a["verificationVersion"])); v != "" && len([]rune(v)) <= 100 && !strings.ContainsAny(v, "\r\n") {
+			i["verificationVersion"] = v
+		}
 		i["link"] = coreString(a["link"])
 		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
 		if coreHas(i, "aiExecution") {

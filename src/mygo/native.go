@@ -153,7 +153,7 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 			target := n.browsers[id]
 			if method == "browser.open" && (target == nil || target.IsDestroyed()) {
 				area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
-				target = mygo.NewWindow(mygo.WindowOptions{Title: "浏览项目", Width: 1200, Height: 800, MinWidth: 600, MinHeight: 400, X: area.X + (area.Width-1200)/2, Y: area.Y + (area.Height-800)/2, URL: "/?browser=" + url.QueryEscape(id), BackgroundColor: "#fbfaf9", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+				target = mygo.NewWindow(mygo.WindowOptions{Title: "浏览项目", Width: 1200, Height: 800, MinWidth: 600, MinHeight: 400, X: area.X + (area.Width-1200)/2, Y: area.Y + (area.Height-800)/2, URL: "/?browser=" + url.QueryEscape(id), Frameless: true, BackgroundColor: "#fbfaf9", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
 				n.browsers[id] = target
 				ready := make(chan struct{})
 				n.browserReady[id] = ready
@@ -184,7 +184,12 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 			case "browser.close":
 				target.Close()
 			case "browser.maximize":
-				target.Maximize()
+				// 同一按钮在最大化与还原之间切换。
+				if target.IsMaximized() {
+					target.Unmaximize()
+				} else {
+					target.Maximize()
+				}
 			}
 		})
 		return exists, nil

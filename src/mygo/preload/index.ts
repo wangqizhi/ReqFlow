@@ -68,6 +68,7 @@ const channels = {
   optimizeGuidance: 'ai:guidance:optimize',
   saveAISettings: 'ai:settings:save',
   getWorkspace: 'workspace:get',
+  getLocalWorkspace: 'workspace:local',
   apply: 'workspace:apply',
   appInfo: 'app:info',
   showDataFile: 'app:showDataFile',
