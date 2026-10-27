@@ -4,6 +4,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { pendingCommitItems, buildCommitMessage, type Project } from '../core/domain';
+import { Maximize2 } from './icons';
 import { bridge, type FileEntry, type GitChange, type GitStatusInfo } from './api';
 import { renderMarkdown } from './markdown';
 import { ProjectRemoteOverlay } from './project-remote';
@@ -487,6 +488,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
         </div>
       )}
       <div className="fb">
+        {new URLSearchParams(location.search).has('browser') && <button className="fb-maximize icon-btn" title="最大化" aria-label="最大化浏览窗口" onClick={() => void bridge.maximizeProjectBrowser?.(project.id)}><Maximize2 size={18} /></button>}
         <button className="fb-close" title="关闭（Esc）" aria-label="关闭浏览项目" onClick={onClose}>
           <X size={19} />
         </button>
@@ -595,7 +597,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                         </>
                       )}
                       </div>
-                      <p className="settings-hint">Pull → Add → AI 生成 Log → Commit → Push</p>
+                      <p className="settings-hint">{git.hasRemote ? 'Pull → Add → AI 生成 Log → Commit → Push' : 'Add → AI 生成 Log → Commit'}</p>
                       <div className="fb-git-commit">
                         <div className="commit-input field"><button type="button" className="icon-btn" aria-label="AI 生成提交文案" title={aiBusy ? 'AI 正在生成…' : !stagedChanges.length ? '请先 Add 暂存变动' : '根据暂存 diff 与需求生成提交文案'} disabled={gitBusy || aiBusy || !stagedChanges.length || !bridge.optimizeCommitMessage} onClick={generateCommitMessage}><Wand size={18} /></button><textarea rows={1} aria-label="Git 提交信息" value={commitMsg} placeholder={aiBusy ? 'AI 正在生成…' : '点击左侧魔术棒生成提交文案'} disabled={gitBusy || aiBusy}
                           onChange={(e) => setCommitMsg(e.target.value)}
@@ -627,7 +629,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                         )}
                       </div>
 
-                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span><button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button></div>
+                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span>{git.hasRemote && <button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button>}</div>
                       {!(git.log || []).length && <p className="fb-git-empty">暂无提交记录</p>}
                       <div className="fb-git-logs">{(git.log || []).map((entry) => <div key={entry.hash} className="fb-git-log" title={entry.hash + '\n' + entry.author + ' · ' + entry.date + '\n\n' + entry.message}><code>{entry.hash.slice(0, 7)}</code><span>{entry.message.split('\n')[0]}</span></div>)}</div>
 

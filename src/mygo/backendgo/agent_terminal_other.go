@@ -20,3 +20,7 @@ func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 func startDshChatPTY(root, prompt, label string) (agentPTY, error) {
 	return nil, errors.New("DeepSeek Harness 交互终端目前仅支持 Windows")
 }
+
+func startShellPTY(root string) (agentPTY, error) {
+	return nil, errors.New("交互式 Shell 目前仅支持 Windows")
+}

@@ -311,6 +311,8 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		}
 		r := desktopParseStatus(st)
 		r["repo"] = true
+		remotes, _ := git("remote")
+		r["hasRemote"] = strings.TrimSpace(remotes) != ""
 		br, _ := git("for-each-ref", "--format=%(refname:short)", "refs/heads/")
 		branches := []any{}
 		for _, name := range strings.Split(br, "\n") {

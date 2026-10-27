@@ -46,6 +46,7 @@ export type Item = {
   gitCommittedVersion?: number;
   gitCommitHash?: string;
   executionVersion?: number;
+  verificationVersion?: string;
   completionNote?: string;
   completionNoteVersion?: number;
   scheduledDate?: string;
@@ -345,7 +346,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   }));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'projectSync', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'projectSync', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'verificationVersion', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!(localOps.includes(a?.op) || ['requirementDraft', 'executionClaim', 'executionRelease'].includes(a?.op)) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -441,7 +442,7 @@ async function applyOperation(s: Workspace, a: any) {
 
   const p = s.projects.find((p) => p.id === a.project);
   if (!p) throw new Error('项目不存在');
-  if (!['executionClaim', 'executionRelease', 'gitCommitted', 'requirementDraft', 'completionNote'].includes(a.op)) {
+  if (!['executionClaim', 'executionRelease', 'gitCommitted', 'requirementDraft', 'completionNote', 'verificationVersion'].includes(a.op)) {
     const ids = [...(a.ids || []), ...(a.id ? [a.id] : [])];
     if (['cancel', 'submit'].includes(a.op)) ids.push(...(p.batches.find(b => b.id === a.batch)?.items.map(i => i.id) || []));
     if (['deleteProject', 'guidance', 'projectDir', 'projectDescription'].includes(a.op)) ids.push(...p.items.map(i => i.id));
@@ -873,6 +874,7 @@ async function applyOperation(s: Workspace, a: any) {
     }
     finishAIExecution(i, now, 'completed');
     i.status = 'pending_verification';
+    delete i.verificationVersion;
     i.link = String(a.link || '');
     if (completionNote) {
       i.completionNote = completionNote;
@@ -882,6 +884,13 @@ async function applyOperation(s: Workspace, a: any) {
       delete i.completionNoteVersion;
     }
     i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}), ...(i.aiExecution ? { execution: structuredClone(i.aiExecution) } : {}) });
+    return;
+  }
+  if (a.op === 'verificationVersion') {
+    if (i.status !== 'pending_verification' || i.executionVersion !== i.version || a.version !== i.version) throw Error('只能为当前待验证需求设置验证版本');
+    const value = String(a.value || '').trim();
+    if ([...value].length > 100 || /[\r\n]/.test(value)) throw Error('验证版本须为 100 字以内的单行文字');
+    if (value) i.verificationVersion = value; else delete i.verificationVersion;
     return;
   }
   if (a.op === 'completionNote') {

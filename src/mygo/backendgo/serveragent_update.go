@@ -21,6 +21,29 @@ import (
 
 type syncSSHRun func(string, time.Duration) (string, error)
 
+func syncSSHCommandError(stderr string, err error) error {
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(desktopCleanLog(stderr))
+	if detail == "" {
+		return err
+	}
+	hint := "SSH 命令失败"
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "permission denied"), strings.Contains(lower, "authentication failed"):
+		hint = "SSH 认证失败，请使用原部署的用户名和公钥；只填 IP 会使用 SSH 配置或本机用户名"
+	case strings.Contains(lower, "host key verification failed"), strings.Contains(lower, "remote host identification has changed"):
+		hint = "SSH 主机指纹校验失败，请核对服务器身份及 known_hosts"
+	case strings.Contains(lower, "could not resolve hostname"):
+		hint = "无法解析 SSH 主机，请检查地址或本机 SSH 别名配置"
+	case strings.Contains(lower, "connection refused"), strings.Contains(lower, "timed out"), strings.Contains(lower, "no route to host"):
+		hint = "SSH 网络连接失败，请核对 SSH 端口与网络；SSH 端口不同于 Server 的 HTTPS 端口"
+	}
+	return fmt.Errorf("%s：%s（%w）", hint, detail, err)
+}
+
 func syncAgentSSH(target string) (*url.URL, syncSSHRun, error) {
 	remote, err := parseSSHRoot("ssh://" + strings.ReplaceAll(target, "#", "%23") + "/./")
 	if err != nil {
@@ -36,8 +59,8 @@ func syncAgentSSH(target string) (*url.URL, syncSSHRun, error) {
 	run := func(script string, timeout time.Duration) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		output, _, err := desktopRun(ctx, "ssh", append(append([]string{}, args...), "--", remote.Hostname(), script), "", timeout)
-		return strings.TrimSpace(output), err
+		output, stderr, err := desktopRun(ctx, "ssh", append(append([]string{}, args...), "--", remote.Hostname(), script), "", timeout)
+		return strings.TrimSpace(output), syncSSHCommandError(stderr, err)
 	}
 	return remote, run, nil
 }

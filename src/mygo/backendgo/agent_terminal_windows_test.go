@@ -324,3 +324,37 @@ func TestInteractiveBatchAgentTerminal(t *testing.T) {
 		t.Run(agent, func(t *testing.T) { runInteractiveAgentTerminal(t, agent, nil, true) })
 	}
 }
+
+func TestProjectShellStartsInProjectDirectory(t *testing.T) {
+	root := t.TempDir()
+	b := NewBackend(t.TempDir(), root, "test")
+	state := coreTestGet(t, b.Workspace)
+	pid := coreString(coreMap(coreList(coreMap(state["state"])["projects"])[0])["id"])
+	if _, err := b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": pid, "dir": root}, nil); err != nil {
+		t.Fatal(err)
+	}
+	result := desktopTestCall(t, b, "agent:shell:start", pid)
+	id := coreString(result["runId"])
+	if id == "" {
+		t.Fatal(result)
+	}
+	defer desktopTestCall(t, b, "agent:stop", id)
+	desktopTestCall(t, b, "agent:write", id, "[Console]::WriteLine('SHELL-CWD:'+(Get-Location).Path)\r")
+	deadline := time.Now().Add(15 * time.Second)
+	var output string
+	var offset int64
+	for time.Now().Before(deadline) {
+		response := desktopTestCall(t, b, "agent:read", id, offset)
+		raw, err := base64.StdEncoding.DecodeString(coreString(response["data"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		output += string(raw)
+		offset = coreNum(response["offset"])
+		if strings.Contains(output, "SHELL-CWD:"+root) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("shell did not report project directory: %s", output)
+}

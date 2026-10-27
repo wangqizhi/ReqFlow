@@ -70,7 +70,7 @@ func finishAIExecution(i map[string]any, now, outcome string) {
 // across separate processes as well as separate clients.
 func guardAIExecution(p, a map[string]any) error {
 	op := coreString(a["op"])
-	if coreIn(op, "executionClaim", "executionRelease", "gitCommitted", "requirementDraft", "completionNote") {
+	if coreIn(op, "executionClaim", "executionRelease", "gitCommitted", "requirementDraft", "completionNote", "verificationVersion") {
 		return nil
 	}
 	ids := coreList(a["ids"])

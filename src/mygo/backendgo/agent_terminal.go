@@ -94,6 +94,34 @@ func (r *agentRun) collect() {
 
 // One interactive session receives a combined prompt for all selected requirements.
 func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
+	if channel == "agent:shell:start" {
+		project := desktopText(args, 0)
+		p, err := b.desktopProject(project)
+		if err != nil {
+			return nil, err
+		}
+		root := coreString(p["dir"])
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() || !filepath.IsAbs(root) {
+			return nil, errors.New("请关联有效的本地项目目录")
+		}
+		pty, err := startShellPTY(root)
+		if err != nil {
+			return nil, err
+		}
+		id := coreUUID()
+		run := &agentRun{pty: pty, project: project, agent: "shell"}
+		b.agentMu.Lock()
+		if b.agentRuns == nil {
+			b.agentRuns = map[string]*agentRun{}
+		}
+		b.agentRuns[id] = run
+		b.agentMu.Unlock()
+		drained := make(chan struct{})
+		go func() { defer close(drained); run.collect() }()
+		go b.waitAgent(run, drained)
+		return desktopOK(map[string]any{"runId": id}), nil
+	}
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
@@ -150,7 +178,7 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 			r.mu.Lock()
 			done := r.done
 			r.mu.Unlock()
-			if r.project == project && !done {
+			if r.project == project && !done && r.agent != "shell" {
 				// A rejected/edited requirement is a new round. Retire its old TUI
 				// before the renderer's asynchronous stop request reaches us.
 				if !agentHasCurrentAssignments(p, r) {

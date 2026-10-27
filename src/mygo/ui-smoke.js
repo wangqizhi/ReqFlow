@@ -125,7 +125,7 @@
     await click(button('设置'));
     await waitFor(() => document.querySelector('.settings-page') && !button('新增配置').disabled);
     const settingsNav = document.querySelector('[aria-label="设置功能菜单"]');
-    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 7 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
+    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 6 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
     const profileCount = document.querySelectorAll('.ai-profile-list button').length;
     await click(button('新增配置'));
     await click(button('本地 CLI'));
@@ -289,7 +289,7 @@
     await waitFor(() => !!document.querySelector('[aria-label="插件/MOD/AGENT"]'));
     const modsNav = () => document.querySelector('[aria-label="插件功能菜单"]');
     const modsMenu = label => [...modsNav().querySelectorAll('button')].find(el => el.textContent.startsWith(label));
-    checks.modsWorkspace = { ok: !document.querySelector('.overlay') && !document.querySelector('.mods-page [role="dialog"], .mods-page [role="tablist"]') && modsNav().querySelectorAll('button').length === 4 && document.querySelector('.mods-page').clientWidth === document.querySelector('.main').clientWidth };
+    checks.modsWorkspace = { ok: !document.querySelector('.overlay') && !document.querySelector('.mods-page [role="dialog"], .mods-page [role="tablist"]') && modsNav().querySelectorAll('button').length === 5 && document.querySelector('.mods-page').clientWidth === document.querySelector('.main').clientWidth };
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     checks.modsWorkspace.ok &&= !!document.querySelector('.mods-page');
     // REQ-235：插件 / MOD 说明占满右侧工作区，不再只占据中间一段阅读宽度。
@@ -449,20 +449,7 @@
     checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
     await click(button('返回项目'));
     await waitFor(() => !document.querySelector('.stats-panel'));
-    await click(button('浏览项目'));
-    await waitFor(() => !!button('关联目录设置'));
-    await click(button('关联目录设置'));
-    const directoryDialog = document.querySelector('.directory-settings');
-    const currentRoot = directoryDialog.querySelector('.directory-current-path').textContent;
-    const clipboardWrite = navigator.clipboard.writeText;
-    let copiedPath = '';
-    navigator.clipboard.writeText = async value => { copiedPath = value; };
-    try { await click(directoryDialog.querySelector('[aria-label="复制关联目录路径"]')); }
-    finally { navigator.clipboard.writeText = clipboardWrite; }
-    const rect = directoryDialog.getBoundingClientRect();
-    checks.directorySettings = { ok: Math.abs(rect.width - 580) < 1 && rect.bottom <= innerHeight && !!directoryDialog.querySelector('.directory-settings-heading svg') && copiedPath === currentRoot && directoryDialog.querySelectorAll('.directory-settings-actions .primary').length === 1 };
-    await click(document.querySelector('[aria-label="关闭关联目录设置"]'));
-    await click(document.querySelector('[aria-label="关闭浏览项目"]'));
+    // 独立浏览窗口由 smokeUI 在主窗口脚本结束后单独检查。
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
     const toolbar = document.querySelector('.workspace-toolbar');
     const actionsBottom = toolbar.querySelector('.workspace-actions').getBoundingClientRect().bottom;
@@ -645,7 +632,7 @@
     const closedState = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
     checks.concurrentDraftClose = { ok: closedState.state.projects.find(project => project.id === concurrentPid).requirementDraft.body === '关闭窗口保留草稿' };
     await click(button('记录新需求'));
-    await click(button('展开更多设置 · 图片、标题、验收与交付'));
+    await click(button('展开更多设置 · 图片、标题与验收'));
     const textarea = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, '长中文说明、附件与高级字段清空检查。'.repeat(35));
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -784,7 +771,7 @@
     checks.reopenDraft = { ok: reset() && !document.querySelector('.requirement-advanced') };
     const buttons = [...document.querySelectorAll('.editor-footer button')];
     checks.editorLayout = { ok: buttons.map(el => el.textContent).join('|') === '清空需求|保存需求' && Math.abs(buttons[0].getBoundingClientRect().top - buttons[1].getBoundingClientRect().top) < 1 && buttons.every(el => el.getBoundingClientRect().bottom < innerHeight) };
-    await click(button('展开更多设置 · 图片、标题、验收与交付'));
+    await click(button('展开更多设置 · 图片、标题与验收'));
     const body = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(body, '长中文说明与十二张参考图片的布局检查。'.repeat(60));
     body.dispatchEvent(new Event('input', { bubbles: true }));

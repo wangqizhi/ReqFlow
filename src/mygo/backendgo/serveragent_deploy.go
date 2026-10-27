@@ -182,6 +182,33 @@ func (b *Backend) syncAgentUninstall(args []any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if aiString(input["serverId"]) == "" {
+		servers, err := b.syncReadAgents()
+		if err != nil {
+			return nil, err
+		}
+		for _, server := range servers {
+			if strings.EqualFold(aiString(server["host"]), remote.Hostname()) || strings.TrimSpace(aiString(server["ssh"])) == target {
+				return nil, errors.New("请选择对应的服务端配置，确保卸载后正确切换项目")
+			}
+		}
+	}
+	if id := aiString(input["serverId"]); id != "" {
+		servers, err := b.syncReadAgents()
+		if err != nil {
+			return nil, err
+		}
+		matched := false
+		for _, server := range servers {
+			if aiString(server["id"]) == id {
+				saved := strings.TrimSpace(aiString(server["ssh"]))
+				matched = (saved != "" && saved == target) || (saved == "" && strings.EqualFold(aiString(server["host"]), remote.Hostname()))
+			}
+		}
+		if !matched {
+			return nil, errors.New("所选服务端与 SSH 目标不匹配，请重新选择")
+		}
+	}
 	sshArgs := []string{"-oBatchMode=yes", "-oStrictHostKeyChecking=yes", "-oConnectTimeout=10"}
 	if remote.Port() != "" {
 		sshArgs = append(sshArgs, "-p", remote.Port())
@@ -192,8 +219,8 @@ func (b *Backend) syncAgentUninstall(args []any) (map[string]any, error) {
 	run := func(script string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, _, err := desktopRun(ctx, "ssh", append(append([]string{}, sshArgs...), "--", remote.Hostname(), script), "", 30*time.Second)
-		return err
+		_, stderr, err := desktopRun(ctx, "ssh", append(append([]string{}, sshArgs...), "--", remote.Hostname(), script), "", 30*time.Second)
+		return syncSSHCommandError(stderr, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -257,13 +284,72 @@ func (b *Backend) syncAgentUninstall(args []any) (map[string]any, error) {
 		return nil, err
 	}
 	if input["preview"] != true {
-		if servers, readErr := b.syncReadAgents(); readErr == nil {
-			for _, value := range servers {
-				if aiString(value["host"]) == remote.Hostname() {
-					b.syncDisconnect(aiString(value["id"]))
+		if err := b.syncRemoveUninstalledAgent(target, aiString(input["serverId"])); err != nil {
+			return nil, err
+		}
+	}
+
+	return aiMap(result), nil
+}
+
+// Read the existing deployment token over an authenticated SSH connection; do not rotate it.
+func (b *Backend) syncAgentRequestToken(args []any) (map[string]any, error) {
+	target := strings.TrimSpace(aiString(aiArg(args, 0)))
+	remote, err := parseSSHRoot("ssh://" + strings.ReplaceAll(target, "#", "%23") + "/./")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := withSFTP(ctx, remote.String(), func(c *sftp.Client, _ *url.URL) (any, error) {
+		home, err := c.RealPath(".")
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := syncDeploymentConfig(c, path.Join(home, "reqflow-server"))
+		if err != nil {
+			return nil, fmt.Errorf("读取服务端配置失败：%w", err)
+		}
+		if !syncValidToken(cfg.Token) {
+			return nil, errors.New("服务端未配置有效访问令牌")
+		}
+		return map[string]any{"ok": true, "token": cfg.Token}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return aiMap(result), nil
+}
+
+func (b *Backend) syncRemoveUninstalledAgent(target, selectedID string) error {
+	servers, readErr := b.syncReadAgents()
+	if readErr != nil {
+		return fmt.Errorf("远程已卸载，但读取本地配置失败：%w", readErr)
+	}
+	for _, server := range servers {
+		// Only remove the explicitly selected configuration, or one whose saved SSH target matches exactly.
+		id := aiString(server["id"])
+		if id != selectedID && strings.TrimSpace(aiString(server["ssh"])) != target {
+			continue
+		}
+		b.syncDisconnect(id)
+		record, readErr := b.Workspace.store.read()
+		if readErr != nil {
+			return fmt.Errorf("远程已卸载，但读取项目备份失败：%w", readErr)
+		}
+		if record != nil {
+			for _, item := range coreList(coreMap(record["data"])["projects"]) {
+				project := coreMap(item)
+				if aiString(coreMap(project["serverAgent"])["id"]) == id {
+					if _, err := b.Workspace.Mutate(map[string]any{"op": "projectSync", "project": project["id"], "server": nil}, nil); err != nil {
+						return fmt.Errorf("远程已卸载，但项目切换到本地失败：%w", err)
+					}
 				}
 			}
 		}
+		if _, err := b.invokeServerAgents("server:agents:delete", []any{id}); err != nil {
+			return fmt.Errorf("远程已卸载，但删除本地服务端配置失败：%w", err)
+		}
 	}
-	return aiMap(result), nil
+	return nil
 }

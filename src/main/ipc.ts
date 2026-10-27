@@ -715,7 +715,8 @@ export function registerIpc(dataDir: string) {
         const [hash, author, date, message] = record.trimStart().split('\0');
         return { hash, author, date, message: (message || '').trim() };
       }) : [];
-      return { ok: true, repo: true, branch: branch.name, ahead: branch.ahead, behind: branch.behind, upstream: branch.upstream, changes, branches, log };
+      const remotes = await runGit(['remote'], root);
+      return { ok: true, repo: true, hasRemote: remotes.code === 0 && !!remotes.out.trim(), branch: branch.name, ahead: branch.ahead, behind: branch.behind, upstream: branch.upstream, changes, branches, log };
     } catch (e: any) {
       return { ok: false, error: e?.message || '读取 Git 状态失败' };
     }

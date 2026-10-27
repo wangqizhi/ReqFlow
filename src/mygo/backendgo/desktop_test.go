@@ -119,6 +119,13 @@ func TestDesktopGitUnicodeAndLiteralArguments(t *testing.T) {
 	name := "中文 & literal.txt"
 	os.WriteFile(filepath.Join(root, name), []byte("one"), 0600)
 	status := desktopTestCall(t, b, "git:status", root)
+	if status["hasRemote"] != false {
+		t.Fatal("local repository should have no remote")
+	}
+	run("remote", "add", "origin", "https://example.invalid/repo.git")
+	if desktopTestCall(t, b, "git:status", root)["hasRemote"] != true {
+		t.Fatal("remote repository should be detected")
+	}
 	changes := desktopList(status["changes"])
 	if len(changes) != 1 || desktopMap(changes[0])["path"] != name {
 		t.Fatalf("literal filename lost: %#v", status)

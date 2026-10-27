@@ -572,7 +572,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "ready", "complete", "executionClaim", "executionRelease", "completionNote", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "ready", "complete", "executionClaim", "executionRelease", "completionNote", "verificationVersion", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -1415,6 +1415,7 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		finishAIExecution(i, now, "completed")
 		i["status"] = "pending_verification"
+		delete(i, "verificationVersion")
 		i["link"] = coreString(a["link"])
 		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
 		if coreHas(i, "aiExecution") {
@@ -1429,6 +1430,23 @@ func coreApplyOperation(s, a map[string]any) error {
 			delete(i, "completionNoteVersion")
 		}
 		coreHistory(i, history)
+		return nil
+	case "verificationVersion":
+		if i["status"] != "pending_verification" || coreNum(i["executionVersion"]) != coreNum(i["version"]) {
+			return errors.New("只能为当前待验证需求设置验证版本")
+		}
+		if !coreSafeInt(a["version"]) || coreNum(a["version"]) != coreNum(i["version"]) {
+			return errors.New("需求版本已变化")
+		}
+		v := strings.TrimSpace(coreString(a["value"]))
+		if len([]rune(v)) > 100 || strings.ContainsAny(v, "\r\n") {
+			return errors.New("验证版本须为 100 字以内的单行文字")
+		}
+		if v == "" {
+			delete(i, "verificationVersion")
+		} else {
+			i["verificationVersion"] = v
+		}
 		return nil
 	case "completionNote":
 		if i["status"] != "pending_verification" || !coreHas(i, "executionVersion") || coreNum(i["executionVersion"]) != coreNum(i["version"]) {

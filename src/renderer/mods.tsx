@@ -1,3 +1,4 @@
+import { ServerAgentPage } from './server-agent';
 import protocol from '../../docs/mod-protocol.md?raw';
 import { bridge, type LocalAgent } from './api';
 import { useCallback, useEffect, useState } from 'react';
@@ -31,9 +32,9 @@ function probeLocalAgents(force = false): Promise<LocalAgent[]> {
   return agentProbeRunning;
 }
 
-export const modsTabs = [['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['lab', '实验室']] as const;
+export const modsTabs = [['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['server', 'Server Agent'], ['lab', '实验室']] as const;
 
-export function ModsPage({ tab, projectDir, onUpdateCountChange }: { tab: string; projectDir?: string; onUpdateCountChange(count: number): void }) {
+export function ModsPage({ tab, projectDir, onUpdateCountChange, notify }: { tab: string; projectDir?: string; onUpdateCountChange(count: number): void; notify(text: string, kind?: 'ok' | 'err'): void }) {
   const [terminalEnabled, setTerminalEnabled] = useTerminalSetting();
   // REQ-207：实验室「指派」开关，控制「提交验证」弹窗是否显示指派浮层
   const [assignEnabled, setAssignEnabled] = useAssignSetting();
@@ -101,7 +102,7 @@ export function ModsPage({ tab, projectDir, onUpdateCountChange }: { tab: string
   }
   return <section className="mods-page" aria-label="插件/MOD/AGENT">
       <header className="settings-page-head"><h1><Layers />{modsTabs.find(([id]) => id === tab)?.[1]}</h1><p>管理本地 Agent、查看接入说明与实验功能</p></header>
-      {tab === 'agents' ? <div className="local-agent-body">
+      {tab === 'server' ? <div className="local-agent-body"><ServerAgentPage notify={notify} /></div> : tab === 'agents' ? <div className="local-agent-body">
         <p className="settings-hint">打开本页会自动检测系统里的 Agent 是否已安装、版本是否需要更新；结果缓存 5 分钟，窗口重新获得焦点或点击「重新检测」会刷新。配置后可以在「提交验证」弹窗中指派（需先在实验室打开「指派」）。Codex 默认可指派；其他 Agent 在此开启后出现在指派选项中。</p>
         <div className="settings-actions">
           <button className="btn" disabled={detecting || !bridge.detectLocalAgents} onClick={() => void detect()}>{detecting ? '检测中…' : '重新检测'}</button>

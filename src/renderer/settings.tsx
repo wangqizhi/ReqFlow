@@ -5,9 +5,8 @@ import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE } from '../core/domain';
 import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
-import { ServerAgentPage } from './server-agent';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['server', 'Server Agent'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '需求模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -368,7 +367,6 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
           <p className="settings-hint">导入会读取远端备份，补充缺失项目、需求与历史；相同 ID 保留本机内容。导入前保留本机恢复副本，不上传本机数据。</p>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
-        {tab === 'server' && <ServerAgentPage notify={notify} />}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className="settings-message" role="status">{message}</p>}

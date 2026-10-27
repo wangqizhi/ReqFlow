@@ -22,6 +22,7 @@ export type FileEntry = { name: string; rel: string; dir: boolean; size: number 
 export type GitChange = { path: string; index: string; worktree: string };
 export type GitStatusInfo = {
   repo: boolean;
+  hasRemote?: boolean;
   branch: string;
   ahead: number;
   behind: number;
@@ -64,6 +65,7 @@ export type PublishSession = { running: boolean; step: string; startedAt: number
 export type TerminalSession = Omit<PublishSession, 'result'> & { project: string; projectId?: string; idle?: boolean; result: { ok: boolean; error?: string } | null };
 export type TerminalPeer = { runId: string; agent?: string };
 export interface ReqFlowBridge {
+  startShell?(project: string): Promise<{ ok: boolean; runId?: string; error?: string }>;
   startAgent?(project: string, agent: string, ids: string[]): Promise<{ ok: boolean; runId?: string; agent?: string; items?: string[]; error?: string }>;
   readAgent?(runId: string, offset: number): Promise<{ ok: boolean; data?: string; offset?: number; done?: boolean; idleMs?: number; error?: string }>;
   /** 终端收起后轮询会话状态（是否仍在运行、距上次输出的毫秒数），不需要传输终端内容。 */
@@ -94,6 +96,9 @@ export interface ReqFlowBridge {
   checkUpdate?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<UpdateState>;
+  openProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
+  closeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
+  maximizeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   windowControl?(action: 'minimize' | 'close'): Promise<void>;
   aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[]): Promise<{ ok: boolean; reply?: string; items?: AIDraft[]; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
   gitPush?(root: string): Promise<GitOpResult>;
@@ -171,9 +176,10 @@ export interface ReqFlowBridge {
   resetServerAgentTrust?(id: string): Promise<{ ok: boolean; error?: string }>;
   connectServerAgent?(id: string): Promise<{ ok: boolean; kind?: string; code?: string; error?: string; fingerprint?: string }>;
   disconnectServerAgent?(id: string): Promise<{ ok: boolean; error?: string }>;
+  requestServerToken?(ssh: string): Promise<{ ok: boolean; token?: string; error?: string }>;
   installServerAgent?(info: { ssh: string; port: number; name?: string; dataDir?: string }): Promise<{ ok: boolean; name?: string; host?: string; port?: number; token?: string; dataDir?: string; ssh?: string; summary?: string; error?: string }>;
   updateServerAgent?(info: { id: string; ssh?: string }): Promise<{ ok: boolean; version?: string; dataDir?: string; warning?: string; error?: string }>;
-  uninstallServerAgent?(info: { ssh: string; cleanData: boolean; preview?: boolean; confirmedDataDir?: string }): Promise<{ ok: boolean; dataDir?: string; dataRemoved?: boolean; error?: string }>;
+  uninstallServerAgent?(info: { ssh: string; serverId?: string; cleanData: boolean; preview?: boolean; confirmedDataDir?: string }): Promise<{ ok: boolean; dataDir?: string; dataRemoved?: boolean; error?: string }>;
 }
 
 declare global {

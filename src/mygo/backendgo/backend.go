@@ -281,6 +281,24 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 	case "app:showDataFile":
 		_, e := desktopNative(b, "showItemInFolder", b.Workspace.DataFile())
 		return desktopOK(nil), e
+	case "browser:open", "browser:close", "browser:maximize":
+		id := desktopText(args, 0)
+		if id == "" {
+			return nil, errors.New("项目 ID 不能为空")
+		}
+		if channel == "browser:open" {
+			if _, err := b.desktopProject(id); err != nil {
+				return nil, err
+			}
+		}
+		value, err := desktopNative(b, strings.Replace(channel, ":", ".", 1), id)
+		if err != nil {
+			return nil, err
+		}
+		if value != true {
+			return nil, errors.New("浏览窗口不可用")
+		}
+		return desktopOK(nil), nil
 	case "window:control":
 		action := desktopText(args, 0)
 		if action != "minimize" && action != "close" {

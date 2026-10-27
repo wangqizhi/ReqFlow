@@ -598,8 +598,8 @@ func (b *Backend) syncAgentInstall(args []any) (map[string]any, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		args := append(append([]string{}, sshArgs...), "--", sshTarget, script)
-		output, _, err := desktopRun(ctx, "ssh", args, "", timeout)
-		return strings.TrimSpace(output), err
+		output, stderr, err := desktopRun(ctx, "ssh", args, "", timeout)
+		return strings.TrimSpace(output), syncSSHCommandError(stderr, err)
 	}
 	info, err := run("uname -s && uname -m", 20*time.Second)
 	if err != nil {
@@ -931,6 +931,8 @@ func (b *Backend) invokeServerAgents(channel string, args []any) (any, error) {
 		return b.syncAgentInstall(args)
 	case "server:update":
 		return b.syncAgentUpdate(args)
+	case "server:token":
+		return b.syncAgentRequestToken(args)
 	case "server:uninstall":
 		return b.syncAgentUninstall(args)
 	case "server:projectSync":

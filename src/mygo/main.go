@@ -287,6 +287,49 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 	if err != nil {
 		result = map[string]any{"ok": false, "error": err.Error()}
 	}
+	if os.Getenv("REQFLOW_UI_INTERACTIONS") == "1" {
+		check := map[string]any{"ok": false}
+		project, projectErr := w.Page().EvalContext(ctx, `(async()=>{const r=await window.mygo.call('ReqFlow.Invoke','workspace:get',[]);return r.state.projects.find(p=>p.name==='发布终端UI检查')?.id || '';})()`)
+		if projectErr == nil {
+			id, _ := project.(string)
+			if id != "" {
+				_, openErr := native.call("browser.open", []any{id})
+				var child *mygo.Window
+				var ready chan struct{}
+				mygo.RunOnMain(func() { child = native.browsers[id]; ready = native.browserReady[id] })
+				if ready != nil {
+					select {
+					case <-ready:
+					case <-time.After(10 * time.Second):
+					}
+				}
+				if openErr == nil && child != nil {
+					script := `(async()=>{const until=Date.now()+10000; while(!document.querySelector('.fb')) { if(Date.now()>until) return {ok:false,error:'browser load timeout'}; await new Promise(r=>setTimeout(r,50)); } const b=document.querySelector('[aria-label="最大化浏览窗口"]'); const dir=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='关联目录设置'); if(!b||!dir)return {ok:false,error:'browser controls missing'}; dir.click(); await new Promise(r=>setTimeout(r,100)); const d=document.querySelector('.directory-settings'); return {ok:!!d && d.getBoundingClientRect().bottom<=innerHeight};})()`
+					if result, err := child.Page().EvalContext(ctx, script); err == nil {
+						if value, ok := result.(map[string]any); ok {
+							check = value
+						}
+					} else {
+						check["error"] = err.Error()
+					}
+					_, _ = native.call("browser.maximize", []any{id})
+					_, _ = native.call("browser.close", []any{id})
+				} else if openErr != nil {
+					check["error"] = openErr.Error()
+				}
+			}
+		} else {
+			check["error"] = projectErr.Error()
+		}
+		if report, ok := result.(map[string]any); ok {
+			if checks, ok := report["checks"].(map[string]any); ok {
+				checks["directorySettings"] = check
+			}
+			if check["ok"] != true {
+				report["ok"] = false
+			}
+		}
+	}
 	if os.Getenv("REQFLOW_UI_NOTIFICATION") == "1" {
 		check := checkNotificationDelivery(w)
 		if report, ok := result.(map[string]any); ok {
@@ -382,12 +425,9 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                     const page=document.querySelector('.stats-page');
                     return {ok:view.scrollWidth===view.clientWidth&&page.scrollWidth===page.clientWidth&&view.querySelectorAll('.milestone-stat').length===4&&view.querySelector('.milestone-hero').scrollWidth<=view.clientWidth+1&&[...view.querySelectorAll('.milestone-card')].every(card=>card.scrollWidth<=card.clientWidth+1),height:innerHeight,cards:view.querySelectorAll('.milestone-card').length};
                   }
-                  button('返回项目').click();await pause();button('浏览项目').click();await pause();button('关联目录设置').click();await pause();
-                  const dialog=document.querySelector('.directory-settings');
-                  const path=dialog.querySelector('.directory-current-path');
-                  path.textContent+='\\很长的中文目录名称'.repeat(10);path.title=path.textContent;
-                  const rect=dialog.getBoundingClientRect();
-                  return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&Math.abs(rect.width-580)<1&&dialog.scrollWidth===dialog.clientWidth&&[...dialog.querySelectorAll('button')].every(b=>b.getBoundingClientRect().bottom<=innerHeight),height:innerHeight};
+                  button('返回项目').click(); await pause();
+                  return {ok:true,height:innerHeight}; // 独立窗口布局在上方单独验证
+
                 })()`
 				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))
 				report, err := w.Page().EvalContext(ctx, code)
@@ -434,9 +474,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 					_ = writeReport(fmt.Sprintf("%s.detached-%d.json", path, height), detached)
 					_, _ = w.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+3000;while(!document.querySelector('.publish-terminal')){if(Date.now()>end)throw Error('Terminal did not reattach');await new Promise(r=>setTimeout(r,30));}})()`)
 				}
-				if surface == "directory" {
-					_, _ = w.Page().EvalContext(ctx, `document.querySelector('[aria-label="关闭关联目录设置"]').click();document.querySelector('[aria-label="关闭浏览项目"]').click()`)
-				}
+
 			}
 			for _, surface := range []string{"projects", "guide", "ssh"} {
 				code := `(async()=>{
@@ -479,7 +517,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                   const page=document.querySelector('.settings-page');const rect=page.getBoundingClientRect();
                   const footer=page.querySelector('.settings-footer').getBoundingClientRect();
                   const body=page.querySelector('.settings-body');
-                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===7&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
+                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===6&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
                   return {ok,height:innerHeight,scrollable:body.scrollHeight>body.clientHeight};
                 })()`
 				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))

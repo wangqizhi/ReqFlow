@@ -110,3 +110,11 @@ type agentPromptPTY struct {
 }
 
 func (p *agentPromptPTY) Close() error { err := p.agentPTY.Close(); _ = os.Remove(p.file); return err }
+
+func startShellPTY(root string) (agentPTY, error) {
+	program, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		return nil, err
+	}
+	return conpty.Start(syscall.EscapeArg(program)+" -NoLogo", conpty.ConPtyWorkDir(root), conpty.ConPtyDimensions(100, 24))
+}

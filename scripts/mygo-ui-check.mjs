@@ -31,6 +31,16 @@ try {
     return JSON.parse(r.stdout);
   };
   const workspace = cli(['workspace', 'get']).state;
+  // The isolated copy has no remote credentials; detach its copied associations
+  // before fixture mutations so tests never contact or modify a real server.
+  for (const project of workspace.projects.filter(p => p.serverAgent)) {
+    const detached = spawnSync(path.join(portable, 'ReqFlow.exe'), ['--test-invoke'], {
+      windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: { ...process.env, REQFLOW_DATA_DIR: data },
+      input: JSON.stringify({ channel: 'workspace:apply', args: [{ op: 'projectSync', project: project.id, server: null }] }) + '\n',
+    });
+    assert.equal(detached.status, 0, detached.error?.message || detached.stderr);
+    assert.equal(JSON.parse(detached.stdout).ok, true, detached.stdout);
+  }
   // Existing runs belong to the copied data, not to the four execution fixtures below.
   // Release them only in this script's isolated copy so UI checks stay deterministic.
   for (const project of workspace.projects) for (const item of project.items) {

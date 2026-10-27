@@ -54,6 +54,32 @@ func TestCompletionNoteLifecycle(t *testing.T) {
 	}
 }
 
+func TestVerificationVersionLifecycle(t *testing.T) {
+	s, p := coreTestState()
+	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "验证版本"})
+	i := coreMap(coreList(p["items"])[0])
+	action := map[string]any{"op": "verificationVersion", "project": p["id"], "id": i["id"], "version": i["version"], "value": "2.13.0"}
+	if Apply(s, action) == nil {
+		t.Fatal("ready item accepted verification version")
+	}
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": p["id"], "id": i["id"]})
+	coreTestApply(t, s, action)
+	if i["verificationVersion"] != "2.13.0" {
+		t.Fatal(i)
+	}
+	action["version"] = 999
+	if Apply(s, action) == nil {
+		t.Fatal("stale version accepted")
+	}
+	coreTestApply(t, s, map[string]any{"op": "verify", "project": p["id"], "id": i["id"], "pass": false, "note": "重做"})
+	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
+	coreTestApply(t, s, map[string]any{"op": "complete", "project": p["id"], "id": i["id"]})
+	if _, ok := i["verificationVersion"]; ok {
+		t.Fatal("old build version carried into new completion")
+	}
+}
+
 func coreTestApply(t *testing.T, s map[string]any, a map[string]any) {
 	t.Helper()
 	if e := Apply(s, a); e != nil {

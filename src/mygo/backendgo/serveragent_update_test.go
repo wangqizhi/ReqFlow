@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,34 @@ import (
 
 	"github.com/pkg/sftp"
 )
+
+func TestSSHCommandErrorsPreserveCauseAndGiveActionableDetails(t *testing.T) {
+	cause := errors.New("exit status 255")
+	for _, entry := range []struct{ detail, hint string }{
+		{"wangq@10.21.56.108: Permission denied (publickey,password).", "原部署的用户名"},
+		{"Host key verification failed.", "known_hosts"},
+		{"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", "服务器身份"},
+		{"ssh: Could not resolve hostname nas-alias: No such host is known.", "主机"},
+		{"ssh: connect to host nas port 2222: Connection refused", "SSH 端口"},
+		{"ssh: connect to host nas port 2222: Connection timed out", "SSH 端口"},
+		{"no matching key exchange method found. Their offer: old-method", "old-method"},
+	} {
+		err := syncSSHCommandError(entry.detail, cause)
+		if err == nil || !errors.Is(err, cause) || !strings.Contains(err.Error(), entry.hint) || !strings.Contains(err.Error(), entry.detail) {
+			t.Fatalf("lost SSH diagnostic: %v", err)
+		}
+	}
+	if err := syncSSHCommandError("", cause); !errors.Is(err, cause) {
+		t.Fatal("missing stderr must preserve the process error")
+	}
+	if err := syncSSHCommandError("warning", nil); err != nil {
+		t.Fatal("stderr warning on success must not become a failure")
+	}
+	err := syncSSHCommandError("Authorization: Bearer private-fixture-token", cause)
+	if strings.Contains(err.Error(), "private-fixture-token") {
+		t.Fatal("SSH diagnostics must redact credentials")
+	}
+}
 
 func TestServerUpdatePlanPreservesDeploymentAndChecksOwnership(t *testing.T) {
 	left, right := net.Pipe()

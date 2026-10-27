@@ -305,3 +305,41 @@ func TestRemoteFlowArchiveReplacementAndProjectMove(t *testing.T) {
 		t.Fatalf("archive replacement was not executed remotely: %s", raw)
 	}
 }
+
+func TestUninstalledAgentDetachesOnlyMatchingProjects(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	b.Workspace.localOnly = true
+	state, err := b.Workspace.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := coreString(coreMap(coreList(coreMap(state["state"])["projects"])[0])["id"])
+	if err = b.syncWriteAgents([]map[string]any{{"id": "one", "name": "one", "host": "one.test", "ssh": "root@one.test"}, {"id": "two", "name": "two", "host": "two.test", "ssh": "root@two.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "item", "project": projectID, "body": "local backup"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "projectSync", "project": projectID, "server": "one"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	b.Workspace.localOnly = false
+	if err = b.syncRemoveUninstalledAgent("root@one.test", "one"); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := b.syncReadAgents()
+	if err != nil || len(servers) != 1 || servers[0]["id"] != "two" {
+		t.Fatalf("remaining servers: %#v %v", servers, err)
+	}
+	state, err = b.Workspace.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := coreFind(coreList(coreMap(state["state"])["projects"]), projectID)
+	if p["serverAgent"] != nil || len(coreList(p["items"])) != 1 {
+		t.Fatalf("local backup not preserved: %#v", p)
+	}
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "item", "project": projectID, "body": "offline edit"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -26,6 +26,9 @@ func (b *Backend) terminalPeers(id string) []terminalPeer {
 	b.desktopPublishMu.Unlock()
 	b.agentMu.Lock()
 	for key, run := range b.agentRuns {
+		if run.agent == "shell" {
+			continue
+		}
 		if key == id || (project != "" && run.project == project) {
 			peers = append(peers, terminalPeer{RunID: key, Agent: run.agent})
 		}

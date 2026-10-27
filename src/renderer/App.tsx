@@ -162,7 +162,8 @@ export default function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [terminalSettingEnabled] = useTerminalSetting();
   const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
-  const [terminalTabs, setTerminalTabs] = useState<Record<string, 'agent' | 'publish'>>({});
+  const [terminalTabs, setTerminalTabs] = useState<Record<string, 'agent' | 'publish' | 'shell'>>({});
+  const [shellSessions, setShellSessions] = useState<Record<string, { runId: string; open: boolean; done: boolean }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
@@ -287,7 +288,8 @@ export default function App() {
       setDirectoryPicker(true);
       return;
     }
-    setBrowserOpen(true);
+    if (bridge.openProjectBrowser) { const result = await bridge.openProjectBrowser(p.id); if (!result.ok) notify(result.error || '打开浏览窗口失败', 'err'); }
+    else setBrowserOpen(true);
   }
 
   // REQ-146：确认后用系统资源管理器打开项目目录；浏览器预览无本地能力时降级提示
@@ -598,6 +600,11 @@ export default function App() {
     finally { setUploading(false); }
   }
 
+  function itemAction(formValue: any) {
+    const { deliveryGuidance: _deliveryGuidance, ...fields } = formValue;
+    return fields;
+  }
+
   function change(f: any) {
     dirtyRef.current = true;
     formRef.current = f;
@@ -606,7 +613,7 @@ export default function App() {
       setSaved('等待保存…');
       clearTimeout(autoRef.current);
       autoRef.current = setTimeout(async () => {
-        if (f.deliveryGuidance?.trim() && await act({ op: 'item', ...f, id: editing.id }, true)) {
+        if (await act({ op: 'item', ...itemAction(f), id: editing.id }, true)) {
           if (formRef.current === f) dirtyRef.current = false;
         }
       }, 800);
@@ -815,7 +822,7 @@ export default function App() {
       dirtyRef.current = false;
     }
     if (modal === 'item' && editing && dirtyRef.current) {
-      if (!await act({ op: 'item', ...formRef.current, id: editing.id }, true)) return;
+      if (!await act({ op: 'item', ...itemAction(formRef.current), id: editing.id }, true)) return;
       dirtyRef.current = false;
     }
     setModal('');
@@ -876,8 +883,11 @@ export default function App() {
             </div>);
   }
 
-  const activeTerminalTab = agentSession?.open && (!terminalSession?.terminalOpen || terminalTabs[p?.id || ''] !== 'publish') ? 'agent' : 'publish';
+  const shellSession = shellSessions[p?.id || ''];
+  const activeTerminalTab = shellSession?.open && terminalTabs[p?.id || ''] === 'shell' ? 'shell' : agentSession?.open && (!terminalSession?.terminalOpen || terminalTabs[p?.id || ''] !== 'publish') ? 'agent' : 'publish';
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
+          {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell'} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>PowerShell</button>}
+          {bridge.startShell && !isSSH(p.dir) && <button className="terminal-tab" title="在当前项目目录打开 PowerShell" disabled={!p.dir || (!!shellSession && !shellSession.done)} onClick={async () => { const r = await bridge.startShell!(p.id); if (!r.ok || !r.runId) { notify(r.error || '启动 Shell 失败', 'err'); return; } setShellSessions(s => ({ ...s, [p.id]: { runId: r.runId!, open: true, done: false } })); setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); }}>＋ Shell</button>}
           {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
@@ -961,7 +971,7 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} notify={notify} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
           const result = await bridge.getWorkspace();
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
@@ -1019,7 +1029,7 @@ export default function App() {
             <h2>项目设置 <span>v{p?.guideVersion}</span></h2>
             <p>{p?.guidance}</p>
             <div className="guide-settings-summary">
-              {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? setBrowserOpen(true) : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
+              {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? void browseProject() : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
               {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
               {p?.contextRules && <button className="btn sm" onClick={() => setRulesOpen(true)}>守则</button>}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
@@ -1186,6 +1196,10 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
+                      {i.status === 'pending_verification' && <label className="field">验证版本
+                        <input key={i.id + ':' + i.version + ':' + (i.verificationVersion || '')} defaultValue={i.verificationVersion || ''} maxLength={100} placeholder="填写版本号，如 2.12.6" onBlur={e => { const value = e.target.value.trim(); if (value !== (i.verificationVersion || '')) void act({ op: 'verificationVersion', id: i.id, version: i.version, value }, true); }} />
+                        {i.verificationVersion && <span>在版本：{i.verificationVersion} 及以上验证</span>}
+                      </label>}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
@@ -1278,7 +1292,9 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {p && ((agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
+      {p && (shellSession || (agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
+        {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={done => setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false, done } }))} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
+        {shellSession && !shellSession.open && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>打开 PowerShell</button>}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
             onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
@@ -1298,8 +1314,8 @@ export default function App() {
           <div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setReleaseItem(null)}>取消</button><button className="btn primary" disabled={busy} onClick={async () => { if (await act({ op: 'executionRelease', id: releaseItem.id, run: releaseItem.aiExecution?.runId, note: '用户手动释放中断任务' })) { setReleaseItem(null); notify('任务已释放，可重新领取'); } }}>确认释放</button></div>
         </div></div>}
       {aiOpen && p && <AIRequirements key={p.id} project={p} onClose={() => setAiOpen(false)} insert={async (items) => { const r = await act({op: 'aiItems', items: items.map((i) => ({...i, criteria: i.criteria.join('\n')}))}); if (r) { setTab('feature'); notify('AI 需求已加入待执行'); } return !!r; }} />}
-      {directoryPicker && <div className="overlay" role="dialog" aria-modal="true" aria-label="选择项目目录"><div className="dialog"><h3>选择项目目录</h3><p>绑定本地文件夹，或连接远程服务器选择目录。</p><div className="settings-actions"><button className="btn" onClick={async () => { const r = await bridge.pickDir?.(); if (r?.ok && r.dir && await act({ op: 'projectDir', dir: r.dir }, true)) { setDirectoryPicker(false); setBrowserOpen(true); } }}>本地文件夹</button><button className="btn primary" onClick={() => { setDirectoryPicker(false); setSSHPicker(true); }}>远程服务器</button><button className="btn" onClick={() => setDirectoryPicker(false)}>取消</button></div></div></div>}
-      {sshPicker && <SSHDirectory initial={p?.dir} onClose={() => setSSHPicker(false)} onSelect={async dir => { if (await act({ op: 'projectDir', dir }, true)) { setSSHPicker(false); setBrowserOpen(true); } else { throw Error('项目目录未保存，请查看主界面提示'); } }} />}
+      {directoryPicker && <div className="overlay" role="dialog" aria-modal="true" aria-label="选择项目目录"><div className="dialog"><h3>选择项目目录</h3><p>绑定本地文件夹，或连接远程服务器选择目录。</p><div className="settings-actions"><button className="btn" onClick={async () => { const r = await bridge.pickDir?.(); if (r?.ok && r.dir && await act({ op: 'projectDir', dir: r.dir }, true)) { setDirectoryPicker(false); if (bridge.openProjectBrowser && p) await bridge.openProjectBrowser(p.id); else setBrowserOpen(true); } }}>本地文件夹</button><button className="btn primary" onClick={() => { setDirectoryPicker(false); setSSHPicker(true); }}>远程服务器</button><button className="btn" onClick={() => setDirectoryPicker(false)}>取消</button></div></div></div>}
+      {sshPicker && <SSHDirectory initial={p?.dir} onClose={() => setSSHPicker(false)} onSelect={async dir => { if (await act({ op: 'projectDir', dir }, true)) { setSSHPicker(false); if (bridge.openProjectBrowser && p) await bridge.openProjectBrowser(p.id); else setBrowserOpen(true); } else { throw Error('项目目录未保存，请查看主界面提示'); } }} />}
       {projectManagerOpen && <ProjectManager data={data} busy={busy} act={act} onClose={() => setProjectManagerOpen(false)} />}
       {completeConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认任务已完成" onClick={e => { if (!busy && !completing && e.target === e.currentTarget) setCompleteConfirm(null); }}>
         <div className="dialog"><div className="dialog-head"><div><h3>确认任务已完成</h3><p>确认以下 {completeConfirm.items.length} 条需求已经完成，再提交到待验证{assignEnabled ? (completeConfirm.bulk ? '，或合并 Prompt 统一指派 Agent 执行。' : '，或在下方指派 Agent 执行。') : '。'}</p></div><button className="icon-btn" disabled={busy || completing} aria-label="关闭确认框" onClick={() => setCompleteConfirm(null)}><X /></button></div>
@@ -1478,7 +1494,7 @@ export default function App() {
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 clearTimeout(autoRef.current);
-                const r = await act({ op: 'item', ...form, id: editing?.id, clearDraft: !editing });
+                const r = await act({ op: 'item', ...itemAction(form), id: editing?.id, clearDraft: !editing });
                 if (r) {
                   setModal(''); setTab('feature');
                   const pr = r.projects.find((x) => x.id === p?.id)!;
@@ -1516,7 +1532,7 @@ export default function App() {
                     placeholder={form.type === 'bug' ? '复现步骤、实际表现与预期行为' : '描述要实现的行为、约束或目标指标'} />
                 </label>
                 <div className="advanced-row">
-                  <button type="button" className="btn secondary advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><ChevronDown size={16} />{advanced ? '收起更多设置' : '展开更多设置 · 图片、标题、验收与交付'}</button>
+                  <button type="button" className="btn secondary advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><ChevronDown size={16} />{advanced ? '收起更多设置' : '展开更多设置 · 图片、标题与验收'}</button>
                   {bodyOverflows && <button type="button" className="btn secondary body-expand-toggle" aria-label="放大编辑需求说明" title="需求说明较长，打开更大的输入框编辑" onClick={() => setBodyExpanded(true)}><Maximize2 size={16} />放大编辑</button>}
                 </div>
                 {advanced && <div className="requirement-advanced">
@@ -1527,10 +1543,6 @@ export default function App() {
                 <label className="field">标题（选填）<input value={form.title} onChange={(e) => change({ ...form, title: e.target.value })} /></label>
                 <label className="field">验收条件（选填）· 每行一项
                   <textarea rows={2} value={form.criteria} onChange={(e) => change({ ...form, criteria: e.target.value })} />
-                </label>
-                <label className="field">交付引导
-                  <textarea required rows={2} value={form.deliveryGuidance || ''} onChange={(e) => change({ ...form, deliveryGuidance: e.target.value })}
-                    placeholder="填写这条需求完成后希望 AI 交付的内容" />
                 </label>
                 </div>}
                 <div className="editor-footer">
@@ -1608,7 +1620,7 @@ export default function App() {
                           {serverAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name} · {agent.host}:{agent.port}{agent.status?.state === 'connected' ? '（已连接）' : ''}</option>)}
                         </select>
                       </label>
-                      {!serverAgents.length && <p className="settings-hint">还没有服务端配置；先在「设置 → Server Agent」新增或通过 SSH 自动安装。</p>}
+                      {!serverAgents.length && <p className="settings-hint">还没有服务端配置；先在「插件 / MOD / AGENT → Server Agent」新增或通过 SSH 自动安装。</p>}
                       {(guideSyncServer || p?.serverAgent) && (() => {
                         const agent = serverAgents.find(a => a.id === (guideSyncServer || p?.serverAgent?.id));
                         const syncState = agent?.status?.state || 'disconnected';
