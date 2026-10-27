@@ -15,6 +15,9 @@ func TestRequestAIOpenAIAndAnthropic(t *testing.T) {
 	for _, format := range []string{"openai", "anthropic"} {
 		t.Run(format, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.UserAgent() != "ReqFlow/dev" || r.Header.Get("x-opencode-session") != "" {
+					t.Error("client identification or provider scoping differs")
+				}
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
@@ -59,6 +62,9 @@ func TestRequestAIOpenAIAndAnthropic(t *testing.T) {
 func TestAISettingsConnectionTestUsesDraftAndChecksReply(t *testing.T) {
 	reply := "OK"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.UserAgent() != "ReqFlow/9.8.7" {
+			t.Error("connection test must identify the running app version")
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
@@ -70,7 +76,7 @@ func TestAISettingsConnectionTestUsesDraftAndChecksReply(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
 	}))
 	defer server.Close()
-	b := &Backend{}
+	b := &Backend{Version: "9.8.7"}
 	settings := map[string]any{"provider": "test", "url": server.URL, "apiKey": "test", "model": "draft-model", "format": "openai"}
 	result, handled, err := b.InvokeAI("ai:settings:test", []any{settings})
 	if err != nil || !handled || coreMap(result)["ok"] != true {

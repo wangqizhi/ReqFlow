@@ -23,6 +23,7 @@ type Backend struct {
 	Workspace                                              *WorkspaceService
 	Native                                                 func(string, []any) (any, error)
 	mu                                                     sync.Mutex
+	aiSessions                                             map[string]string
 	desktopLogMu                                           sync.Mutex
 	desktopLogPending                                      []any
 	desktopPublishMu                                       sync.Mutex

@@ -3,6 +3,7 @@ package backendgo
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,90 @@ type AIRequestEvent struct {
 }
 
 func RequestAI(s AISettings, system, content string, trace func(AIRequestEvent)) (text string, err error) {
+	return requestAI(s, system, content, trace, aiRequestContext{})
+}
+
+type aiRequestContext struct {
+	sessionID string
+	version   string
+}
+
+func openCodeGoURL(u *url.URL) bool {
+	return strings.EqualFold(u.Hostname(), "opencode.ai") &&
+		(strings.HasPrefix(u.Path, "/inference/go/") || strings.HasPrefix(u.Path, "/zen/go/"))
+}
+
+func newAISessionID() (string, error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	return "reqflow-" + hex.EncodeToString(nonce[:]), nil
+}
+
+// Keep routing stable for each provider/project/task in this desktop instance.
+// Only random IDs leave the process; scope and workspace paths are never sent.
+func (b *Backend) requestAI(s AISettings, system, content, scope string, trace func(AIRequestEvent)) (string, error) {
+	requestContext, err := b.aiContextFor(s, scope)
+	if err != nil {
+		return "", err
+	}
+	return requestAI(s, system, content, trace, requestContext)
+}
+
+func (b *Backend) aiContextFor(s AISettings, scope string) (aiRequestContext, error) {
+	requestContext := aiRequestContext{version: b.Version}
+	if u, err := url.Parse(s.URL); s.Kind != "cli" && err == nil && openCodeGoURL(u) {
+		key := sha256.Sum256([]byte(s.ID + "\x00" + s.URL + "\x00" + s.Model + "\x00" + scope))
+		mapKey := hex.EncodeToString(key[:])
+		b.mu.Lock()
+		if b.aiSessions == nil {
+			b.aiSessions = map[string]string{}
+		}
+		sessionID := b.aiSessions[mapKey]
+		if sessionID == "" {
+			var err error
+			sessionID, err = newAISessionID()
+			if err != nil {
+				b.mu.Unlock()
+				return requestContext, errors.New("无法创建 AI 会话标识，请重试")
+			}
+			b.aiSessions[mapKey] = sessionID
+		}
+		b.mu.Unlock()
+		requestContext.sessionID = sessionID
+	}
+	return requestContext, nil
+}
+
+func setAIRequestHeaders(request *http.Request, s AISettings, requestContext aiRequestContext) error {
+	version := requestContext.version
+	if version == "" {
+		version = "dev"
+	}
+	request.Header.Set("User-Agent", "ReqFlow/"+version)
+	if openCodeGoURL(request.URL) {
+		sessionID := requestContext.sessionID
+		if sessionID == "" {
+			var err error
+			sessionID, err = newAISessionID()
+			if err != nil {
+				return errors.New("无法创建 AI 会话标识，请重试")
+			}
+		}
+		request.Header.Set("x-opencode-session", sessionID)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if s.Format == "anthropic" {
+		request.Header.Set("x-api-key", s.APIKey)
+		request.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		request.Header.Set("Authorization", "Bearer "+s.APIKey)
+	}
+	return nil
+}
+
+func requestAI(s AISettings, system, content string, trace func(AIRequestEvent), requestContext aiRequestContext) (text string, err error) {
 	if s.Kind == "cli" {
 		// Log the effective Codex effort, including the lowest-level fallback.
 		if s.CLI == "codex" {
@@ -90,12 +175,8 @@ func RequestAI(s AISettings, system, content string, trace func(AIRequestEvent))
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	if anthropic {
-		request.Header.Set("x-api-key", s.APIKey)
-		request.Header.Set("anthropic-version", "2023-06-01")
-	} else {
-		request.Header.Set("Authorization", "Bearer "+s.APIKey)
+	if err := setAIRequestHeaders(request, s, requestContext); err != nil {
+		return "", err
 	}
 	client := DesktopHTTPClient(60 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("AI 调用不允许重定向") }
@@ -332,7 +413,7 @@ func (b *Backend) optimizeAICommit(args []any) (any, error) {
 		context["stagedDiff"], context["draft"] = diff, strings.TrimSpace(aiReqIDPattern.ReplaceAllString(draft, ""))
 	}
 	payload, _ := json.Marshal(context)
-	text, err := RequestAI(s, system, string(payload), b.aiTrace(s))
+	text, err := b.requestAI(s, system, string(payload), "commit:"+id, b.aiTrace(s))
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +489,7 @@ func (b *Backend) generateAIRequirements(args []any) (any, error) {
 		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]any{"mode": mode, "instruction": instruction, "discussion": discussion, "project": aiSubset(p, "name", "description", "guidance"), "recentRequirements": recent, "gitLog": gitLog, "files": files, "contextNote": contextNote})
-	text, err := RequestAI(s, aiRequirementSystem, string(payload), b.aiTrace(s))
+	text, err := b.requestAI(s, aiRequirementSystem, string(payload), "requirements:"+id+":"+mode, b.aiTrace(s))
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +547,7 @@ func (b *Backend) optimizeGuidance(args []any) (any, error) {
 		return nil, err
 	}
 	payload, _ := json.Marshal(context)
-	result, err := RequestAI(s, aiGuidanceSystem, string(payload), b.aiTrace(s))
+	result, err := b.requestAI(s, aiGuidanceSystem, string(payload), "guidance:"+id+":"+kind, b.aiTrace(s))
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +572,7 @@ func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 		if err != nil {
 			return nil, true, err
 		}
-		response, err := RequestAI(s, "请只回复 OK。", "测试连接，请回复 OK。", nil)
+		response, err := b.requestAI(s, "请只回复 OK。", "测试连接，请回复 OK。", "settings-test", nil)
 		if err != nil {
 			return nil, true, err
 		}
