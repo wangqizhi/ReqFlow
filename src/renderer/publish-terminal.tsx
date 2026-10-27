@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { bridge, type TerminalSession, type TerminalPeer } from './api';
 import { agentLogOnly, agentName } from './assignment';
-import { Check, Maximize2, RefreshCw, X } from './icons';
+import { Check, Minus, Maximize2, RefreshCw, X } from './icons';
 
 const settingKey = 'reqflow-lab-terminal';
 const settingEvent = 'reqflow-terminal-changed';
@@ -242,7 +242,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
       <span className="terminal-status" role="status">{detachError || readError || (session.idle ? '就绪 · 等待发布' : session.running ? '运行中 · ' + (session.step || '准备发布…') : session.result?.ok ? '发布完成' : '发布失败')}</span>
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
-      <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><X size={16} /></button></header>{tabs}
+      <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><Minus size={16} /></button></header>{tabs}
     <div className="publish-terminal-body">
       <div className="publish-terminal-content" ref={container} />
       <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
@@ -306,18 +306,24 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     let disposed = false, finishedSession = false, offset = 0, timer: ReturnType<typeof setTimeout>;
     let inputQueue = Promise.resolve();
     let reportedNeedsInput: boolean | undefined, reportedDone: boolean | undefined;
-    const terminal = new Terminal({ disableStdin: logOnly, cursorBlink: !logOnly, scrollback: 20000, fontSize: 13, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
+    const terminal = new Terminal({ disableStdin: logOnly, cursorBlink: !logOnly, scrollback: 20000, fontSize: 13, screenReaderMode: false, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
     // REQ-256：选中即复制
     const selectionSub = copySelectionOnSelect(terminal);
     // A native scrollbar remains visible, including when xterm auto-hides its own.
     const scrollbar = historyScroll.current!, spacer = historySize.current!;
+    let syncingTop = -1;
     const syncScroll = () => {
       const buffer = terminal.buffer.active;
-      spacer.style.height = `${scrollbar.clientHeight + buffer.baseY * 16}px`;
-      scrollbar.scrollTop = buffer.viewportY * 16;
+      const range = Math.max(1, scrollbar.clientHeight);
+      spacer.style.height = `${scrollbar.clientHeight + buffer.baseY * range / Math.max(1, terminal.rows)}px`;
+      const top = buffer.viewportY * range / Math.max(1, terminal.rows);
+      if (Math.abs(scrollbar.scrollTop - top) > 1) { syncingTop = top; scrollbar.scrollTop = top; }
     };
-    const scrollHistory = () => terminal.scrollToLine(Math.round(scrollbar.scrollTop / 16));
+    const scrollHistory = () => {
+      if (Math.abs(scrollbar.scrollTop - syncingTop) <= 1) { syncingTop = -1; return; }
+      terminal.scrollToLine(Math.round(scrollbar.scrollTop * Math.max(1, terminal.rows) / Math.max(1, scrollbar.clientHeight)));
+    };
     scrollbar.addEventListener('scroll', scrollHistory);
     const scrollSub = terminal.onScroll(syncScroll);
     const writeSub = terminal.onWriteParsed(syncScroll);
@@ -351,7 +357,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); selectionSub.dispose(); terminal.dispose(); };
   }, [runId]);
-  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><X size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content agent-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
+  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><Minus size={16} /></button></header>{tabs}<div className="publish-terminal-body"><div className="publish-terminal-content agent-terminal-content" ref={container} /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
 }
 
 // 指派终端的独立窗口（REQ-212）：与主窗口共享同一个后端会话，关闭窗口不结束会话。

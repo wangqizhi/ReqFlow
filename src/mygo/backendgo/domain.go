@@ -1161,33 +1161,8 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		p["guideHistory"] = append([]any{map[string]any{"version": p["guideVersion"], "text": p["guidance"], "deliveryGuidance": p["deliveryGuidance"], "aiValidation": p["aiValidation"], "time": now}}, coreList(p["guideHistory"])...)
 		p["guidance"] = text
-		scheduled := map[string]bool{}
-		for _, v := range items {
-			i := coreMap(v)
-			if coreIn(coreString(i["status"]), "ready", "in_progress") && (i["deliveryGuidance"] == nil || i["deliveryGuidance"] == p["deliveryGuidance"] || (!coreTruthy(p["aiValidation"]) && p["deliveryGuidance"] == DefaultDelivery && i["deliveryGuidance"] == "说明改动、未解决的问题。")) {
-				if delivery != p["deliveryGuidance"] {
-					i["deliveryGuidance"] = delivery
-					i["version"] = coreNum(i["version"]) + 1
-				}
-			}
-			if !coreTruthy(i["archived"]) && i["status"] == "in_progress" {
-				scheduled[coreString(i["id"])] = true
-				i["status"] = "ready"
-				i["version"] = coreNum(i["version"]) + 1
-				coreHistory(i, map[string]any{"event": "引导词变化，退回需求池", "time": now})
-			}
-		}
 		p["deliveryGuidance"] = delivery
 		p["guideVersion"] = coreNum(p["guideVersion"]) + 1
-		for _, v := range batches {
-			b := coreMap(v)
-			for _, iv := range coreList(b["items"]) {
-				if b["status"] != "cancelled" && scheduled[coreString(coreMap(iv)["id"])] {
-					b["status"] = "cancelled"
-					break
-				}
-			}
-		}
 		return nil
 	case "publishScript":
 		if a["script"] == nil {

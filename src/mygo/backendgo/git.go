@@ -339,6 +339,50 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 	}
 	git := func(values ...string) (string, error) { return desktopGitRun(ctx, values, root) }
 	switch channel {
+	case "git:diff":
+		names, err := git("-c", "core.quotepath=false", "diff", "--name-only", "--no-renames", "HEAD")
+		if err != nil {
+			return nil, err
+		}
+		untracked, _ := git("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+		base := "HEAD"
+		if strings.TrimSpace(names+untracked) == "" {
+			base = "HEAD^"
+			names, err = git("-c", "core.quotepath=false", "diff", "--name-only", "--no-renames", base, "HEAD")
+			if err != nil {
+				return map[string]any{"ok": true, "files": []any{}}, nil
+			}
+		}
+		files := []any{}
+		seen := map[string]bool{}
+		for _, name := range strings.Split(names+"\n"+untracked, "\n") {
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			if len(files) >= 300 {
+				break
+			}
+			before, _ := git("show", base+":"+name)
+			after := ""
+			full := filepath.Join(root, filepath.FromSlash(name))
+			rel, e := filepath.Rel(root, full)
+			if e != nil || strings.HasPrefix(rel, "..") {
+				continue
+			}
+			if info, e := os.Lstat(full); e == nil && info.Mode().IsRegular() && info.Size() <= 1024*1024 {
+				data, e := os.ReadFile(full)
+				if e == nil {
+					after = string(data)
+				}
+			}
+			if strings.ContainsRune(before+after, 0) {
+				before = "[二进制文件]"
+				after = "[二进制文件]"
+			}
+			files = append(files, map[string]any{"path": name, "before": before, "after": after})
+		}
+		return map[string]any{"ok": true, "files": files}, nil
 	case "git:milestones":
 		// Read-only history feed for the dashboard milestone view. Limited and
 		// newest-first; the UI groups commits into milestones.

@@ -165,6 +165,7 @@ export interface ReqFlowBridge {
   openCodexDeepLink?(url: string): Promise<{ ok: boolean; error?: string }>;
   // Git 支持：仅当主进程检测到本机 git 时可用（gitAvailable 返回 available=false 时界面不显示 Git 入口）
   gitAvailable?(): Promise<{ ok: boolean; available: boolean }>;
+  gitDiff?(root: string): Promise<{ ok: boolean; error?: string; files?: { path: string; before: string; after: string }[] }>;
   gitStatus?(root: string): Promise<({ ok: true } & GitStatusInfo) | { ok: false; error: string }>;
   /** 里程碑视图：读取项目目录最近的 Git 提交历史（只读）。仅桌面版提供。 */
   gitMilestones?(root: string, limit?: number): Promise<({ ok: true } & GitMilestoneInfo) | { ok: false; error: string }>;

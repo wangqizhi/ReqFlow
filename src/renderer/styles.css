@@ -1276,3 +1276,19 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .verification-version { margin: 8px 0; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--ink-2); font-size: 12.5px; }
 
 .browser-window-message { position: fixed; z-index: 100; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); color: var(--ink); padding: 10px 16px; border: 1px solid var(--line); border-radius: 8px; }
+
+.pending-count { background: #dc2626; color: white; border-radius: 10px; padding: 1px 6px; margin-left: 5px; }
+.file-diff-dialog { width: min(1300px, 96vw); max-width: 96vw; height: 85vh; display: flex; flex-direction: column; }
+.file-diff-layout { display: flex; gap: 16px; flex: 1; min-height: 0; }
+.file-diff-layout nav { width: 240px; overflow: auto; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.file-diff-layout nav button { text-align: left; overflow: hidden; text-overflow: ellipsis; display: block; }
+.file-diff-panes { display: flex; flex: 1; min-width: 0; gap: 12px; }
+.file-diff-panes section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-diff-panes strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-diff-panes pre { flex: 1; overflow: auto; background: var(--bg); font: 12px/20px Consolas, monospace; }
+.file-diff-panes pre > div { min-width: max-content; min-height: 20px; }
+.diff-line-number { display: inline-block; width: 45px; color: var(--muted); user-select: none; }
+.diff-added { background: #16733b22; }
+.diff-removed { background: #dc262622; }
+.agent-terminal-content { position: relative; min-width: 0; min-height: 0; }
+.agent-history-scroll { position: relative; z-index: 2; touch-action: none; }

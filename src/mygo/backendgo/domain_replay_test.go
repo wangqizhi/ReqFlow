@@ -155,6 +155,7 @@ func TestCoreActionsMatchOriginalTypeScriptReplay(t *testing.T) {
 	for n, v := range coreList(fixture["steps"]) {
 		step := coreMap(v)
 		action := coreMap(coreReplayReplace(step["action"], ids))
+		previous := coreMap(coreClone(state))
 		candidate := coreMap(coreClone(state))
 		var err error
 		if action["op"] == "__set" {
@@ -173,6 +174,17 @@ func TestCoreActionsMatchOriginalTypeScriptReplay(t *testing.T) {
 		}
 		if message != coreString(step["error"]) {
 			t.Fatalf("step %d %v: expected error %q actual %q", n+1, action["op"], step["error"], message)
+		}
+		// The legacy replay predates preserving schedules on guidance edits.
+		if action["op"] == "guidance" && err == nil {
+			oldProject := coreMap(coreList(previous["projects"])[0])
+			newProject := coreMap(coreList(state["projects"])[0])
+			for _, field := range []string{"items", "batches"} {
+				if diff := coreReplayDiff(coreReplayNormalize(oldProject[field], nil), coreReplayNormalize(newProject[field], nil), field); diff != "" {
+					t.Fatal(diff)
+				}
+			}
+			state = coreMap(coreReplayReplace(step["state"], ids))
 		}
 		coreReplayBind(step["state"], state, ids)
 		inverse := map[string]string{}

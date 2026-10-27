@@ -361,18 +361,18 @@
     const elapsedStart = document.querySelector('.terminal-elapsed').textContent;
     await new Promise(resolve => setTimeout(resolve, 1100));
     checks.terminalRunning = { ok: !!publishTabPanel().querySelector('.terminal-spinner') && publishTabPanel().querySelector('.publish-terminal').getAttribute('aria-busy') === 'true' && document.querySelector('.terminal-elapsed').textContent !== elapsedStart };
-    // REQ-258：收起发布终端后回退到仍打开的 PowerShell；重新打开发布页签后收起 PowerShell，让发布面板成为唯一终端
+    // REQ-266: a single minimize action collapses every terminal tab.
     await click(publishTabPanel().querySelector('[aria-label="收起终端"]'));
-    checks.terminalCollapseFallback = { ok: !publishTabPanel() && !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.publish-terminal-reopen') };
+    checks.terminalCollapseFallback = { ok: !document.querySelector('.terminal-tab-panel') && !!document.querySelector('.terminal-collapsed-bar') };
+    await click(document.querySelector('.publish-terminal-reopen'));
     await waitFor(() => !!publishTabButton());
     await click(publishTabButton());
     await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
-    await click(document.querySelector('[aria-label="收起 PowerShell 终端"]'));
     const dockHeight = document.querySelector('.main').getBoundingClientRect().height;
     await click(publishTabPanel().querySelector('[aria-label="在独立窗口打开终端"]'));
     await waitFor(() => !publishTabPanel());
     const detached = await window.reqflow.getPublishTerminal(terminalRunId);
-    checks.terminalDetached = { ok: detached.ok && detached.detached && document.querySelector('.main').getBoundingClientRect().height > dockHeight + 100 && document.querySelectorAll('.publish-terminal-reopen').length === 1 };
+    checks.terminalDetached = { ok: detached.ok && detached.detached && !publishTabPanel() && !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') };
     await window.reqflow.closePublishTerminal(terminalRunId);
     await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     checks.terminalReattached = { ok: !button('终端') && !!document.querySelector('.terminal-elapsed') };
@@ -430,9 +430,11 @@
       await terminalSetting(true);
       await switchProject('发布终端UI检查');
       if (document.querySelector('.publish-terminal-reopen')) await click(document.querySelector('.publish-terminal-reopen'));
+      await waitFor(() => !!publishTabButton());
+      await click(publishTabButton());
       await waitFor(() => terminalText().includes('stream-last'));
       await waitFor(() => !veilVisible());
-      if (document.querySelector('.publish-terminal [role="status"]').textContent !== '发布完成') throw Error('Terminal lost completed result');
+      if (publishTabPanel().querySelector('[role="status"]').textContent !== '发布完成') throw Error('Terminal lost completed result');
     };
     window.__reqflowHideTerminal = async () => {
       await terminalSetting(false);

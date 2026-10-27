@@ -1,3 +1,4 @@
+import { FileDiff } from './file-diff';
 // ReqFlow 主界面 —— 移植自线上 app/page.tsx 的完整工作台逻辑，
 // 交互与状态流与线上一致；新增「帮助 / CLI 参考」入口。
 
@@ -645,6 +646,9 @@ export default function App() {
   // REQ-205：指派的交互终端会话同样视为执行中；插件领取后由 aiExecution 记录呈现
   const agentSession = agentSessions[p?.id || ''];
   const executing = (i: Item) => itemExecuting(i, agentSession);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [executionView, setExecutionView] = useState<'executing' | 'pending'>('executing');
+  const globalPending = (data?.projects || []).flatMap(project => project.items.filter(i => !i.archived && i.status === 'pending_verification').map(item => ({ project, item })));
   const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => itemExecuting(i, agentSessions[project.id])).map(item => ({ project, item })));
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
@@ -1000,6 +1004,12 @@ export default function App() {
     setTerminalTabs(t => ({ ...t, [p.id]: 'agent' }));
     setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: true } } : s);
   }
+  function minimizeTerminals() {
+    if (!p) return;
+    setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: false } } : s);
+    setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: false } } : s);
+    setTerminalOpen(p.id, false);
+  }
   const terminalPanelOpen = !!shellSession?.open || (!!agentSession?.open && !agentTerminalDetached) || (terminalEnabled && !terminalDetached && !!terminalSession?.terminalRunId && !!terminalSession.terminalOpen);
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
           {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell' && shellSession.open} onClick={() => void openShell()}>PowerShell{shellSession.done ? ' · 已退出' : ''}</button>}
@@ -1093,7 +1103,7 @@ export default function App() {
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="execution-list">
+        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="segmented" aria-label="执行状态"><button aria-pressed={executionView === 'executing'} onClick={() => setExecutionView('executing')}>执行中 · {globalExecuting.length}</button><button aria-pressed={executionView === 'pending'} onClick={() => setExecutionView('pending')}>待验证 {globalPending.length > 0 && <span className="pending-count">{globalPending.length}</span>}</button></div><div className="execution-list">{executionView === 'pending' ? <>{!globalPending.length && <div className="empty">暂无待验证需求</div>}{globalPending.map(({ project, item }) => <article className="req-card" key={item.id}><div className="card-body"><div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('pending_verification'); }}>{project.name}</button><code>{item.number}</code><span className="status pending_verification">待验证</span></div><p className="body-copy">{item.title || item.body}</p></div></article>)}</> : <>
           {globalExecuting.some(({ item }) => !!activeAIExecution(item)) && <div className="settings-actions"><label className="check-label"><input type="checkbox" checked={globalExecuting.filter(({ item }) => !!activeAIExecution(item)).every(({ project, item }) => globalSelected.includes(project.id + ':' + item.id))} onChange={e => setGlobalSelected(e.target.checked ? globalExecuting.filter(({ item }) => !!activeAIExecution(item)).map(({ project, item }) => project.id + ':' + item.id) : [])} />全选可释放任务</label><button className="btn" disabled={busy || !globalSelected.length} onClick={() => setBulkConfirm('global')}>批量释放 · 已选 {globalSelected.length} 条</button></div>}
           {!globalExecuting.length && <div className="empty">暂无执行中的任务</div>}
           {globalExecuting.map(({ project, item: i }) => {
@@ -1109,7 +1119,7 @@ export default function App() {
               <div className="card-actions"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>进入项目</button></div>
             </div></article>;
           })}
-        </div></div> : mode === 'CONTENT' ? <ContentWorkspace projects={data.projects} prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
+        </>}</div></div> : mode === 'CONTENT' ? <ContentWorkspace projects={data.projects} prompts={data.contextPrompts || []} busy={busy} apply={act} notify={notify} /> : <>
         <section className="title-row">
           <div>
             <div className="eyebrow">PROJECT WORKSPACE</div>
@@ -1369,7 +1379,7 @@ export default function App() {
             <div className="workspace-toolbar" aria-label="需求操作与筛选">
               {!viewingHistory && <div className="workspace-filters">
                 <div className="segmented" role="group" aria-label="按需求类型筛选">{['all', 'feature', 'improvement', 'bug'].map(type => <button key={type} className={typeFilter === type ? 'on' : ''} aria-pressed={typeFilter === type} onClick={() => { setTypeFilter(type); setArchiveDate(''); }}>{type === 'all' ? '全部' : labels[type]}</button>)}</div>
-                <div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
+                {tab === 'pending_verification' && <button className="btn" disabled={!p?.dir} onClick={() => setDiffOpen(true)}>文件对比</button>}<div className="search"><Search size={15} /><input aria-label="搜索需求" value={query} onChange={e => { setQuery(e.target.value); setArchiveDate(''); }} placeholder="搜索需求" /></div>
               </div>}
               <div className="workspace-actions">
                 {tab === 'feature' && <><label className="check-label"><input type="checkbox"
@@ -1409,15 +1419,15 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {p && (shellSession || (agentSession && !agentTerminalDetached) || publishTabVisible) && <>
-        {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={done => setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false, done } }))} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
+      {mode !== 'EXECUTING' && p && (shellSession || (agentSession && !agentTerminalDetached) || publishTabVisible) && <>
+        {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={minimizeTerminals} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
-            onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
+            onClose={minimizeTerminals}
             onState={state => setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], needsInput: state.needsInput, done: state.done } } : s)} />
         </div>}
         {publishTabVisible && terminalSession?.terminalRunId && terminalSession.terminalOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="发布" style={{ display: terminalSession.terminalOpen && activeTerminalTab === 'publish' ? undefined : 'none' }}>
-          <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />
+          <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={minimizeTerminals} />
         </div>}
         {/* REQ-243/258：所有终端收起时只保留底部一行信息栏；PowerShell 与发布终端合并为一个「终端」按钮，默认展开 PowerShell */}
         {!terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端">
@@ -1787,7 +1797,7 @@ export default function App() {
                       const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
                       if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, contextRulesLimit: rulesLimit }, true)) return;
                       setModal('');
-                      if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，所有排期需求已退回需求池，请重新排期'); }
+                      if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，仅影响下次执行，本轮继续使用原引导词'); }
                       else notify('设置已保存');
                     }}>
                     保存设置
@@ -1927,6 +1937,7 @@ export default function App() {
         </div>
       )}
 
+      {diffOpen && p?.dir && <FileDiff root={p.dir} close={() => setDiffOpen(false)} />}
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
       {browserOpen && p && (
         <ProjectBrowser

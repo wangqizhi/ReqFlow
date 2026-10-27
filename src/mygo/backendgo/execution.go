@@ -84,7 +84,7 @@ func guardAIExecution(p, a map[string]any) error {
 			}
 		}
 	}
-	if coreIn(op, "deleteProject", "guidance", "projectDir", "projectDescription") {
+	if coreIn(op, "deleteProject", "projectDir", "projectDescription") {
 		for _, v := range coreList(p["items"]) {
 			ids = append(ids, coreMap(v)["id"])
 		}

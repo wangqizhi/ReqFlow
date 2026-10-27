@@ -183,8 +183,8 @@ func TestCoreAssignmentAndAccumulatedBatches(t *testing.T) {
 		t.Fatal("cancelled item while another batch runs")
 	}
 	coreTestApply(t, s, map[string]any{"op": "guidance", "project": p["id"], "text": "新引导", "deliveryGuidance": "自定义交付"})
-	if i["status"] != "ready" || second["status"] != "cancelled" || coreNum(i["version"]) != 3 {
-		t.Fatal("guidance invalidation mismatch")
+	if i["status"] != "in_progress" || second["status"] != "submitted" || coreNum(i["version"]) != 1 {
+		t.Fatal("guidance must preserve the running schedule")
 	}
 }
 func TestCoreValidationAndSettings(t *testing.T) {

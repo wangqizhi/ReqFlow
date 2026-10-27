@@ -405,7 +405,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                   document.querySelectorAll('.sidebar-fixture').forEach(el=>el.remove());
                   if(SURFACE==='terminal') {
                     await window.__reqflowShowTerminal();await pause();
-                    const dock=document.querySelector('.publish-terminal'),rect=dock.getBoundingClientRect();
+                    const dock=[...document.querySelectorAll('.publish-terminal')].find(el=>el.getBoundingClientRect().height>0),rect=dock.getBoundingClientRect();
                     const main=document.querySelector('.main').getBoundingClientRect();
                     return {ok:Math.abs(rect.bottom-innerHeight)<1&&main.bottom<=rect.top+1&&rect.height>=160&&!!dock.querySelector('.xterm')&&dock.scrollWidth===dock.clientWidth,height:innerHeight};
                   }
@@ -472,7 +472,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 						case <-ctx.Done():
 						}
 						child.SetSize(1000, 400)
-						detached, err = child.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+5000;while(!document.querySelector('.xterm')?.textContent.includes('stream-last')){if(Date.now()>end)throw Error('Detached terminal output timeout');await new Promise(r=>setTimeout(r,30));}const dock=document.querySelector('.publish-terminal'),rect=dock.getBoundingClientRect();return {ok:!document.querySelector('.side')&&!document.querySelector('.terminal-spinner')&&!!document.querySelector('.terminal-elapsed')&&dock.querySelector('[role="status"]').textContent==='发布完成'&&Math.abs(rect.height-innerHeight)<1&&Math.abs(rect.width-innerWidth)<1};})()`)
+						detached, err = child.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+5000;while(!document.querySelector('.xterm')?.textContent.includes('stream-last')){if(Date.now()>end)throw Error('Detached terminal output timeout');await new Promise(r=>setTimeout(r,30));}const dock=[...document.querySelectorAll('.publish-terminal')].find(el=>el.getBoundingClientRect().height>0),rect=dock.getBoundingClientRect();return {ok:!document.querySelector('.side')&&!document.querySelector('.terminal-spinner')&&!!document.querySelector('.terminal-elapsed')&&dock.querySelector('[role="status"]').textContent==='发布完成'&&Math.abs(rect.height-innerHeight)<1&&Math.abs(rect.width-innerWidth)<1};})()`)
 						if err != nil {
 							detached = map[string]any{"ok": false, "error": err.Error()}
 						} else if report, ok := detached.(map[string]any); ok {

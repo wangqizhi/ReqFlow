@@ -1,0 +1,12 @@
+import { useEffect, useRef, useState } from 'react';
+import { bridge } from './api';
+import { X } from './icons';
+type File = { path: string; before: string; after: string };
+export function FileDiff({ root, close }: { root: string; close(): void }) {
+  const [files, setFiles] = useState<File[]>([]), [selected, select] = useState(0), [error, setError] = useState(''), [loading, setLoading] = useState(true);
+  const left = useRef<HTMLPreElement>(null), right = useRef<HTMLPreElement>(null);
+  useEffect(() => { let active = true; void (async () => { try { const r = await bridge.gitDiff?.(root); if (!r?.ok) throw Error(r?.error || '当前环境不支持文件对比'); if (active) setFiles(r.files || []); } catch (e: any) { if (active) setError(e.message); } finally { if (active) setLoading(false); } })(); return () => { active = false; }; }, [root]);
+  const file = files[selected];
+  const before = file?.before.split('\n') || [], after = file?.after.split('\n') || [];
+  return <div className="overlay" onKeyDown={e => { if (e.key === 'Escape') close(); }} onClick={e => { if (e.target === e.currentTarget) close(); }}><div className="dialog file-diff-dialog" role="dialog" aria-modal="true" aria-label="文件对比"><div className="dialog-head"><h3>文件对比</h3><button autoFocus className="icon-btn" aria-label="关闭文件对比" onClick={close}><X /></button></div><p className="muted">对比当前工作区与 Git HEAD；工作区无变动时展示最近一次提交。左右同步滚动，着色行表示对应行内容不同。</p>{loading ? <p role="status">正在读取文件…</p> : error ? <p role="alert">{error}</p> : !files.length ? <p>没有可对比的文件</p> : <div className="file-diff-layout"><nav aria-label="变动文件">{files.map((f, n) => <button className={'btn' + (n === selected ? ' primary' : '')} title={f.path} key={f.path} onClick={() => { select(n); if (left.current) left.current.scrollTop = left.current.scrollLeft = 0; if (right.current) right.current.scrollTop = right.current.scrollLeft = 0; }}>{f.path}</button>)}</nav><div className="file-diff-panes">{[before, after].map((lines, n) => <section key={n}><strong>{n ? '变更后' : '变更前'} · {file.path}</strong><pre ref={n ? right : left} tabIndex={0} onScroll={e => { const peer = n ? left.current : right.current; if (peer) { peer.scrollTop = e.currentTarget.scrollTop; peer.scrollLeft = e.currentTarget.scrollLeft; } }}>{Array.from({ length: Math.max(before.length, after.length) }, (_, i) => <div className={before[i] !== after[i] ? n ? 'diff-added' : 'diff-removed' : ''} key={i}><span className="diff-line-number">{i + 1}</span>{lines[i] || ' '}</div>)}</pre></section>)}</div></div>}</div></div>;
+}

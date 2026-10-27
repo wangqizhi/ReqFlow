@@ -464,7 +464,7 @@ async function applyOperation(s: Workspace, a: any) {
   if (!['executionClaim', 'executionRelease', 'gitCommitted', 'requirementDraft', 'completionNote', 'verificationVersion'].includes(a.op)) {
     const ids = [...(a.ids || []), ...(a.id ? [a.id] : [])];
     if (['cancel', 'submit'].includes(a.op)) ids.push(...(p.batches.find(b => b.id === a.batch)?.items.map(i => i.id) || []));
-    if (['deleteProject', 'guidance', 'projectDir', 'projectDescription'].includes(a.op)) ids.push(...p.items.map(i => i.id));
+    if (['deleteProject', 'projectDir', 'projectDescription'].includes(a.op)) ids.push(...p.items.map(i => i.id));
     for (const id of ids) {
       const item = p.items.find(i => i.id === id);
       const execution = item && activeAIExecution(item);
@@ -606,29 +606,8 @@ async function applyOperation(s: Workspace, a: any) {
       time: now
     });
     p.guidance = text;
-    // 继续使用原默认交付引导的未完成需求随项目设置更新；独立定制的文案保留。
-    for (const item of p.items) {
-      if (['ready', 'in_progress'].includes(item.status) &&
-          (item.deliveryGuidance === undefined || item.deliveryGuidance === p.deliveryGuidance ||
-            (!p.aiValidation && p.deliveryGuidance === DEFAULT_DELIVERY && item.deliveryGuidance === '说明改动、未解决的问题。'))) {
-        if (delivery !== p.deliveryGuidance) {
-          item.deliveryGuidance = delivery;
-          item.version++;
-        }
-      }
-    }
     p.deliveryGuidance = delivery;
-    // Legacy aiValidation values remain readable; the retired flag no longer changes behavior.
     p.guideVersion++;
-    const scheduledIds = new Set(p.items.filter(item => !item.archived && item.status === 'in_progress').map(item => item.id));
-    for (const item of p.items) {
-      if (!item.archived && item.status === 'in_progress') {
-        item.status = 'ready';
-        item.version++;
-        item.history.unshift({ event: '引导词变化，退回需求池', time: now });
-      }
-    }
-    for (const batch of p.batches) if (batch.status !== 'cancelled' && batch.items.some(item => scheduledIds.has(item.id))) batch.status = 'cancelled';
     return;
   }
 

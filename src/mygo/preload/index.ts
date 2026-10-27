@@ -88,6 +88,7 @@ const channels = {
   openCodexDeepLink: 'shell:openCodexDeepLink',
   gitAvailable: 'git:available',
   gitStatus: 'git:status',
+  gitDiff: 'git:diff',
   gitMilestones: 'git:milestones',
   gitInit: 'git:init',
   gitStage: 'git:stage',
