@@ -536,6 +536,17 @@ func BuildPrompt(p map[string]any, items []any) string {
 		}
 		tail = append(tail, "交付引导（"+label+"）：\n"+g.text)
 	}
+	releaseContext := []string{guidance}
+	for _, v := range items {
+		i := coreMap(v)
+		releaseContext = append(releaseContext, coreString(i["title"]), coreString(i["body"]), coreString(RequirementSettings(p, i)["deliveryGuidance"]))
+		for _, criterion := range coreList(i["criteria"]) {
+			releaseContext = append(releaseContext, coreString(criterion))
+		}
+	}
+	if regexp.MustCompile(`(?i)发布|安装包|打包|升版|版本(?:说明|更新|交付)|\b(?:release|changelog)\b`).MatchString(strings.Join(releaseContext, "\n")) {
+		tail = append(tail, ReleaseNotesGuidance)
+	}
 	rules := ""
 	if text := coreString(p["contextRules"]); text != "" {
 		rules = "\n\n## 项目守则（自动生成）\n" + text
@@ -546,6 +557,14 @@ func BuildPrompt(p map[string]any, items []any) string {
 	}
 	return r
 }
+
+const ReleaseNotesGuidance = "## 版本交付与发布说明\n" +
+	"本轮涉及版本交付或编写发布说明时，必须遵守以下要求：\n" +
+	"- 使用本轮确定的交付版本；发布重试沿用该版本，不因重试再次升版。按仓库约定编写发布说明；无约定时使用 docs/release-<版本>.md。\n" +
+	"- 发布说明必须包含一级标题「# 项目名 <版本>」，以及独立的二级标题「## 主要更新」；在该章节下用「- 」列表列出本版本实际完成的功能、改进或修复，不能把更新列表直接放在一级标题下。\n" +
+	"- 「## 主要更新」只写实际产品变化，不写交付引导、开发指令、测试命令或安装步骤；不得只有安装说明，不得将未完成事项写成已完成，不得保留待填写占位内容。\n" +
+	"- 交付前核对发布说明中的版本与交付版本一致，并运行仓库已有的发布说明校验或发布预检；ReqFlow 仓库运行 node scripts/release-notes-check.mjs，并调用 releaseNotes 校验当前版本文件。校验失败先修正，再报告结果。"
+
 func ProjectConcurrencyToken(p map[string]any) string {
 	var clean func(any) any
 	clean = func(v any) any {

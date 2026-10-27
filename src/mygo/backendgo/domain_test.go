@@ -270,6 +270,36 @@ func TestCorePromptMatchesTypeScript(t *testing.T) {
 	}
 }
 
+func TestPromptReleaseNotesGuidance(t *testing.T) {
+	for _, source := range []string{"guidance", "deliveryGuidance", "title", "body", "criteria"} {
+		t.Run(source, func(t *testing.T) {
+			p := MakeProject("测试项目", "项目背景")
+			i := map[string]any{"number": "REQ-001", "title": "普通需求", "body": "修改页面", "type": "feature", "priority": "P1", "criteria": []any{}}
+			if source == "guidance" || source == "deliveryGuidance" {
+				p[source] = "完成后生成安装包"
+			} else if source == "criteria" {
+				i[source] = []any{"发布说明符合规范"}
+			} else {
+				i[source] = "更新 changelog"
+			}
+			prompt := BuildPrompt(p, []any{i, coreClone(i)})
+			if strings.Count(prompt, "## 版本交付与发布说明") != 1 || !strings.HasSuffix(prompt, ReleaseNotesGuidance) {
+				t.Fatal("release guidance missing or duplicated")
+			}
+			for _, required := range []string{"## 主要更新", "docs/release-<版本>.md", "node scripts/release-notes-check.mjs", "不因重试再次升版"} {
+				if !strings.Contains(prompt, required) {
+					t.Fatalf("missing %s", required)
+				}
+			}
+		})
+	}
+	p := MakeProject("普通项目", "背景")
+	i := map[string]any{"number": "REQ-001", "body": "修改页面", "type": "feature", "priority": "P1", "criteria": []any{}}
+	if strings.Contains(BuildPrompt(p, []any{i}), "## 版本交付与发布说明") {
+		t.Fatal("unrelated task received release guidance")
+	}
+}
+
 func TestDeferPoolItem(t *testing.T) {
 	s, p := coreTestState()
 	coreTestApply(t, s, map[string]any{"op": "item", "project": p["id"], "body": "延迟需求"})
