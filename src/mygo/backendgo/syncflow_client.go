@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -360,4 +361,23 @@ func (s *WorkspaceService) remoteMutate(action map[string]any, expected *int64) 
 		return nil, true, fmt.Errorf("操作已在远程完成，但本地备份更新失败；请刷新，勿重复提交：%w", err)
 	}
 	return cached, true, nil
+}
+
+// REQ-242：关联 Server Agent 时 complete 在远程执行，旧版服务端会丢弃 verificationVersion；
+// 完成后若远程记录缺少版本，再以 verificationVersion 操作（2.13.0 起服务端支持）补写一次。失败不影响完成结果。
+func (s *WorkspaceService) remoteVerificationVersion(action, result map[string]any) map[string]any {
+	version := strings.TrimSpace(aiString(action["verificationVersion"]))
+	if aiString(action["op"]) != "complete" || version == "" || result == nil {
+		return result
+	}
+	p := coreFind(coreList(coreMap(result["state"])["projects"]), aiString(action["project"]))
+	i := coreFind(coreList(p["items"]), aiString(action["id"]))
+	if i == nil || i["status"] != "pending_verification" || aiString(i["verificationVersion"]) != "" {
+		return result
+	}
+	next, handled, err := s.remoteMutate(map[string]any{"op": "verificationVersion", "project": action["project"], "id": action["id"], "version": i["version"], "value": version}, nil)
+	if !handled || err != nil || next == nil {
+		return result
+	}
+	return next
 }

@@ -85,6 +85,9 @@ func (s *WorkspaceService) Get() (map[string]any, error) {
 }
 func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64) (map[string]any, error) {
 	if result, handled, err := s.remoteMutate(action, expectedVersion); handled {
+		if err == nil {
+			result = s.remoteVerificationVersion(action, result)
+		}
 		return result, err
 	}
 	scopes := MutationProjectIDs(action)

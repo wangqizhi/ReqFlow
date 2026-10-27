@@ -948,8 +948,20 @@ export default function App() {
 
   const shellSession = shellSessions[p?.id || ''];
   const activeTerminalTab = shellSession?.open && terminalTabs[p?.id || ''] === 'shell' ? 'shell' : agentSession?.open && (!terminalSession?.terminalOpen || terminalTabs[p?.id || ''] !== 'publish') ? 'agent' : 'publish';
+  // REQ-243：展开 PowerShell；会话已退出时在项目目录重新启动一个
+  async function openShell() {
+    if (!p || !shellSession) return;
+    const projectId = p.id;
+    if (shellSession.done && bridge.startShell) {
+      const r = await bridge.startShell(projectId);
+      if (!r.ok || !r.runId) { notify(r.error || '启动 PowerShell 失败', 'err'); return; }
+      setShellSessions(s => ({ ...s, [projectId]: { runId: r.runId!, open: true, done: false } }));
+    } else setShellSessions(s => ({ ...s, [projectId]: { ...s[projectId], open: true } }));
+    setTerminalTabs(t => ({ ...t, [projectId]: 'shell' }));
+  }
+  const terminalPanelOpen = !!shellSession?.open || (!!agentSession?.open && !agentTerminalDetached) || (terminalEnabled && !terminalDetached && !!terminalSession?.terminalRunId && !!terminalSession.terminalOpen);
   const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
-          {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell'} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'shell' })); setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>PowerShell</button>}
+          {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell' && shellSession.open} onClick={() => void openShell()}>PowerShell{shellSession.done ? ' · 已退出' : ''}</button>}
           {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {terminalEnabled && terminalRunId && !terminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
         </div>) : null;
@@ -1355,12 +1367,6 @@ export default function App() {
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
       {p && (shellSession || (agentSession && !agentTerminalDetached) || (terminalEnabled && terminalRunId && !terminalDetached)) && <>
         {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={done => setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false, done } }))} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
-        {shellSession && !shellSession.open && <button className="publish-terminal-reopen" onClick={async () => {
-          // 已退出的 Shell 重新在项目目录启动一个新会话
-          if (shellSession.done && bridge.startShell) { const r = await bridge.startShell(p.id); if (!r.ok || !r.runId) { notify(r.error || '启动 PowerShell 失败', 'err'); return; } setShellSessions(s => ({ ...s, [p.id]: { runId: r.runId!, open: true, done: false } })); }
-          else setShellSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } }));
-          setTerminalTabs(t => ({ ...t, [p.id]: 'shell' }));
-        }}>打开 PowerShell</button>}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
           <AgentTerminal tabs={terminalTabBar} key={agentSession.runId} runId={agentSession.runId} project={p.name} agent={agentName(agentSession.agent)} onDetach={bridge.openAgentTerminal ? detachAgentTerminal : undefined}
             onClose={() => setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: false } }))}
@@ -1369,8 +1375,12 @@ export default function App() {
         {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && terminalSession.terminalOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="发布" style={{ display: terminalSession.terminalOpen && activeTerminalTab === 'publish' ? undefined : 'none' }}>
           <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={() => setTerminalOpen(p.id, false)} />
         </div>}
-        {agentSession && !agentSession.open && !agentTerminalDetached && !terminalSession?.terminalOpen && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>打开 {agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
-        {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && !terminalSession.terminalOpen && !agentSession && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>打开终端{publishing ? ' · 执行中' : ''}</button>}
+        {/* REQ-243：所有终端收起时只保留底部一行信息栏，PowerShell / Agent / 发布入口并排，点击展开对应会话 */}
+        {!terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端">
+          {shellSession && <button className="publish-terminal-reopen" onClick={() => void openShell()}>PowerShell{shellSession.done ? ' · 已退出' : ''}</button>}
+          {agentSession && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+          {terminalEnabled && !terminalDetached && terminalSession?.terminalRunId && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布终端{publishing ? ' · 执行中' : ''}</button>}
+        </div>}
       </>}
       </div>
 

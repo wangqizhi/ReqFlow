@@ -343,3 +343,33 @@ func TestUninstalledAgentDetachesOnlyMatchingProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// REQ-242：关联远程后完成需求，可验证版本必须写入远程记录并回到本地备份。
+func TestRemoteCompleteKeepsVerificationVersion(t *testing.T) {
+	baseURL, token, stop := startTestSyncServer(t)
+	defer stop()
+	b, projectID, serverID := syncFixtureBackend(t, baseURL, token)
+	if _, err := b.Workspace.Mutate(map[string]any{"op": "projectSync", "project": projectID, "server": serverID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	result, err := b.Workspace.Mutate(map[string]any{"op": "item", "project": projectID, "body": "remote verify version"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := coreMap(coreList(coreFind(coreList(coreMap(result["state"])["projects"]), projectID)["items"])[0])["id"]
+	if _, err = b.Workspace.Mutate(map[string]any{"op": "generate", "project": projectID, "ids": []any{itemID}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	result, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": projectID, "id": itemID, "verificationVersion": "2.13.3"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := coreFind(coreList(coreFind(coreList(coreMap(result["state"])["projects"]), projectID)["items"]), aiString(itemID))
+	if i["status"] != "pending_verification" || i["verificationVersion"] != "2.13.3" {
+		t.Fatal(i)
+	}
+	_, raw := syncTestRequest(t, http.MethodGet, baseURL+"/api/sync/project?id="+projectID, token, nil)
+	if !strings.Contains(string(raw), `"verificationVersion":"2.13.3"`) {
+		t.Fatalf("remote record lost verification version: %s", raw)
+	}
+}

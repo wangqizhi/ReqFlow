@@ -192,6 +192,12 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     }
   }
 
+  // REQ-251：新增、安装、卸载与配置改为弹出浮层，不在页面底部追加区域
+  const closeEditor = () => { setEditor(null); setEditingId(null); setTokenVisible(false); };
+  const closeInstall = () => setInstall({ open: false, ssh: '', port: 8787, dataDir: '' });
+  const closeUninstall = () => setUninstall({ open: false, ssh: '', serverId: '', cleanData: false, previewDataDir: '' });
+  const backdrop = (close: () => void) => (e: { target: EventTarget; currentTarget: EventTarget }) => { if (e.target === e.currentTarget && !busy) close(); };
+
   return <section className="server-agent-page" aria-label="Server Agent">
     <p className="settings-hint">关联项目后，flow 操作直接由远程服务器执行，配置、需求和步骤保存在服务端 SQLite 中。本地保存已确认结果的备份；中断远程同步后可继续使用本地备份。</p>
     {!bridge.getServerAgents && <p className="settings-message" role="alert">Server Agent 仅桌面版可用。</p>}
@@ -236,22 +242,21 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
     </div>
 
     <div className="settings-actions">
-      <button className="btn" disabled={!!busy || !bridge.saveServerAgent} onClick={() => { setAddOpen(!addOpen); setInstall({ ...install, open: false }); }}><Plus size={16} />新增服务端</button>
-      <button className="btn" disabled={!!busy || !bridge.uninstallServerAgent} onClick={() => setUninstall({ ...uninstall, open: !uninstall.open })}><Trash size={16} />远程卸载…</button>
+      <button className="btn" disabled={!!busy || !bridge.saveServerAgent} onClick={() => { setAddOpen(true); setInstall({ ...install, open: false }); }}><Plus size={16} />新增服务端</button>
+      <button className="btn" disabled={!!busy || !bridge.uninstallServerAgent} onClick={() => setUninstall({ ...uninstall, open: true })}><Trash size={16} />远程卸载…</button>
     </div>
 
-    {addOpen && <div className="agent-install-box">
-      <h3>选择服务端</h3>
-      <p className="settings-hint">选择已配置的服务端进行编辑，或新增已有服务端；也可以通过免密 SSH 安装新服务端。</p>
+    {addOpen && <div className="overlay" style={{ zIndex: 80 }} role="dialog" aria-modal="true" aria-label="新增服务端" onClick={backdrop(() => setAddOpen(false))}><div className="dialog agent-dialog">
+      <div className="dialog-head"><div><h3>新增服务端</h3><p>选择已配置的服务端进行编辑，或新增已有服务端；也可以通过免密 SSH 安装新服务端。</p></div><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setAddOpen(false)}><X size={18} /></button></div>
       <div className="settings-actions">
         {servers.map(server => <button type="button" className="btn" key={server.id} onClick={() => { setEditor({ ...server, token: '' }); setEditingId(server.id); setTokenVisible(false); setAddOpen(false); }}>{server.name}</button>)}
         <button type="button" className="btn" onClick={() => { setEditor({ ...emptyEditor }); setEditingId(null); setTokenVisible(false); setAddOpen(false); }}>配置已有服务端</button>
         <button type="button" className="btn primary" disabled={!bridge.installServerAgent} onClick={() => { setAddOpen(false); setInstall({ ...install, open: true, ssh: 'root@' }); }}><Plus size={16} />SSH 自动安装</button>
       </div>
-    </div>}
+    </div></div>}
 
-    {install.open && <div className="agent-install-box">
-      <h3>自动安装到免密登录的服务器</h3>
+    {install.open && <div className="overlay" style={{ zIndex: 80 }} role="dialog" aria-modal="true" aria-label="SSH 自动安装" onClick={backdrop(closeInstall)}><div className="dialog agent-dialog">
+      <div className="dialog-head"><h3>自动安装到免密登录的服务器</h3><button type="button" className="icon-btn" disabled={!!busy} aria-label="关闭" onClick={closeInstall}><X size={18} /></button></div>
       <p className="settings-hint">通过已配置免密（公钥）登录的 SSH 上传 reqflow-server 到 Linux 服务器，自动生成配置与访问令牌，并以 crontab / systemd 方式常驻。要求本机可直连该服务器。</p>
       <div className="settings-columns"><label className="field">SSH 用户名<input value={install.ssh.includes('@') ? install.ssh.split('@')[0] : 'root'} onChange={e => setInstall({ ...install, ssh: e.target.value + '@' + (install.ssh.includes('@') ? install.ssh.split('@').slice(1).join('@') : install.ssh) })} placeholder="root" /></label><label className="field">服务器地址及 SSH 端口<input value={install.ssh.includes('@') ? install.ssh.split('@').slice(1).join('@') : install.ssh} onChange={e => setInstall({ ...install, ssh: (install.ssh.includes('@') ? install.ssh.split('@')[0] : 'root') + '@' + e.target.value })} placeholder="nas.lan 或 192.168.1.10:22" /></label></div>
       <div className="settings-columns">
@@ -259,27 +264,27 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
         <label className="field">数据目录（可选）<input value={install.dataDir} onChange={e => setInstall({ ...install, dataDir: e.target.value })} placeholder="默认 ~/reqflow-server/data" /></label>
       </div>
       <div className="settings-actions">
+        <button className="btn" disabled={!!busy} onClick={closeInstall}>取消</button>
         <button className="btn primary" disabled={!!busy || !install.ssh.trim() || install.ssh.endsWith('@')} onClick={() => void runInstall()}>{busy === 'install' ? '安装中…' : '安装到服务器'}</button>
-        <button className="btn" onClick={() => setInstall({ open: false, ssh: '', port: 8787, dataDir: '' })}>收起</button>
       </div>
-    </div>}
+    </div></div>}
 
-    {uninstall.open && <div className="agent-install-box">
-      <h3>卸载远程 Server Agent</h3>
+    {uninstall.open && <div className="overlay" style={{ zIndex: 80 }} role="dialog" aria-modal="true" aria-label="远程卸载" onClick={backdrop(closeUninstall)}><div className="dialog agent-dialog">
+      <div className="dialog-head"><h3>卸载远程 Server Agent</h3><button type="button" className="icon-btn" disabled={!!busy} aria-label="关闭" onClick={closeUninstall}><X size={18} /></button></div>
       <p className="settings-hint">停止服务并移除开机自启、服务端程序和部署配置。默认保留数据。卸载成功后会移除对应配置并让关联项目使用本地备份。</p>
       <label className="field">对应服务端<select value={uninstall.serverId} disabled={!!busy} onChange={e => { const selected = servers.find(s => s.id === e.target.value); setUninstall({ ...uninstall, serverId: e.target.value, ssh: selected ? (selected.ssh || 'root@' + selected.host) : '', previewDataDir: '' }); }}><option value="">手动输入 SSH 目标</option>{servers.map(s => <option key={s.id} value={s.id}>{s.name} · {s.host}</option>)}</select></label>
       <label className="field">SSH 目标<input disabled={!!busy} value={uninstall.ssh} onChange={e => setUninstall({ ...uninstall, ssh: e.target.value, previewDataDir: '' })} placeholder="user@nas.lan 或 user@192.168.1.10:22" /></label>
-      <label><input type="checkbox" disabled={!!busy} checked={uninstall.cleanData} onChange={e => setUninstall({ ...uninstall, cleanData: e.target.checked, previewDataDir: '' })} />同时清理远程数据目录（不可恢复）</label>
-      {uninstall.previewDataDir && <p role="alert">{uninstall.cleanData ? '将永久清理' : '将保留'}数据目录：<code>{uninstall.previewDataDir}</code></p>}
+      <label className="agent-check"><input type="checkbox" disabled={!!busy} checked={uninstall.cleanData} onChange={e => setUninstall({ ...uninstall, cleanData: e.target.checked, previewDataDir: '' })} />同时清理远程数据目录（不可恢复）</label>
+      {uninstall.previewDataDir && <p className="agent-preview" role="alert">{uninstall.cleanData ? '将永久清理' : '将保留'}数据目录：<code>{uninstall.previewDataDir}</code></p>}
       <div className="settings-actions">
-        <button type="button" className="btn" disabled={!!busy || !uninstall.ssh.trim()} onClick={() => void runUninstall(true)}>检查卸载范围</button>
-        {uninstall.previewDataDir && <button type="button" className="btn primary" disabled={!!busy} onClick={() => void runUninstall(false)}>{busy === 'uninstall' ? '处理中…' : uninstall.cleanData ? '确认卸载并清理数据' : '确认卸载并保留数据'}</button>}
-        <button type="button" className="btn" disabled={!!busy} onClick={() => setUninstall({ open: false, ssh: '', serverId: '', cleanData: false, previewDataDir: '' })}>取消</button>
+        <button type="button" className="btn" disabled={!!busy} onClick={closeUninstall}>取消</button>
+        <button type="button" className={'btn' + (uninstall.previewDataDir ? '' : ' primary')} disabled={!!busy || !uninstall.ssh.trim()} onClick={() => void runUninstall(true)}>检查卸载范围</button>
+        {uninstall.previewDataDir && <button type="button" className={'btn primary' + (uninstall.cleanData ? ' danger' : '')} disabled={!!busy} onClick={() => void runUninstall(false)}>{busy === 'uninstall' ? '处理中…' : uninstall.cleanData ? '确认卸载并清理数据' : '确认卸载并保留数据'}</button>}
       </div>
-    </div>}
+    </div></div>}
 
-    {editor && <form className="agent-editor" onSubmit={e => { e.preventDefault(); void saveEditor(); }}>
-      <h3>{editingId ? '编辑服务端' : '新增服务端'}</h3>
+    {editor && <div className="overlay" style={{ zIndex: 80 }} role="dialog" aria-modal="true" aria-label={editingId ? '编辑服务端' : '配置服务端'} onClick={backdrop(closeEditor)}><form className="dialog agent-dialog" onSubmit={e => { e.preventDefault(); void saveEditor(); }}>
+      <div className="dialog-head"><h3>{editingId ? '编辑服务端' : '配置已有服务端'}</h3><button type="button" className="icon-btn" disabled={!!busy} aria-label="关闭" onClick={closeEditor}><X size={18} /></button></div>
       <label className="field">名称<input value={editor.name || ''} autoFocus onChange={e => setEditor({ ...editor, name: e.target.value })} placeholder="如 家庭 NAS" /></label>
       <div className="settings-columns">
         <label className="field">地址<input value={editor.host || ''} onChange={e => setEditor({ ...editor, host: e.target.value })} placeholder="nas.lan 或 192.168.1.10" /></label>
@@ -301,10 +306,10 @@ export function ServerAgentPage({ notify }: { notify(text: string, kind?: 'ok' |
         <label className="switch"><input id={'agent-auto-' + (editingId || 'new')} type="checkbox" checked={!!editor.autoConnect} onChange={e => setEditor({ ...editor, autoConnect: e.target.checked })} /><span className="slider" /><span className="switch-state">{editor.autoConnect ? '已开启' : '已关闭'}</span></label></div>
       <div className="settings-actions">
         <button type="button" className="btn" disabled={!!busy || !bridge.testServerAgent || !editor.host?.trim()} onClick={() => void testEditor()}>测试连接</button>
-        <button type="button" className="btn" onClick={() => { setEditor(null); setEditingId(null); }}>取消</button>
+        <button type="button" className="btn" disabled={!!busy} onClick={closeEditor}>取消</button>
         <button className="btn primary" disabled={!!busy}>{busy === 'save' ? '保存中…' : '保存服务端'}</button>
       </div>
-    </form>}
+    </form></div>}
 
     {update && <div className="overlay" role="dialog" aria-modal="true" aria-label="更新 Server" style={{ zIndex: 80 }}>
       <div className="dialog">
