@@ -12,7 +12,7 @@ import { publishProject } from './publish';
 import { AgentTerminal, PublishTerminal, useTerminalSetting, agentNeedsInput } from './publish-terminal';
 import {
   Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
-  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Trash, X, ImageIcon, Settings, EyeOff, BarChart
+  Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Terminal, Trash, X, ImageIcon, Settings, EyeOff, BarChart
 } from './icons';
 import { HelpOverlay } from './help';
 import { UpdateButton } from './update';
@@ -233,6 +233,14 @@ export default function App() {
   }
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
   const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
+  // REQ-277：目录浮层与项目设置目录旁的图标按钮共用打开终端 CLI 逻辑，防重复提交
+  const openTerminalCli = async () => {
+    if (!p || terminalOpening || !bridge.openProjectTerminal) return;
+    setTerminalOpening(true);
+    try { const r = await bridge.openProjectTerminal(p.id); if (!r.ok) notify(r.error || '打开终端失败', 'err'); else setDirConfirm(false); }
+    catch (e: any) { notify(e.message, 'err'); }
+    finally { setTerminalOpening(false); }
+  };
   useEffect(() => {
     if (!publishConfirm) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !publishing) setPublishConfirm(false); };
@@ -1168,6 +1176,8 @@ export default function App() {
             <p>{p?.guidance}</p>
             <div className="guide-settings-summary">
               {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? void browseProject() : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
+              {/* REQ-277：目录后提供打开终端 CLI 图标按钮，远程目录不支持本机终端 */}
+              {p?.dir && !isSSH(p.dir) && bridge.openProjectTerminal && <button type="button" className="icon-btn dir-terminal" aria-label="打开终端 CLI" title="在项目目录打开终端 CLI" disabled={terminalOpening} onClick={() => void openTerminalCli()}><Terminal size={14} /></button>}
               {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
               {p?.contextRules && <button className="btn sm" onClick={() => setRulesOpen(true)}>守则</button>}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
@@ -1540,7 +1550,7 @@ export default function App() {
             <p className="detail-body">{p.dir}</p>
             <div className="settings-actions">
               <button className="btn" onClick={() => setDirConfirm(false)}>取消</button>
-              <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={async () => { setTerminalOpening(true); try { const r = await bridge.openProjectTerminal!(p!.id); if (!r.ok) notify(r.error || '打开终端失败', 'err'); else setDirConfirm(false); } catch (e: any) { notify(e.message, 'err'); } finally { setTerminalOpening(false); } }}>打开终端 CLI</button>
+              <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={() => void openTerminalCli()}>打开终端 CLI</button>
  <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
             </div>
           </div>

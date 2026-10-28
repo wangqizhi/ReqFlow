@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { main, matchProject, completeRun } from '../scripts/reqflow.mjs';
 
 const PLUGIN_NAME = 'reqflow-agent-dsh';
-const PLUGIN_VERSION = '0.1.2';
+const PLUGIN_VERSION = '0.1.4';
 const PLUGIN_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const name = PLUGIN_NAME;
@@ -183,7 +183,8 @@ export function apply(ctx) {
       if (!Array.isArray(args.items) || args.items.length === 0) throw new Error('报告需要非空 items 数组。');
       const snapshot = active.get(exec.agent.session.id);
       if (!snapshot) throw new Error('本会话没有有效领取快照，请先调用 reqflow_read（execute=true）或 /reqflow。');
-      return completeRun(snapshot.runFile, { items: args.items }, snapshot.cwd);
+      // REQ-278：传入 DSH 会话 ID，ReqFlow 从本机压缩会话记录读取领取后的实际用量。
+      return completeRun(snapshot.runFile, { items: args.items, sessionId: exec.agent.session.id }, snapshot.cwd);
     },
     presentCall: args => ({
       card: 'generic',

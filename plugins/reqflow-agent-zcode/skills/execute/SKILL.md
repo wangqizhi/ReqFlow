@@ -42,7 +42,7 @@ read / doctor / complete 会先向 ReqFlow 查询本宿主插件版本。版本�
 {"items":[{"id":"本轮需求ID","summary":"实现内容","validation":"测试命令与结果，或未运行原因"}]}
 ```
 
-3. 运行 `node "<script>" complete --cwd "<领取时目录>" --run "<runFile>" --report "<报告绝对路径>"`。
+3. 运行 `node "<script>" complete --cwd "<领取时目录>" --run "<runFile>" --report "<报告绝对路径>" --session "${ZCODE_SESSION_ID}"`。`--session` 传当前 ZCode 会话 ID，ReqFlow 据此读取本机会话用量；变量为空时照常回写。
 4. 检查 ok、outcomes、unprocessed。脚本重新核对项目、批次、需求版本与内容，并调用官方 CLI complete。出现冲突或部分成功时停止，向用户报告具体条目，不盲重试，不手工改 workspace.json。
 5. 本插件不执行 verify / archive，不代替人工验收。最终给出实现与检查结果，列出已转待验证、未完成和回写失败条目。
 
@@ -50,4 +50,4 @@ read / doctor / complete 会先向 ReqFlow 查询本宿主插件版本。版本�
 
 ## 任务用量（可选）
 
-完成报告的每条 items 可包含 usage 数组：`[{"model":"实际模型ID","reasoningEffort":"实际思考等级","inputTokens":100,"outputTokens":20,"cachedInputTokens":50,"reasoningOutputTokens":5,"source":"provider-report"}]`。仅填写供应商/会话实际提供的数值，不估算、不将缺失填成零。缓存输入属于输入，推理输出属于输出，不额外累加。默认每条需求独立用量；批次共享会话须设置 scope 为 run 以及 sessionId，数据看板按 run/session/model 去重并标注共享，禁止给每条需求重复分摊。Codex CLI 完成命令可从继承的 CODEX_THREAD_ID 精确会话自动读取本轮增量；其他客户端或远程不可访问会话时通过报告显式提供。未取得数据则省略 usage。
+完成报告的每条 items 可包含 usage 数组：`[{"model":"实际模型ID","reasoningEffort":"实际思考等级","inputTokens":100,"outputTokens":20,"cachedInputTokens":50,"reasoningOutputTokens":5,"source":"provider-report"}]`。仅填写供应商/会话实际提供的数值，不估算、不将缺失填成零。缓存输入属于输入，推理输出属于输出，不额外累加。默认每条需求独立用量；批次共享会话须设置 scope 为 run 以及 sessionId，数据看板按 run/session/model 去重并标注共享，禁止给每条需求重复分摊。省略 usage 时，ReqFlow 按领取客户端从本机精确会话自动读取本轮增量：Codex（CODEX_THREAD_ID）、Claude Code（CLAUDE_CODE_SESSION_ID）、Pi、ZCode（ZCODE_SESSION_ID）与 DeepSeek Harness（插件传入会话 ID）；会话目录须属于项目。远程或无法访问会话时通过报告显式提供。未取得数据则省略 usage。

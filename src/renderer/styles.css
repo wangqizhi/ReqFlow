@@ -886,6 +886,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .guide-settings-summary { flex-wrap: wrap; align-items: center; }
 .guide-settings-summary > span { flex-shrink: 0; }
 .guide-settings-summary .linked-dir { margin: 0 !important; min-width: 0; max-width: 46%; flex: 0 1 auto; }
+/* REQ-277：目录后的打开终端 CLI 图标按钮，紧贴目录且保持可见焦点 */
+.guide-settings-summary .dir-terminal { width: 24px; height: 24px; margin-left: -4px; flex-shrink: 0; }
+.guide-settings-summary .dir-terminal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.guide-settings-summary .dir-terminal:disabled { opacity: .5; cursor: default; }
 /* REQ-147：简要设置标志（引导词 / 引导交付 / 历史需求总数），有配置的带勾并加深文字，未配置保持弱化 */
 .guide-flag { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; }
 .guide-flag.on { color: var(--ink-2); }

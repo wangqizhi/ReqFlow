@@ -199,7 +199,7 @@ export async function completeRun(runFile, report, cwd) {
       if (result.usage !== undefined && !w.capabilities.includes('task-token-usage-v1')) fail('ReqFlow 需升级至支持任务用量的版本，未回写');
       const note = `[ReqFlow Pi run ${run.id}]\n${result.summary}\n验证：${result.validation}`;
       // Legacy CLI has no conditional-write API. Pre/post checks narrow but cannot eliminate the race.
-      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id, ...(result.usage !== undefined ? ['--usage', JSON.stringify(result.usage)] : [])]);
+      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id, ...(result.usage !== undefined ? ['--usage', JSON.stringify(result.usage)] : report.sessionId ? ['--session', String(report.sessionId)] : [])]);
       const after = await workspace(run.config);
       const updated = after.state.projects.find(p => p.id === run.projectId)?.items.find(x => x.id === i.id);
       if (updated?.status !== 'pending_verification' || updated.version !== i.version || updated.history[0]?.note !== note)
@@ -231,7 +231,7 @@ export async function main(argv) {
   const { command, opts } = parse(argv);
   const configFile = path.resolve(opts.config || process.env.REQFLOW_PLUGIN_CONFIG || path.join(os.homedir(), '.reqflow-pi', 'config.json'));
   const cwd = opts.cwd || process.cwd();
-  if (command === 'complete') return completeRun(path.resolve(opts.run || fail('缺少 --run')), await json(opts.report || fail('缺少 --report')), cwd);
+  if (command === 'complete') return completeRun(path.resolve(opts.run || fail('缺少 --run')), { ...await json(opts.report || fail('缺少 --report')), ...(opts.session ? { sessionId: opts.session } : {}) }, cwd);
   let config;
   try { config = await json(configFile); }
   catch (e) { if (e.code !== 'ENOENT') throw e; config = {}; }

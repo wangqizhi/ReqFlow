@@ -3,14 +3,15 @@ module reqflow/mygo
 go 1.27.1
 
 require (
+	github.com/UserExistsError/conpty v0.1.4
 	github.com/egoist/mygo v0.4.8
+	github.com/klauspost/compress v1.18.0
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.42.2
 )
 
 require (
-	github.com/UserExistsError/conpty v0.1.4 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect

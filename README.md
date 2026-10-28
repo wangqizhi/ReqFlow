@@ -457,6 +457,14 @@ npm run release:github -- --help
 
 修复项目系统终端闪退：使用独立可见控制台，CLI 退出后保留终端与错误。数据看板新增 Token 消耗及模型/思考等级、项目、需求维度，按完成时间和当前项目筛选；缓存输入与推理输出是子集，不重复累加。
 
-任务用量：`complete --usage '[{"model":"实际模型ID","reasoningEffort":"high","inputTokens":100,"outputTokens":20,"source":"provider-report"}]'`；各插件完成报告 items 可携带同结构 usage 数组。远端客户端需将实际用量经报告传入（服务端也需升级）；未提供则显示未采集，不估算。Codex 未显式传入 usage 时，可从继承的 CODEX_THREAD_ID 与 CODEX_HOME 精确匹配本机原始会话、校验项目目录，再读取领取时间之后的增量；采集截至完成回写前最近已落盘事件，当前未落盘/完成回写后的消耗不包含。无法访问或不匹配时留空。其他客户端目前通过供应商实际报告上报，不自动解析终端画面。
+任务用量：`complete --usage '[{"model":"实际模型ID","reasoningEffort":"high","inputTokens":100,"outputTokens":20,"source":"provider-report"}]'`；各插件完成报告 items 可携带同结构 usage 数组。远端客户端需将实际用量经报告传入（服务端也需升级）；未提供则显示未采集，不估算。Codex 未显式传入 usage 时，可从继承的 CODEX_THREAD_ID 与 CODEX_HOME 精确匹配本机原始会话、校验项目目录，再读取领取时间之后的增量；采集截至完成回写前最近已落盘事件，当前未落盘/完成回写后的消耗不包含。无法访问或不匹配时留空。其他客户端的自动采集见 2.15.0；不解析终端画面。
 
 同一运行含多需求时，自动采集属于共享执行，按运行/会话/模型/思考等级去重取最新快照，不按需求估算分摊。可提供独立需求用量时省略 scope（默认 requirement）；共享用量设置 scope 为 run 并提供 sessionId。历史未采集记录不会伪造或补零。
+
+### 2.14.1
+
+项目设置的项目目录后新增终端图标按钮，点击直接打开终端 CLI（Windows 本机目录；远程 SSH 目录不显示）。目录浮层中的「打开终端 CLI」保持可用。
+
+### 2.15.0
+
+任务 Token 自动采集覆盖 Codex、Claude Code、Pi、ZCode 与 DeepSeek Harness，插件执行与客户端直接指派 CLI 两种方式都适用。`complete --run <运行ID>` 未传 `--usage` 时，按领取客户端读取 `--session <会话ID>` 或继承的会话变量对应的本机记录：Codex 为 `CODEX_THREAD_ID`（`~/.codex/sessions`），Claude Code 为 `CLAUDE_CODE_SESSION_ID`（`~/.claude/projects`），Pi 由插件传入会话 ID（`~/.pi/agent/sessions`），ZCode 为 `ZCODE_SESSION_ID`（`~/.zcode/cli/rollout`，目录经 `~/.zcode/cli/db` 只读核对），DeepSeek Harness 由插件传入会话 ID（`~/.dsh/sessions` 下的 zstd 压缩记录）。只统计领取时间之后的消耗，会话目录须为项目目录或其子目录；不匹配、不可读或格式不符时留空，不估算。

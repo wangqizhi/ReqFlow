@@ -71,10 +71,11 @@ export default function (pi: ExtensionAPI) {
     description: "仅在用户授权执行、实际完成并检查需求后使用。使用本会话领取快照，重新核对项目/批次/版本再回写；冲突停止，不自动验收或归档。",
     executionMode: "sequential",
     parameters: Type.Object({ items: Type.Array(Type.Object({ id: Type.String(), summary: Type.String(), validation: Type.String(), usage: Type.Optional(Type.Array(Type.Object({ model: Type.String(), reasoningEffort: Type.Optional(Type.String()), inputTokens: Type.Number(), outputTokens: Type.Number(), cachedInputTokens: Type.Optional(Type.Number()), reasoningOutputTokens: Type.Optional(Type.Number()), source: Type.Optional(Type.String()), sessionId: Type.Optional(Type.String()), scope: Type.Optional(Type.String()) }))) }), { minItems: 1 }) }),
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _update, ctx) {
       if (!active) throw new Error("本会话没有有效领取快照，请先调用 reqflow_read 或 /reqflow。");
       const { completeRun } = await import("./scripts/reqflow.mjs");
-      return output(await completeRun(active.runFile, { items: params.items }, active.cwd));
+      // REQ-278：传入当前 Pi 会话 ID，ReqFlow 从本机会话记录读取领取后的实际用量。
+      return output(await completeRun(active.runFile, { items: params.items, sessionId: ctx?.sessionManager?.getSessionId?.() }, active.cwd));
     },
   });
 }

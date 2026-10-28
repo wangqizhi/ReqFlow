@@ -475,8 +475,9 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 					project := coreFind(coreList(coreMap(current["state"])["projects"]), a["project"])
 					item := coreFind(coreList(project["items"]), a["id"])
 					execution := ActiveAIExecution(item)
-					if execution != nil && execution["runId"] == a["run"] && execution["client"] == "codex" {
-						if usage := codexTaskUsage(coreString(project["dir"]), os.Getenv("CODEX_THREAD_ID"), coreString(execution["startedAt"])); len(usage) > 0 {
+					// REQ-278：按领取客户端读取精确会话（--session 或宿主继承的会话变量）的实际增量。
+					if execution != nil && execution["runId"] == a["run"] {
+						if usage := taskUsage(coreString(execution["client"]), coreString(project["dir"]), coreString(a["session"]), coreString(execution["startedAt"])); len(usage) > 0 {
 							action["usage"] = usage
 						}
 					}
