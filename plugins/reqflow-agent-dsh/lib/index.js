@@ -171,6 +171,7 @@ export function apply(ctx) {
               id: { type: 'string', description: '本轮领取的需求 ID。' },
               summary: { type: 'string', description: '实际实现内容。' },
               validation: { type: 'string', description: '测试命令与结果，或未运行原因。' },
+                usage: { type: "array", description: "可选的实际供应商用量记录；model/inputTokens/outputTokens 及 reasoningEffort、source、scope、sessionId。不得估算。", items: { type: "object" } },
             },
           },
         },

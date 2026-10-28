@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
     name: "reqflow_complete", label: "ReqFlow 转待验证",
     description: "仅在用户授权执行、实际完成并检查需求后使用。使用本会话领取快照，重新核对项目/批次/版本再回写；冲突停止，不自动验收或归档。",
     executionMode: "sequential",
-    parameters: Type.Object({ items: Type.Array(Type.Object({ id: Type.String(), summary: Type.String(), validation: Type.String() }), { minItems: 1 }) }),
+    parameters: Type.Object({ items: Type.Array(Type.Object({ id: Type.String(), summary: Type.String(), validation: Type.String(), usage: Type.Optional(Type.Array(Type.Object({ model: Type.String(), reasoningEffort: Type.Optional(Type.String()), inputTokens: Type.Number(), outputTokens: Type.Number(), cachedInputTokens: Type.Optional(Type.Number()), reasoningOutputTokens: Type.Optional(Type.Number()), source: Type.Optional(Type.String()), sessionId: Type.Optional(Type.String()), scope: Type.Optional(Type.String()) }))) }), { minItems: 1 }) }),
     async execute(_id, params) {
       if (!active) throw new Error("本会话没有有效领取快照，请先调用 reqflow_read 或 /reqflow。");
       const { completeRun } = await import("./scripts/reqflow.mjs");

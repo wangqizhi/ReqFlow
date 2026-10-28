@@ -480,7 +480,7 @@
     checks.activityCalendar = { ok: calendarCells.length === 365 && new Set(calendarCells.map(cell => cell.dataset.date)).size === 365 && navigated && calendarCells[0].getAttribute('aria-pressed') === 'true' && calendarCells.every(cell => cell.getAttribute('aria-label').includes(`新建 ${created.get(cell.dataset.date) || 0} 条需求`)) };
     const rangeButton = [...restoredPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
     if (rangeButton) await click(rangeButton);
-    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.stats-chart-head h4').length === 1 };
+    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.stats-chart-head h4').length === 2 && restoredPanel.querySelectorAll('.token-usage-block .segmented button').length === 3 && restoredPanel.querySelector('.token-usage-block').textContent.includes('未采集不代表零消耗') };
     await click(button('返回项目'));
     await waitFor(() => !document.querySelector('.stats-panel'));
     // 独立浏览窗口由 smokeUI 在主窗口脚本结束后单独检查。

@@ -53,3 +53,7 @@ read / doctor / complete 会先向 ReqFlow 查询本宿主插件版本。版本�
 5. 本插件不执行 verify / archive，不代替人工验收。最终给出实现与检查结果，列出已转待验证、未完成和回写失败条目。
 
 旧 CLI 没有原子条件完成接口，读取到写入之间仍有并发窗口；不要让多个 Agent 同时处理同一批需求，也不要在发现用户正修改目标条目时继续回写。安装不会自动启动新聊天；在当前项目聊天中仅 @ ReqFlow Agent 即触发本技能，无需附加执行指令。
+
+## 任务用量（可选）
+
+完成报告的每条 items 可包含 usage 数组：`[{"model":"实际模型ID","reasoningEffort":"实际思考等级","inputTokens":100,"outputTokens":20,"cachedInputTokens":50,"reasoningOutputTokens":5,"source":"provider-report"}]`。仅填写供应商/会话实际提供的数值，不估算、不将缺失填成零。缓存输入属于输入，推理输出属于输出，不额外累加。默认每条需求独立用量；批次共享会话须设置 scope 为 run 以及 sessionId，数据看板按 run/session/model 去重并标注共享，禁止给每条需求重复分摊。Codex CLI 完成命令可从继承的 CODEX_THREAD_ID 精确会话自动读取本轮增量；其他客户端或远程不可访问会话时通过报告显式提供。未取得数据则省略 usage。

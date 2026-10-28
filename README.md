@@ -452,3 +452,11 @@ npm run release:github -- --help
 ### 2.13.15
 
 项目目录浮层新增「打开终端 CLI」（Windows）；项目设置「验证与发布」可选择 Codex / Claude Code / pi 与完整控制权限。版本号定位文件支持项目相对路径，读取 JSON version 或单行 VERSION，未配置仍读取根 package.json。多组件版本交付规则已加入发布功能需求模板。
+
+### 2.14.0
+
+修复项目系统终端闪退：使用独立可见控制台，CLI 退出后保留终端与错误。数据看板新增 Token 消耗及模型/思考等级、项目、需求维度，按完成时间和当前项目筛选；缓存输入与推理输出是子集，不重复累加。
+
+任务用量：`complete --usage '[{"model":"实际模型ID","reasoningEffort":"high","inputTokens":100,"outputTokens":20,"source":"provider-report"}]'`；各插件完成报告 items 可携带同结构 usage 数组。远端客户端需将实际用量经报告传入（服务端也需升级）；未提供则显示未采集，不估算。Codex 未显式传入 usage 时，可从继承的 CODEX_THREAD_ID 与 CODEX_HOME 精确匹配本机原始会话、校验项目目录，再读取领取时间之后的增量；采集截至完成回写前最近已落盘事件，当前未落盘/完成回写后的消耗不包含。无法访问或不匹配时留空。其他客户端目前通过供应商实际报告上报，不自动解析终端画面。
+
+同一运行含多需求时，自动采集属于共享执行，按运行/会话/模型/思考等级去重取最新快照，不按需求估算分摊。可提供独立需求用量时省略 scope（默认 requirement）；共享用量设置 scope 为 run 并提供 sessionId。历史未采集记录不会伪造或补零。

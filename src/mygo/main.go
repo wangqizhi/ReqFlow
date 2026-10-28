@@ -514,7 +514,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
                     if(!choice||![...document.querySelectorAll('button')].some(b=>b.textContent==='从本地创建'))throw Error('Missing project creation choices');
                     choice.click();await new Promise(r=>setTimeout(r,80));
                     const dialog=document.querySelector('.dialog'),rect=dialog.getBoundingClientRect();
-                    const action=[...dialog.querySelectorAll('button')].find(b=>b.textContent==='导入并关联');
+                    const action=[...dialog.querySelectorAll('button')].find(b=>b.textContent==='导入并创建项目');
                     action.scrollIntoView({block:'nearest'});
                     const button=action.getBoundingClientRect();
                     return {ok:rect.top>=0&&rect.bottom<=innerHeight+1&&button.top>=0&&button.bottom<=innerHeight+1&&action.disabled,height:innerHeight};

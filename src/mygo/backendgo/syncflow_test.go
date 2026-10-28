@@ -360,7 +360,7 @@ func TestRemoteCompleteKeepsVerificationVersion(t *testing.T) {
 	if _, err = b.Workspace.Mutate(map[string]any{"op": "generate", "project": projectID, "ids": []any{itemID}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	result, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": projectID, "id": itemID, "verificationVersion": "2.13.3"}, nil)
+	result, err = b.Workspace.Mutate(map[string]any{"op": "complete", "project": projectID, "id": itemID, "verificationVersion": "2.13.3", "usage": []any{map[string]any{"model": "remote-provider-model", "inputTokens": 90, "outputTokens": 10, "reasoningEffort": "high", "source": "provider-report"}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,13 @@ func TestRemoteCompleteKeepsVerificationVersion(t *testing.T) {
 	if i["status"] != "pending_verification" || i["verificationVersion"] != "2.13.3" {
 		t.Fatal(i)
 	}
+	if coreNum(coreMap(coreList(coreMap(coreList(i["history"])[0])["usage"])[0])["totalTokens"]) != 100 {
+		t.Fatal("remote usage lost", i)
+	}
 	_, raw := syncTestRequest(t, http.MethodGet, baseURL+"/api/sync/project?id="+projectID, token, nil)
+	if !strings.Contains(string(raw), `"model":"remote-provider-model"`) {
+		t.Fatal("remote provider metadata lost")
+	}
 	if !strings.Contains(string(raw), `"verificationVersion":"2.13.3"`) {
 		t.Fatalf("remote record lost verification version: %s", raw)
 	}

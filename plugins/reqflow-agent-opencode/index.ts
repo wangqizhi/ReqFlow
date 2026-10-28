@@ -26,7 +26,7 @@ const READ_DESCRIPTION = `读取 ReqFlow 中与当前项目目录匹配的 AI �
 
 const COMPLETE_DESCRIPTION = `仅在用户授权执行、实际完成并检查需求后使用。使用本会话 reqflow_read 的领取快照，重新核对项目/批次/需求版本后再回写；冲突停止，不自动验收或归档，不直接修改 workspace.json。每条 items 必须提供 id、summary、validation。${RULES}`;
 
-type Completion = { id: string; summary: string; validation: string };
+type Completion = { id: string; summary: string; validation: string; usage?: Record<string, unknown>[] };
 type Bridge = {
   main(argv: string[]): Promise<any>;
   completeRun(runFile: string, report: { items: Completion[] }, cwd: string): Promise<any>;
@@ -139,6 +139,7 @@ function serverHooks() {
                 id: { type: "string", description: "本轮领取的需求 ID。" },
                 summary: { type: "string", description: "实际实现内容。" },
                 validation: { type: "string", description: "测试命令与结果，或未运行原因。" },
+                usage: { type: "array", description: "可选的实际供应商用量记录；model/inputTokens/outputTokens 及 reasoningEffort、source、scope、sessionId。不得估算。", items: { type: "object" } },
               },
               required: ["id", "summary", "validation"],
             },
@@ -205,6 +206,7 @@ async function setup(ctx: any) {
                 id: { type: "string", description: "本轮领取的需求 ID。" },
                 summary: { type: "string", description: "实际实现内容。" },
                 validation: { type: "string", description: "测试命令与结果，或未运行原因。" },
+                usage: { type: "array", description: "可选的实际供应商用量记录；model/inputTokens/outputTokens 及 reasoningEffort、source、scope、sessionId。不得估算。", items: { type: "object" } },
               },
               required: ["id", "summary", "validation"],
               additionalProperties: false,

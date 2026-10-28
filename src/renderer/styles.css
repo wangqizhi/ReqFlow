@@ -1302,3 +1302,6 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .agent-history-scroll::-webkit-scrollbar-thumb { background: #a8a29e; border: 3px solid #292524; border-radius: 8px; }
 .agent-history-view { position: absolute; inset: 0 16px 0 0; z-index: 3; margin: 0; padding: 0 14px 10px; overflow: auto; background: #1c1917; color: #e7e5e4; font: 13px Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-history-view[hidden] { display: none; }
+
+.token-usage-scroll { overflow-x: auto; margin: 12px 0; }
+.token-usage-scroll td:first-child { min-width: 180px; overflow-wrap: anywhere; }

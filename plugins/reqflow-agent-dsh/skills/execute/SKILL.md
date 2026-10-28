@@ -61,3 +61,7 @@ description: 从 ReqFlow 读取与当前项目目录匹配的 AI 排期任务，
 `reqflow_read` 的 `execute=true` 使用 ReqFlow 原子领取，写入运行 ID、客户端与开始时间；执行中的需求不会被其他客户端领取。`reqflow_complete` 必须使用同一运行记录。任务中断不自动抢占或超时解锁；由用户在 ReqFlow 执行中页面确认释放，或使用 CLI `execution release`。释放后旧运行记录不能完成回写。
 
 DSH 插件优先使用 `dsh` 执行客户端标识领取。若运行中的 ReqFlow 尚未包含该标识（旧版本），桥接脚本会自动回退到 `pi`，运行记录和完成备注仍标明 DSH。不要在多个客户端同时处理同一批需求。
+
+## 任务用量（可选）
+
+完成报告的每条 items 可包含 usage 数组：`[{"model":"实际模型ID","reasoningEffort":"实际思考等级","inputTokens":100,"outputTokens":20,"cachedInputTokens":50,"reasoningOutputTokens":5,"source":"provider-report"}]`。仅填写供应商/会话实际提供的数值，不估算、不将缺失填成零。缓存输入属于输入，推理输出属于输出，不额外累加。默认每条需求独立用量；批次共享会话须设置 scope 为 run 以及 sessionId，数据看板按 run/session/model 去重并标注共享，禁止给每条需求重复分摊。Codex CLI 完成命令可从继承的 CODEX_THREAD_ID 精确会话自动读取本轮增量；其他客户端或远程不可访问会话时通过报告显式提供。未取得数据则省略 usage。

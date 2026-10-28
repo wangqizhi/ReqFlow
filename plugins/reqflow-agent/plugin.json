@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "reqflow-agent",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "仅 @ 即读取当前项目 ReqFlow AI 排期任务，开始实现并转入待验证。",
   "author": {
     "name": "ReqFlow"

@@ -1,3 +1,4 @@
+import { TokenUsage } from './token-usage';
 // 数据看板：从工作区数据派生需求与 AI 执行统计，全部前端计算。
 // 图表遵循 docs/ui-guidelines.md 与数据可视化规范：每图单轴、单系列单色（槽 1 蓝）、
 // hairline 实线网格、2px 线宽 + 白环端点、crosshair 悬浮提示与明细表兜底；
@@ -349,6 +350,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
       <LineChart key={`created-${range}-${projectId}`} title="新建需求" points={series.created} width={740} />
     </div>
+    <TokenUsage projects={projects} days={range} projectId={projectId} />
     <div className="stats-grid-2">
       <div className="stats-chart-block"><h4>每日 AI 执行次数</h4><LineChart key={`claims-${range}`} title="AI 执行次数" points={series.claims} width={354} height={150} /></div>
       <div className="stats-chart-block"><h4>每日 AI 执行用时</h4><LineChart key={`minutes-${range}`} title="AI 执行用时" unit=" 分" points={series.minutes} width={354} height={150} /></div>

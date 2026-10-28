@@ -226,13 +226,15 @@ export async function completeRun(runFile, report, cwd) {
       if (i.aiExecution?.runId !== run.id || i.aiExecution?.client !== run.client || i.aiExecution?.endedAt) fail('任务已释放或由另一 AI 执行，未回写');
       if (!['ready', 'in_progress'].includes(i.status) || (i.executor || 'ai') !== 'ai' || i.archived || !b || signature(p, i, b) !== snapshot.signature)
         fail('需求、批次或项目设置已变化，请重新领取并核对实现');
+      if (result.usage !== undefined && !w.capabilities.includes('task-token-usage-v1')) fail('ReqFlow 需升级至支持任务用量的版本，未回写');
       const note = `[ReqFlow OpenCode run ${run.id}]\n${result.summary}\n验证：${result.validation}`;
       // Legacy CLI has no conditional-write API. Pre/post checks narrow but cannot eliminate the race.
-      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id]);
+      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id, ...(result.usage !== undefined ? ['--usage', JSON.stringify(result.usage)] : [])]);
       const after = await workspace(run.config);
       const updated = after.state.projects.find(project => project.id === run.projectId)?.items.find(item => item.id === i.id);
       if (updated?.status !== 'pending_verification' || updated.version !== i.version || updated.history[0]?.note !== note)
         fail('写回后状态不一致，请人工核对；不要自动重试');
+      if (result.usage?.length && !updated.history[0]?.usage?.length) fail('需求已转待验证，但服务端未保存用量；请升级远端服务并人工核对，不要重试完成');
       run.completed.push({ id: i.id, note });
       await fs.writeFile(runFile, JSON.stringify(run, null, 2), { mode: 0o600 });
       outcomes.push({ id: i.id, status: 'pending_verification' });

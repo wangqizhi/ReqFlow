@@ -40,13 +40,15 @@ try {
   assert.equal(run.requirements.length, 2);
   assert.ok(!run.requirements.some(i => i.id === ready.id));
   assert.equal(run.requirements[0].requirement.body, first.body);
-  const report = { items: [{ id: first.id, summary: '已实现', validation: '测试通过' }] };
+  const report = { items: [{ id: first.id, summary: '已实现', validation: '测试通过', usage: [{ model: 'fixture-model', reasoningEffort: 'high', inputTokens: 100, outputTokens: 20, cachedInputTokens: 40, source: 'provider-report' }] }] };
   await assert.rejects(completeRun(run.runFile, { items: [{ ...report.items[0], id: ready.id }] }, child), /未领取/);
   await assert.rejects(completeRun(run.runFile, report, root), /目录/);
   const result = await completeRun(run.runFile, report, child);
   assert.equal(result.ok, true);
   const after = await callCli(config, ['workspace', 'get']);
   assert.equal(after.state.projects[0].items[0].status, 'pending_verification');
+  assert.equal(after.state.projects[0].items[0].history[0].usage[0].totalTokens, 120);
+  assert.equal(after.state.projects[0].items[0].history[0].usage[0].model, 'fixture-model');
   assert.equal(after.state.projects[0].items[1].status, 'in_progress');
   assert.equal(after.state.projects[0].items[2].status, 'ready');
   assert.equal((await completeRun(run.runFile, report, child)).outcomes[0].status, 'already_completed');
@@ -80,7 +82,7 @@ try {
   assert.equal(scheduled.requirements[0].id, assigned[0].id);
   assert.equal(scheduled.requirements[0].requirement.executor, 'ai');
   assert.equal(scheduled.requirements[0].requirement.status, 'ready');
-  assert.equal(scheduled.skipped.length, 3);
+  for (const item of assigned.slice(1)) assert.ok(scheduled.skipped.some(entry => entry.id === item.id), `missing excluded executor ${item.executor}`);
   const scheduledReport = { items: [{ id: assigned[0].id, summary: '已完成AI排期任务', validation: '测试通过' }] };
   assert.equal((await completeRun(scheduled.runFile, scheduledReport, root)).ok, true);
   const scheduledAfter = await callCli(config, ['workspace', 'get']);

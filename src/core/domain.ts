@@ -879,6 +879,22 @@ async function applyOperation(s: Workspace, a: any) {
       if (i.status !== 'ready' || i.archived || !scheduledBatch(p, i)) throw new Error('需求不在执行中或有效排期中');
       i.executionVersion = i.version;
     }
+    let usage: any[] | undefined;
+    if (a.usage !== undefined) {
+      if (!Array.isArray(a.usage) || a.usage.length > 100) throw Error('usage 须为最多100条记录的数组');
+      usage = a.usage.map((u: any) => {
+        if (!u || typeof u.model !== 'string' || !u.model.trim() || u.model.length > 200) throw Error('usage model 无效');
+        if (u.inputTokens === undefined || u.outputTokens === undefined) throw Error('usage 必须提供实际输入与输出 Token');
+        const clean: any = { model: u.model.trim(), scope: u.scope === 'run' ? 'run' : 'requirement' };
+        for (const key of ['inputTokens', 'outputTokens', 'cachedInputTokens', 'reasoningOutputTokens']) { const n = u[key] ?? 0; if (!Number.isSafeInteger(n) || n < 0) throw Error('usage Token 无效'); clean[key] = n; }
+        if (clean.cachedInputTokens > clean.inputTokens || clean.reasoningOutputTokens > clean.outputTokens) throw Error('usage 子集 Token 超过总量');
+        clean.totalTokens = clean.inputTokens + clean.outputTokens;
+        if (!Number.isSafeInteger(clean.totalTokens)) throw Error('usage Token 超出范围');
+        for (const key of ['source', 'sessionId', 'reasoningEffort']) { if (u[key] !== undefined && (typeof u[key] !== 'string' || u[key].length > 300)) throw Error('usage 元数据无效'); clean[key] = u[key] || ''; }
+        if (clean.scope === 'run' && !clean.sessionId) throw Error('共享 usage 缺少 sessionId');
+        return clean;
+      });
+    }
     finishAIExecution(i, now, 'completed');
     i.status = 'pending_verification';
     delete i.verificationVersion;
@@ -892,7 +908,7 @@ async function applyOperation(s: Workspace, a: any) {
       delete i.completionNote;
       delete i.completionNoteVersion;
     }
-    i.history.unshift({ event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}), ...(i.aiExecution ? { execution: structuredClone(i.aiExecution) } : {}) });
+    i.history.unshift({ ...(usage ? { usage } : {}), event: '实现完成', time: now, link: i.link, note: String(a.note || ''), ...(completionNote ? { summary: completionNote } : {}), ...(i.aiExecution ? { execution: structuredClone(i.aiExecution) } : {}) });
     return;
   }
   if (a.op === 'verificationVersion') {

@@ -283,7 +283,7 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 		return s.moveContexts(coreString(a["dir"]))
 
 	case "version":
-		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
+		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1", "task-token-usage-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
 	case "plugin version", "plugin bundle":
 		return pluginRelease(command, a)
 	case "execution claim":
@@ -460,6 +460,28 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 			action["version"] = n
 		}
 		if command == "complete" {
+			if coreHas(a, "usage") {
+				var usage any
+				if err := json.Unmarshal([]byte(coreString(a["usage"])), &usage); err != nil {
+					return nil, errors.New("--usage 必须是 JSON 数组")
+				}
+				if _, err := validateTokenUsage(usage); err != nil {
+					return nil, err
+				}
+				action["usage"] = usage
+			} else if coreString(a["run"]) != "" {
+				current, err := s.Get()
+				if err == nil {
+					project := coreFind(coreList(coreMap(current["state"])["projects"]), a["project"])
+					item := coreFind(coreList(project["items"]), a["id"])
+					execution := ActiveAIExecution(item)
+					if execution != nil && execution["runId"] == a["run"] && execution["client"] == "codex" {
+						if usage := codexTaskUsage(coreString(project["dir"]), os.Getenv("CODEX_THREAD_ID"), coreString(execution["startedAt"])); len(usage) > 0 {
+							action["usage"] = usage
+						}
+					}
+				}
+			}
 			action["verificationVersion"] = coreString(a["verify-version"])
 			if action["verificationVersion"] == "" {
 				action["verificationVersion"] = s.projectVersion(coreString(a["project"]))

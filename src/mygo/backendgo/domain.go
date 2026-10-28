@@ -1449,6 +1449,14 @@ func coreApplyOperation(s, a map[string]any) error {
 			}
 			i["executionVersion"] = i["version"]
 		}
+		var usage []any
+		if coreHas(a, "usage") {
+			var err error
+			usage, err = validateTokenUsage(a["usage"])
+			if err != nil {
+				return err
+			}
+		}
 		finishAIExecution(i, now, "completed")
 		i["status"] = "pending_verification"
 		delete(i, "verificationVersion")
@@ -1458,6 +1466,9 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		i["link"] = coreString(a["link"])
 		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
+		if usage != nil {
+			history["usage"] = usage
+		}
 		if coreHas(i, "aiExecution") {
 			history["execution"] = coreClone(i["aiExecution"])
 		}
