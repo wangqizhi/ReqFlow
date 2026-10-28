@@ -23,7 +23,7 @@ func (p *exitingAgentPTY) Close() error                         { p.once.Do(func
 func (p *exitingAgentPTY) Wait(context.Context) (uint32, error) { <-p.exit; return p.code, nil }
 
 func TestAgentExitReleasesAssignedClaims(t *testing.T) {
-	for _, exit := range []string{"stop", "normal", "failure"} {
+	for _, exit := range []string{"stop", "normal", "failure", "shutdown"} {
 		t.Run(exit, func(t *testing.T) {
 			b := NewBackend(t.TempDir(), t.TempDir(), "test")
 			state := coreTestGet(t, b.Workspace)
@@ -86,7 +86,13 @@ func TestAgentExitReleasesAssignedClaims(t *testing.T) {
 			}
 			claim(ids[3], "pi")
 			mutate(map[string]any{"op": "complete", "id": ids[2], "run": runID, "batch": batch["id"], "version": 1, "summary": "already done"})
-			if exit == "stop" {
+			if exit == "shutdown" {
+				b.BeginShutdown()
+				if _, err := b.desktopApply(map[string]any{"op": "executionRelease", "project": pid, "id": ids[0], "run": runID}); err == nil {
+					t.Fatal("renderer released claim during shutdown")
+				}
+				_ = pty.Close()
+			} else if exit == "stop" {
 				desktopTestCall(t, b, "agent:stop", "terminal")
 			} else {
 				_ = pty.Close()
@@ -104,6 +110,20 @@ func TestAgentExitReleasesAssignedClaims(t *testing.T) {
 				t.Fatal("terminal did not finish cleanup")
 			}
 			raw, _ := base64.StdEncoding.DecodeString(coreString(output["data"]))
+			if exit == "shutdown" {
+				if strings.Contains(string(raw), "已释放") {
+					t.Fatal(string(raw))
+				}
+				reopened := NewWorkspaceService(b.DataDir)
+				actions, err := reopened.ActiveExecutionActions()
+				if err != nil || len(actions) != 6 {
+					t.Fatal("shutdown lost claims", actions, err)
+				}
+				if _, err := reopened.Mutate(map[string]any{"op": "complete", "project": pid, "id": ids[0], "run": runID, "batch": batch["id"], "version": 1, "summary": "continued after reopen"}, nil); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			if !strings.Contains(string(raw), "已释放 2 条任务") {
 				t.Fatal(string(raw))
 			}

@@ -109,3 +109,28 @@ func TestCompletionDoesNotUseHostVersion(t *testing.T) {
 		t.Fatalf("host version leaked: %v", i)
 	}
 }
+
+func TestConfiguredProjectVersion(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "99.0.0")
+	r := coreTestGet(t, b.Workspace)
+	pid := coreMap(coreList(coreMap(r["state"])["projects"])[0])["id"]
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"version":"1.0.0"}`), 0600)
+	os.WriteFile(filepath.Join(root, "VERSION"), []byte("3.2.1\n"), 0600)
+	if _, err := b.Workspace.Mutate(map[string]any{"op": "projectDir", "project": pid, "dir": root}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Workspace.Mutate(map[string]any{"op": "projectRuntime", "project": pid, "cli": "pi", "fullAccess": false, "versionFile": "VERSION"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Workspace.projectVersion(coreString(pid)); got != "3.2.1" {
+		t.Fatal(got)
+	}
+	os.Remove(filepath.Join(root, "VERSION"))
+	if got := b.Workspace.projectVersion(coreString(pid)); got != "" {
+		t.Fatal("missing explicit source must not fallback", got)
+	}
+	if _, err := b.Workspace.Mutate(map[string]any{"op": "projectRuntime", "project": pid, "cli": "pi", "versionFile": "../VERSION"}, nil); err == nil {
+		t.Fatal("traversal accepted")
+	}
+}

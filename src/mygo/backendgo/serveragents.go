@@ -475,7 +475,7 @@ func (b *Backend) syncResetTrust(id string) (map[string]any, error) {
 // syncFlowPayload 提取远程 flow 和附件内容；本机路径、发布与验证配置保留在本地。
 func syncFlowPayload(project map[string]any) map[string]any {
 	payload := coreMap(coreCloneAny(project))
-	for _, key := range []string{"dir", "remote", "folderId", "hidden", "serverAgent", "verifySource", "publishScript"} {
+	for _, key := range []string{"dir", "remote", "folderId", "hidden", "serverAgent", "verifySource", "publishScript", "terminalCli", "terminalFullAccess", "versionFile"} {
 		delete(payload, key)
 	}
 	var stripPaths func(any)

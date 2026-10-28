@@ -168,7 +168,29 @@ func (s *WorkspaceService) projectVersion(project string) string {
 		return ""
 	}
 	p := coreFind(coreList(coreMap(r["state"])["projects"]), project)
-	return versionInDirectory(coreString(p["dir"]))
+	file := coreString(p["versionFile"])
+	if file == "" {
+		return versionInDirectory(coreString(p["dir"]))
+	}
+	root := coreString(p["dir"])
+	if !filepath.IsAbs(root) || filepath.IsAbs(file) || strings.Contains(strings.ReplaceAll(file, "\\", "/"), "..") {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(root, file))
+	if err != nil {
+		return ""
+	}
+	value := strings.TrimSpace(string(raw))
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(raw, &manifest) == nil {
+		value = strings.TrimSpace(manifest.Version)
+	}
+	if value == "" || len([]rune(value)) > 100 || strings.ContainsAny(value, "\r\n") {
+		return ""
+	}
+	return value
 }
 
 func versionInDirectory(dir string) string {

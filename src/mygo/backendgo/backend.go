@@ -16,8 +16,10 @@ import (
 // Backend owns all desktop business operations. No external JavaScript runtime
 // participates in requests; the frontend calls this Go service directly.
 type Backend struct {
-	agentMu   sync.Mutex
-	agentRuns map[string]*agentRun
+	shutdownMu   sync.Mutex
+	shuttingDown bool
+	agentMu      sync.Mutex
+	agentRuns    map[string]*agentRun
 
 	DataDir, AppDir, Version                               string
 	Workspace                                              *WorkspaceService
@@ -353,6 +355,25 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		}
 		_, e := desktopNative(b, "openExternal", value)
 		return desktopOK(nil), e
+	case "dir:terminal":
+		r, err := b.Workspace.localService().Get()
+		if err != nil {
+			return nil, err
+		}
+		p := coreFind(coreList(coreMap(r["state"])["projects"]), desktopText(args, 0))
+		if p == nil {
+			return nil, errors.New("项目不存在")
+		}
+		root := coreString(p["dir"])
+		info, err := os.Stat(root)
+		if err != nil {
+			return nil, err
+		}
+		if !filepath.IsAbs(root) || !info.IsDir() {
+			return nil, errors.New("项目目录无效")
+		}
+		err = openProjectTerminal(root, coreString(p["terminalCli"]), p["terminalFullAccess"] != false)
+		return desktopOK(nil), err
 	case "dir:open":
 		// REQ-146：从资源管理器打开项目目录；仅允许绝对路径下的目录。
 		value := desktopText(args, 0)
@@ -399,6 +420,13 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 }
 
 func (b *Backend) desktopApply(action map[string]any) (any, error) {
+	if coreString(action["op"]) == "executionRelease" {
+		b.shutdownMu.Lock()
+		defer b.shutdownMu.Unlock()
+		if b.shuttingDown {
+			return nil, errors.New("ReqFlow 正在关闭，执行中任务将保留")
+		}
+	}
 	var expected *int64
 	if v, ok := action["expectedVersion"]; ok {
 		n := desktopInt(v)

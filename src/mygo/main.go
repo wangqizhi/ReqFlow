@@ -186,6 +186,9 @@ func run() (int, error) {
 		}
 		mygo.RunOnMain(func() {
 			approved = prepareShutdown(backend.Workspace)
+			if approved {
+				backend.BeginShutdown()
+			}
 			shutdownApproved = approved
 		})
 		return approved
@@ -203,6 +206,9 @@ func run() (int, error) {
 			return
 		}
 		shutdownApproved = prepareShutdown(backend.Workspace)
+		if shutdownApproved {
+			backend.BeginShutdown()
+		}
 		if !shutdownApproved {
 			e.PreventDefault()
 		}

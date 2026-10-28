@@ -341,7 +341,20 @@ func (b *Backend) waitAgent(r *agentRun, drained <-chan struct{}) {
 	r.mu.Unlock()
 }
 
+// BeginShutdown fences both terminal cleanup and late renderer release requests
+// before MyGO starts tearing down terminal windows and child processes.
+func (b *Backend) BeginShutdown() {
+	b.shutdownMu.Lock()
+	defer b.shutdownMu.Unlock()
+	b.shuttingDown = true
+}
+
 func (b *Backend) releaseAgentExecutions(r *agentRun) (int, error) {
+	b.shutdownMu.Lock()
+	defer b.shutdownMu.Unlock()
+	if b.shuttingDown {
+		return 0, nil
+	}
 	b.agentMu.Lock()
 	assignments := make(map[string]agentAssignment, len(r.assignments))
 	for id, assignment := range r.assignments {

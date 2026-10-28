@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -47,7 +48,7 @@ func coreCompletionSummary(a map[string]any) (string, error) {
 const DefaultGuidance = "请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。"
 const DefaultBaselineTemplate = "完善项目基线配置：\n1. 检查 .gitignore：构建产物、依赖与运行时生成目录（如 node_modules、dist、release、日志等）应已被忽略；\n2. 安装包输出：如项目会生成安装包，指定固定的生成目录，并确认该目录的忽略策略正确；\n3. 运行包：如项目有可独立运行的运行包/绿色版，指定固定的输出或运行目录；\n4. 编译与发布脚本：在固定位置 scripts/ 下提供编译脚本与发布脚本（可直接运行，注明用法与依赖）；\n5. 核对以上配置与当前项目结构一致，缺失或失效的项请补齐或修正。\n完成后说明改动、脚本用法与未解决的问题。"
 const legacyPublishTemplate = "配置项目发布与部署脚本：\n1. 检查项目现有部署脚本及发布配置，优先复用用户已有的部署流程；\n2. 如果没有部署脚本，先与用户确认目标位置、部署方式、运行环境、所需凭据与产物、覆盖及回滚策略，再创建可部署到该目标的脚本，不猜测部署细节；\n3. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.bat），点击应用的「发布」按钮时实际调用用户的部署脚本；仅构建或生成安装包不能视为部署完成；\n4. 按项目交付引导构建并生成产物，再部署到用户确认的目标位置；脚本失败时返回非零退出码，成功时打印部署目标与结果；\n5. 注明脚本运行方式、依赖及配置方法，不将凭据写入代码仓库，并验证发布入口能够触发部署流程。\n完成后说明发布入口、实际部署脚本、目标位置、验证结果与未解决的问题。"
-const DefaultPublishTemplate = "配置项目发布与部署脚本：\n1. 先检查项目类型、现有发布脚本与更新配置，优先复用已跑通的流程。明确使用以下哪种模式；混合项目分别完成两条链路。\n2. 客户端模式：按交付引导构建安装包或可运行程序，上传到指定服务器或用户确认的分发平台（如 GitHub Releases），提供可访问的版本化下载地址；部署版本元数据、更新清单及校验值，接入客户端检查更新、下载校验和安装或替换能力，验证旧版本能发现并获取新版本。参考 ReqFlow 的构建打包、Release 分发与自动更新流程。\n3. 网页服务模式：构建并上传服务程序、网页资源与运行依赖到指定服务器；先识别目标操作系统及可用守护工具，随产物部署匹配的服务定义、环境配置示例和安装/更新脚本（如 systemd 的 .service 与 systemctl、OpenRC、Supervisor 或 Windows 服务），核对用户、目录、权限、端口、启动命令及开机自启；部署后重载服务配置并重启，验证守护程序已启用、服务运行和 HTTP 健康检查均成功，核对线上版本及静态资源。参考 release-watch 的发布入口、部署脚本、服务定义和远端校验流程。\n4. 从已有配置读取目标地址、目录、部署方式及认证；缺少必要信息时再向用户确认，不猜测服务器或凭据。分发平台与服务器均以用户配置为准，禁止把参考项目的主机、账号或路径写成新项目默认值。\n5. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.ps1），供应用的「发布」按钮实际调用部署脚本；明确区分仅构建、仅打包与完成部署。支持发布前预检、重复发布保护、失败重试及必要的备份/回滚，保护服务器业务数据与现有配置。\n6. 校验上传产物完整性；任一步骤失败返回非零退出码，不打印发布成功，记录具体失败阶段。成功时打印模式、版本、部署目标、下载地址或服务地址及验证结果。凭据仅存环境变量或忽略的本地配置，不写入仓库或日志。\n完成后说明发布入口与用法、部署配置、产物及更新或守护脚本、实际部署和验证结果；没有完成远端部署或校验时明确列出未完成项。"
+const DefaultPublishTemplate = "配置项目发布与部署脚本：\n1. 先检查项目类型、现有发布脚本与更新配置，优先复用已跑通的流程。明确使用以下哪种模式；混合项目分别完成两条链路。\n2. 客户端模式：按交付引导构建安装包或可运行程序，上传到指定服务器或用户确认的分发平台（如 GitHub Releases），提供可访问的版本化下载地址；部署版本元数据、更新清单及校验值，接入客户端检查更新、下载校验和安装或替换能力，验证旧版本能发现并获取新版本。参考 ReqFlow 的构建打包、Release 分发与自动更新流程。\n3. 网页服务模式：构建并上传服务程序、网页资源与运行依赖到指定服务器；先识别目标操作系统及可用守护工具，随产物部署匹配的服务定义、环境配置示例和安装/更新脚本（如 systemd 的 .service 与 systemctl、OpenRC、Supervisor 或 Windows 服务），核对用户、目录、权限、端口、启动命令及开机自启；部署后重载服务配置并重启，验证守护程序已启用、服务运行和 HTTP 健康检查均成功，核对线上版本及静态资源。参考 release-watch 的发布入口、部署脚本、服务定义和远端校验流程。\n4. 从已有配置读取目标地址、目录、部署方式及认证；缺少必要信息时再向用户确认，不猜测服务器或凭据。分发平台与服务器均以用户配置为准，禁止把参考项目的主机、账号或路径写成新项目默认值。\n5. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.ps1），供应用的「发布」按钮实际调用部署脚本；明确区分仅构建、仅打包与完成部署。支持发布前预检、重复发布保护、失败重试及必要的备份/回滚，保护服务器业务数据与现有配置。\n6. 校验上传产物完整性；任一步骤失败返回非零退出码，不打印发布成功，记录具体失败阶段。成功时打印模式、版本、部署目标、下载地址或服务地址及验证结果。凭据仅存环境变量或忽略的本地配置，不写入仓库或日志。\n7. 版本定位约定：每次发布在项目根 VERSION 写入单行统一交付版本，并在项目设置「验证与发布」将版本号定位文件设为 VERSION；发布前更新并提交该文件，部署后核对线上版本。前端、后端、CLI 独立版本时在 release-versions.json 保存 version（统一交付版本）和 components（各组件版本及源文件路径）；同步更新组件自身版本文件。默认验证统一交付版本；仅验证某组件时明确指定其版本文件，禁止使用 ReqFlow 或其他项目的版本。\n完成后说明发布入口与用法、部署配置、产物及更新或守护脚本、实际部署和验证结果；没有完成远端部署或校验时明确列出未完成项。"
 
 func coreMap(v any) map[string]any {
 	if m, ok := v.(map[string]any); ok && m != nil {
@@ -609,7 +610,7 @@ func ProjectConcurrencyToken(p map[string]any) string {
 	return coreHash(coreCanonicalJSON(m))
 }
 func MutationProjectIDs(a map[string]any) []string {
-	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "ready", "complete", "executionClaim", "executionRelease", "completionNote", "verificationVersion", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
+	if !coreIn(coreString(a["op"]), "deleteProject", "projectFolder", "projectDescription", "projectRemote", "projectDir", "projectSync", "guidance", "projectRuntime", "verifySource", "publishScript", "baselineTemplate", "assign", "deferItem", "item", "aiItems", "deleteItem", "moveItem", "generate", "submit", "cancel", "ready", "complete", "executionClaim", "executionRelease", "completionNote", "verificationVersion", "revert", "verify", "regress", "archive", "gitCommitted", "requirementDraft") {
 		return nil
 	}
 	id, ok := a["project"].(string)
@@ -1174,6 +1175,18 @@ func coreApplyOperation(s, a map[string]any) error {
 			}
 			p["publishScript"] = script
 		}
+		return nil
+	case "projectRuntime":
+		if !coreIn(coreString(a["cli"]), "codex", "claude-code", "pi") {
+			return errors.New("CLI 无效")
+		}
+		file := strings.TrimSpace(coreString(a["versionFile"]))
+		if file != "" && (filepath.IsAbs(file) || strings.Contains(strings.ReplaceAll(file, "\\", "/"), "..")) {
+			return errors.New("版本文件须为项目内相对路径")
+		}
+		p["terminalCli"] = a["cli"]
+		p["terminalFullAccess"] = a["fullAccess"] != false
+		p["versionFile"] = file
 		return nil
 	case "verifySource":
 		if a["source"] == nil || a["source"] == "" {

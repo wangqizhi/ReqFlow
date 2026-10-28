@@ -95,6 +95,9 @@ export type Project = {
   nextNumber: number;
   dir?: string; // 本地路径或 ssh://user@host:port/absolute/path
   remote?: RemoteSettings;
+  terminalCli?: string;
+  terminalFullAccess?: boolean;
+  versionFile?: string;
   verifySource?: VerifySource; // 验证源：待验证需求一键打开的程序或网页
   publishScript?: string; // 项目内发布脚本相对路径；未设置时自动检测，空串禁用
   baselineTemplate?: string; // 基线需求模板（留空使用 DEFAULT_BASELINE_TEMPLATE）
@@ -149,6 +152,7 @@ export const DEFAULT_PUBLISH_TEMPLATE = [
   "4. 从已有配置读取目标地址、目录、部署方式及认证；缺少必要信息时再向用户确认，不猜测服务器或凭据。分发平台与服务器均以用户配置为准，禁止把参考项目的主机、账号或路径写成新项目默认值。",
   "5. 在 scripts/ 或项目根目录提供 publish 入口（如 publish.mjs、publish.py、publish.ps1），供应用的「发布」按钮实际调用部署脚本；明确区分仅构建、仅打包与完成部署。支持发布前预检、重复发布保护、失败重试及必要的备份/回滚，保护服务器业务数据与现有配置。",
   "6. 校验上传产物完整性；任一步骤失败返回非零退出码，不打印发布成功，记录具体失败阶段。成功时打印模式、版本、部署目标、下载地址或服务地址及验证结果。凭据仅存环境变量或忽略的本地配置，不写入仓库或日志。",
+  "7. 版本定位约定：每次发布在项目根 VERSION 写入单行统一交付版本，并在项目设置「验证与发布」将版本号定位文件设为 VERSION；发布前更新并提交该文件，部署后核对线上版本。前端、后端、CLI 独立版本时在 release-versions.json 保存 version（统一交付版本）和 components（各组件版本及源文件路径）；同步更新组件自身版本文件。默认验证统一交付版本；仅验证某组件时明确指定其版本文件，禁止使用 ReqFlow 或其他项目的版本。",
   "完成后说明发布入口与用法、部署配置、产物及更新或守护脚本、实际部署和验证结果；没有完成远端部署或校验时明确列出未完成项。",
 ].join('\n');
 
@@ -360,7 +364,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   }));
 }
 export function mutationProjectIds(a: any): string[] | null {
-  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'projectSync', 'guidance', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'verificationVersion', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
+  const localOps = ['deleteProject', 'projectFolder', 'projectDescription', 'projectRemote', 'projectDir', 'projectSync', 'guidance', 'projectRuntime', 'verifySource', 'publishScript', 'baselineTemplate', 'assign', 'deferItem', 'item', 'aiItems', 'deleteItem', 'moveItem', 'generate', 'submit', 'cancel', 'complete', 'completionNote', 'verificationVersion', 'revert', 'verify', 'regress', 'archive', 'gitCommitted'];
   if (!(localOps.includes(a?.op) || ['requirementDraft', 'executionClaim', 'executionRelease'].includes(a?.op)) || typeof a.project !== 'string') return null;
   return [...new Set(a.op === 'moveItem' ? [a.project, a.targetProject] : [a.project])];
 }
@@ -621,6 +625,11 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
 
+  if (a.op === 'projectRuntime') {
+    if (!['codex', 'claude-code', 'pi'].includes(a.cli)) throw Error('CLI 无效');
+    p.terminalCli = a.cli; p.terminalFullAccess = a.fullAccess !== false; p.versionFile = String(a.versionFile || '').trim();
+    return;
+  }
   if (a.op === 'verifySource') {
     // 验证源独立于引导词保存：不递增 guideVersion、不影响进行中的批次
     if (a.source === null || a.source === undefined || a.source === '') {

@@ -109,6 +109,10 @@ export default function App() {
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
   const [guideSyncServer, setGuideSyncServer] = useState(''); // REQ-240：项目关联的 Server Agent
   const [serverAgents, setServerAgents] = useState<ServerAgentEntry[]>([]);
+  const [terminalCli, setTerminalCli] = useState('codex');
+  const [terminalFullAccess, setTerminalFullAccess] = useState(true);
+  const [versionFile, setVersionFile] = useState('');
+  const [terminalOpening, setTerminalOpening] = useState(false);
   const [publishMode, setPublishMode] = useState('auto');
   const [publishPath, setPublishPath] = useState('');
   const [settingsTab, setSettingsTab] = useState('ai');
@@ -1175,6 +1179,7 @@ export default function App() {
           <button className="btn plain" onClick={() => {
             setGuide(p!.guidance); setDelivery(p!.deliveryGuidance);
             setRulesLimit(p!.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT);
+            setTerminalCli(p!.terminalCli || 'codex'); setTerminalFullAccess(p!.terminalFullAccess !== false); setVersionFile(p!.versionFile || '');
             setVerifyKind(p!.verifySource?.kind || 'none'); setVerifyValue(p!.verifySource?.value || '');
             setPublishMode(p!.publishScript === undefined ? 'auto' : p!.publishScript ? 'script' : 'none'); setPublishPath(p!.publishScript || '');
             setBaselineTpl(p!.baselineTemplate || '');
@@ -1535,7 +1540,8 @@ export default function App() {
             <p className="detail-body">{p.dir}</p>
             <div className="settings-actions">
               <button className="btn" onClick={() => setDirConfirm(false)}>取消</button>
-              <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
+              <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={async () => { setTerminalOpening(true); try { const r = await bridge.openProjectTerminal!(p!.id); if (!r.ok) notify(r.error || '打开终端失败', 'err'); else setDirConfirm(false); } catch (e: any) { notify(e.message, 'err'); } finally { setTerminalOpening(false); } }}>打开终端 CLI</button>
+ <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
             </div>
           </div>
         </div>
@@ -1722,6 +1728,10 @@ export default function App() {
                     <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
                   </>}
                   {guideTab === 'run' && <>
+ <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{[['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi']].map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
+ <label className="field inline"><input type="checkbox" checked={terminalFullAccess} onChange={e => setTerminalFullAccess(e.target.checked)} />完整控制权限启动</label>
+ <label className="field">版本号定位文件<input value={versionFile} onChange={e => setVersionFile(e.target.value)} placeholder="项目内相对路径，如 VERSION 或 frontend/package.json" /></label>
+ <p className="settings-hint">留空读取项目根 package.json 的 version；指定文件支持 JSON 的 version 或单行版本文本。读取失败不使用 ReqFlow 版本。多组件请指定统一发布清单或需要验证组件的版本文件。</p>
                     <div className="field"><span>验证源</span>
                       <div className="segmented" role="group" aria-label="验证源类型">
                         {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (
@@ -1799,6 +1809,7 @@ export default function App() {
                   <span className="guide-footer-note">保存会应用全部标签页的修改</span>
                   <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || !Number.isInteger(rulesLimit) || rulesLimit < MIN_CONTEXT_RULES_LIMIT || rulesLimit > MAX_CONTEXT_RULES_LIMIT || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
                     onClick={async () => {
+                      if (!await act({ op: 'projectRuntime', cli: terminalCli, fullAccess: terminalFullAccess, versionFile }, true)) return;
                       if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
                       if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
                       if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;

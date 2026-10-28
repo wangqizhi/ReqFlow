@@ -75,6 +75,7 @@ const channels = {
   appInfo: 'app:info',
   showDataFile: 'app:showDataFile',
   openConfigDir: 'app:openConfigDir',
+  openProjectTerminal: 'dir:terminal',
   openProjectDir: 'dir:open',
   pickDir: 'dir:pick',
   prepareDir: 'dir:prepare',

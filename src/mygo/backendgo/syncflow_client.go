@@ -36,7 +36,7 @@ func (s *WorkspaceService) recordRemoteBackup(serverID string, records []any) {
 }
 
 func syncLocalOperation(op string) bool {
-	return coreIn(op, "projectSync", "projectDir", "projectRemote", "projectFolder", "verifySource", "publishScript")
+	return coreIn(op, "projectSync", "projectDir", "projectRemote", "projectFolder", "verifySource", "publishScript", "projectRuntime")
 }
 
 func (s *WorkspaceService) localService() *WorkspaceService {
