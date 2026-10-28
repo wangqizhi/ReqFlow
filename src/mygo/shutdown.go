@@ -18,12 +18,6 @@ func prepareShutdown(workspace *backendgo.WorkspaceService) bool {
 	if len(actions) == 0 {
 		return true
 	}
-	if !confirmForceShutdown(fmt.Sprintf("有 %d 条 Agent CLI 任务正在执行。\n强制关闭会释放这些任务，使其从执行中返回排期表；Agent 后续回写将失效。\n是否强制关闭？选择“否”继续运行。", len(actions))) {
-		return false
-	}
-	if err := workspace.ReleaseForShutdown(actions); err != nil {
-		showStartupError("释放任务失败，已取消关闭：" + err.Error())
-		return false
-	}
-	return true
+	// Closing the desktop must preserve external CLI run IDs for later completion.
+	return confirmForceShutdown(fmt.Sprintf("有 %d 条 Agent CLI 任务正在执行。\n关闭后任务将保留在执行中，不会释放；重新打开 ReqFlow 后 CLI 仍可使用原运行记录继续操作。\n本窗口内的 Agent 终端会中断。是否关闭？选择“否”继续运行。", len(actions)))
 }

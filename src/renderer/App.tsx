@@ -2,7 +2,7 @@ import { FileDiff } from './file-diff';
 // ReqFlow 主界面 —— 移植自线上 app/page.tsx 的完整工作台逻辑，
 // 交互与状态流与线上一致；新增「帮助 / CLI 参考」入口。
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_BASELINE_TEMPLATE, DEFAULT_DELIVERY, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CONTEXT_RULES_LIMIT, MIN_CONTEXT_RULES_LIMIT, MAX_CONTEXT_RULES_LIMIT, buildPrompt, requirementSettings, unresolvedFailures, pendingCommitItems, compareArchivedItems, mutationProjectIds, projectConcurrencyToken,
   scheduledBatch, activeAIExecution, type Item, type Project, type Workspace
@@ -171,6 +171,9 @@ export default function App() {
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
+  // Project snapshots are immutable: reuse derived indexes across Flow switches.
+  const scheduledIds = useMemo(() => new Set((p?.items || []).filter(i => scheduledBatch(p!, i)).map(i => i.id)), [p]);
+  const pendingCommitIds = useMemo(() => new Map((data?.projects || []).map(project => [project.id, new Set(pendingCommitItems(project).map(i => i.id))])), [data]);
   const terminalEnabled = terminalSettingEnabled || !!agentSessions[p?.id || ''];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
@@ -658,9 +661,10 @@ export default function App() {
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
   const executingItems = (p?.items || []).filter(i => executing(i));
-  const allInProgress = (p?.items || []).filter((i) => !i.archived && !executing(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && !!scheduledBatch(p, i))));
+  const allInProgress = (p?.items || []).filter((i) => !i.archived && !executing(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && scheduledIds.has(i.id))));
   // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
   const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
+  const inProgressIds = new Set(allInProgress.map(i => i.id));
   const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
     && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
@@ -771,7 +775,7 @@ export default function App() {
   const viewingHistory = tab === 'archived' && archiveView === 'batches';
   const visible = (p?.items || []).filter((i) =>
     (tab === 'executing' ? executing(i) : tab === 'archived' ? !!i.archived
-      : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledBatch(p!, i) : tab === 'generate' ? allInProgress.some(item => item.id === i.id) : i.status === tab))
+      : !i.archived && (tab === 'feature' ? i.status === 'ready' && !scheduledIds.has(i.id) : tab === 'generate' ? inProgressIds.has(i.id) : i.status === tab))
     && (tab !== 'generate' || matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate))
     && (typeFilter === 'all' || i.type === typeFilter)
     && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
@@ -779,7 +783,7 @@ export default function App() {
     const time = i.history.find(h => h.event === '归档')?.time;
     return time && Number.isFinite(Date.parse(time)) ? localDate(new Date(time)) : '日期未知';
   };
-  const archiveDates = [...new Set(visible.map(archivedDate))].sort().reverse();
+  const archiveDates = tab === 'archived' ? [...new Set(visible.map(archivedDate))].sort().reverse() : [];
   // REQ-131：把归档日期组织成「年 → 月 → 日」的文件夹树（archiveDates 已按日期倒序，最新年份/月份在前）；无法解析的日期单独归为一组
   const archiveTree = (() => {
     const years: { year: string; count: number; months: { month: string; count: number; days: { day: string; date: string; count: number }[] }[] }[] = [];
@@ -817,8 +821,7 @@ export default function App() {
     // 界面没有「确认提交」步骤：生成即提交，需求直接进入执行中（CLI 仍可 generate/submit 分步）
     if (!await act({ op: 'submit', batch: b.id }, true)) return;
     setBatchId(b.id);
-    setSelected(ids);
-    setTab('generate');
+    setSelected([]);
     notify(`已排期 ${ids.length} 条需求，进入待开发`);
   }
 
@@ -1112,7 +1115,7 @@ export default function App() {
           {globalExecuting.map(({ project, item: i }) => {
             const session = agentSessions[project.id];
             return <article className="req-card" key={project.id + ':' + i.id}>{activeAIExecution(i) && <div className="card-selection"><input type="checkbox" aria-label={'选择 ' + (i.title || i.number)} checked={globalSelected.includes(project.id + ':' + i.id)} onChange={e => setGlobalSelected(e.target.checked ? [...globalSelected, project.id + ':' + i.id] : globalSelected.filter(id => id !== project.id + ':' + i.id))} /></div>}<div className="card-body">
-              <div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>{project.name}</button><code>{i.number}</code><span className={'badge ' + i.type}>{labels[i.type]}</span><span className="priority">{i.priority}</span><span className="status executing">执行中</span><span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(project).some(x => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}</div>
+              <div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>{project.name}</button><code>{i.number}</code><span className={'badge ' + i.type}>{labels[i.type]}</span><span className="priority">{i.priority}</span><span className="status executing">执行中</span><span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitIds.get(project.id)?.has(i.id) && <span className="badge improvement">待 Git 提交</span>}</div>
               {i.title && <strong className="item-title">{i.title}</strong>}<p className="body-copy">{i.body || '暂无详细说明'}</p>
               {!!i.attachments?.length && <p className="muted">参考图片 · {i.attachments.map(a => a.label).join('、')}</p>}
               {unresolvedFailures(i).length > 0 && <div className="failure-content"><strong>未通过的问题</strong>{unresolvedFailures(i).map((f, n) => <p key={n}>{f.note}</p>)}</div>}
@@ -1193,7 +1196,7 @@ export default function App() {
                   {v === 'executing' && agentSession?.needsInput && !agentSession.done && <i className="navtab-alert" role="img" aria-label="Agent 终端等待输入，请处理交互" />}
                   <span>{v === 'executing' ? executingItems.length : v === 'generate' ? allInProgress.length
                     : p!.items.filter((i) =>
-                      v === 'archived' ? !!i.archived : !i.archived && (v === 'feature' ? i.status === 'ready' && !activeAIExecution(i) && !scheduledBatch(p!, i) : i.status === v)).length}</span>
+                      v === 'archived' ? !!i.archived : !i.archived && (v === 'feature' ? i.status === 'ready' && !activeAIExecution(i) && !scheduledIds.has(i.id) : i.status === v)).length}</span>
                 </button>
               ))}
             </div>
@@ -1308,7 +1311,7 @@ export default function App() {
                         <span className={'badge ' + i.type}>{labels[i.type]}</span>
                         <span className="priority">{i.priority}</span>
                         <span className={'status ' + (executing(i) ? 'executing' : i.status)}>{executing(i) ? '执行中' : labels[i.status]}</span>
-                        <span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement" title="全选时跳过，仍可手动勾选或单条排期">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitItems(p!).some((x) => x.id === i.id) && <span className="badge improvement">待 Git 提交</span>}
+                        <span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement" title="全选时跳过，仍可手动勾选或单条排期">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitIds.get(p!.id)?.has(i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
                       <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
