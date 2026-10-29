@@ -33,6 +33,7 @@ type Backend struct {
 	desktopTerminalSessions                                map[string]publishTerminalSession
 	desktopUpdateMu                                        sync.Mutex
 	desktopUpdate                                          map[string]any
+	desktopUpdateConfirmed                                 bool // REQ-285：本次更新流程已确认忽略执行中任务
 	desktopAsset                                           map[string]any
 	desktopChecksum, desktopInstaller, desktopExpectedHash string
 	desktopUpdateBusy                                      bool
@@ -217,7 +218,7 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		return b.desktopArchive(channel, args)
 	}
 	if strings.HasPrefix(channel, "update:") {
-		return b.desktopUpdater(ctx, channel)
+		return b.desktopUpdater(ctx, channel, args)
 	}
 	switch channel {
 	case "lab:terminal:get", "lab:terminal:save":

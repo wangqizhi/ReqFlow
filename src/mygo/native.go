@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 
@@ -214,6 +215,23 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		if err := mygo.Shell.OpenPath(firstString(args)); err != nil {
 			return err.Error(), nil
 		}
+		return "", nil
+	case "installer.launch":
+		// REQ-284：更新流程直接启动安装包并附带“已确认忽略执行中任务”参数；
+		// 安装器据此不再重复提示，并自行结束仍在运行的实例。
+		file := firstString(args)
+		extra := ""
+		if len(args) > 1 {
+			extra, _ = args[1].(string)
+		}
+		cmd := exec.Command(file)
+		if extra != "" {
+			cmd.Args = append(cmd.Args, extra)
+		}
+		if err := cmd.Start(); err != nil {
+			return err.Error(), nil
+		}
+		_ = cmd.Process.Release()
 		return "", nil
 	case "shell.openExternal", "openExternal":
 		raw := firstString(args)

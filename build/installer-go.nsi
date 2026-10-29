@@ -84,6 +84,12 @@ FunctionEnd
 Function .onInit
   SetShellVarContext current
   SetRegView 64
+  ; REQ-285：应用内更新确认继续后启动安装器时带上该参数，安装流程内不再重复询问。
+  StrCpy $UpdateConfirmed "0"
+  ${GetOptions} $CMDLINE "/REQFLOW_UPDATE_CONFIRMED" $0
+  IfErrors update_not_confirmed
+  StrCpy $UpdateConfirmed "1"
+  update_not_confirmed:
 !ifdef SANDBOX_DIR
   ; Test installers never touch the real registry, shortcuts or installation.
   StrCpy $INSTDIR "${SANDBOX_DIR}"
@@ -262,7 +268,11 @@ Section "ReqFlow" SEC_APP
   File /oname=ReqFlow-shutdown.exe "${APP_SOURCE}"
   Push $DataDir
   Call ReadDataDirectory
-  ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\"' $0
+  ${If} $UpdateConfirmed == "1"
+    ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\" --confirmed' $0
+  ${Else}
+    ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\"' $0
+  ${EndIf}
   Pop $DataDir
   ${If} $0 != 0
     ; Older launchers may have closed the app before this task check. Restore

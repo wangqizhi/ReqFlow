@@ -6,6 +6,8 @@
 
 Var AppKillCount
 Var AppWritable
+; REQ-284/285：应用内更新已确认忽略执行中任务时由安装器静默关闭实例，不再询问。
+Var UpdateConfirmed
 
 ; 终止所有可执行文件完整路径等于 $0 的进程，命中数写入 $AppKillCount。
 ; 安装器为 32 位进程：PROCESSENTRY32W 按本机布局使用（dwSize=556，PID 位于偏移 8）。
@@ -114,6 +116,7 @@ ensure_silent:
   SetErrorLevel 2
   Abort
 ensure_ask:
+  StrCmp $UpdateConfirmed "1" ensure_kill
   MessageBox MB_ICONQUESTION|MB_OKCANCEL "检测到 ReqFlow 正在运行。$\r$\n点击“确定”关闭程序并继续安装，点击“取消”退出安装。" /SD IDOK IDOK ensure_kill IDCANCEL ensure_cancel
 ensure_cancel:
   SetErrorLevel 2

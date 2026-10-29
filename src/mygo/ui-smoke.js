@@ -518,6 +518,17 @@
       await switchProject(completionProject.name);
       await waitFor(() => document.querySelector('.main h1')?.textContent === completionProject.name);
     }
+    // REQ-280：需求池长正文卡片在卡片内滚动，滚动条占用宽度且可实际滚动
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('需求池')));
+    const longCard = [...document.querySelectorAll('.req-card')].find(card => card.querySelector('.item-title')?.textContent === '长正文滚动UI检查');
+    const longBody = longCard?.querySelector('.body-copy');
+    if (longBody) longBody.scrollTop = longBody.scrollHeight;
+    const longStyle = longBody && getComputedStyle(longBody);
+    checks.requirementBodyScroll = {
+      ok: !!longBody && longBody.scrollHeight > longBody.clientHeight && longBody.offsetWidth > longBody.clientWidth && longBody.scrollTop > 0 && longStyle.overflowY === 'auto' && parseFloat(longStyle.maxHeight) > 0 && longStyle.webkitLineClamp === 'none',
+      clientHeight: longBody?.clientHeight, scrollHeight: longBody?.scrollHeight, clientWidth: longBody?.clientWidth, offsetWidth: longBody?.offsetWidth,
+      maxHeight: longStyle?.maxHeight, upperBound: longCard ? longCard.getBoundingClientRect().height : 0, scrollTop: longBody?.scrollTop
+    };
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
     const executionCards = [...document.querySelectorAll('.req-card')];
     checks.executionTab = { ok: executionCards.length === 5 && ['Codex', 'ZCode', 'Pi', 'Claude Code', 'OpenCode'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
@@ -562,10 +573,6 @@
     const versions = reportCard?.querySelector('.verification-version');
     const componentRows = [...(versions?.querySelectorAll('.verification-components span') || [])];
     checks.componentVersions = { ok: versions?.textContent.includes('3.0.0') && componentRows.length === 2 && componentRows.some(el => el.textContent === 'frontend：1.2.3') && componentRows.some(el => el.textContent === 'backend：2.3.4') && componentRows.every(el => el.getBoundingClientRect().right <= reportCard.getBoundingClientRect().right), text: versions?.textContent };
-    // REQ-280：需求说明改为卡片内滚动，不再按两行截断
-    const bodyCopy = reportCard?.querySelector('.body-copy');
-    const bodyStyle = bodyCopy && getComputedStyle(bodyCopy);
-    checks.requirementBodyScroll = { ok: !!bodyStyle && bodyStyle.overflowY === 'auto' && parseFloat(bodyStyle.maxHeight) > 0 && bodyStyle.webkitLineClamp === 'none', overflowY: bodyStyle?.overflowY, maxHeight: bodyStyle?.maxHeight, lineClamp: bodyStyle?.webkitLineClamp };
     if (completionProject.name !== originalProject) {
       await switchProject(originalProject);
       await waitFor(() => document.querySelector('.main h1')?.textContent === originalProject);

@@ -93,6 +93,21 @@ func (b *Backend) desktopUpdateSet(value map[string]any) {
 	b.desktopUpdateMu.Unlock()
 }
 
+// UpdateInstallConfirmed reports whether the current update flow already
+// confirmed ignoring running tasks (REQ-285). The flag lives in memory only:
+// it is cleared when a new check/download starts, and disappears on restart.
+func (b *Backend) UpdateInstallConfirmed() bool {
+	b.desktopUpdateMu.Lock()
+	defer b.desktopUpdateMu.Unlock()
+	return b.desktopUpdateConfirmed
+}
+
+func (b *Backend) setUpdateInstallConfirmed(value bool) {
+	b.desktopUpdateMu.Lock()
+	b.desktopUpdateConfirmed = value
+	b.desktopUpdateMu.Unlock()
+}
+
 var desktopVersion = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)
 
 func desktopNewer(candidate, current string) bool {
@@ -238,7 +253,7 @@ func (b *Backend) desktopSavedInstaller(directory, metadata string) (string, map
 	return "", nil, "", "", false
 }
 
-func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, error) {
+func (b *Backend) desktopUpdater(ctx context.Context, channel string, args []any) (any, error) {
 	if channel == "update:state" {
 		return b.desktopUpdateState(), nil
 	}
@@ -265,6 +280,7 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 		if phase := desktopString(state["phase"]); phase == "ready" || phase == "installing" {
 			return state, nil
 		}
+		b.setUpdateInstallConfirmed(false)
 		b.desktopUpdateSet(map[string]any{"phase": "checking"})
 		if version, asset, hash, target, ok := b.desktopSavedInstaller(directory, metadata); ok {
 			b.desktopAsset, b.desktopInstaller, b.desktopExpectedHash = asset, target, hash
@@ -290,6 +306,7 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 	case "update:recheck":
 		// REQ-257：安装界面的「重新检测」强制查询 GitHub 最新版本；已下载的安装包不再短路，
 		// 发现更新的版本时回到 available，用户可直接下载新版安装包。
+		b.setUpdateInstallConfirmed(false)
 		b.desktopUpdateSet(map[string]any{"phase": "checking"})
 		tag, e := desktopResolveLatestRelease(ctx)
 		if e != nil {
@@ -318,6 +335,7 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 		if asset == nil || (desktopString(state["phase"]) != "available" && desktopString(state["phase"]) != "error") {
 			return state, nil
 		}
+		b.setUpdateInstallConfirmed(false)
 		version := desktopString(state["version"])
 		if !desktopValidAsset(asset, version) {
 			return fail(errors.New("安装包元数据无效"), "check"), nil
@@ -411,24 +429,44 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string) (any, erro
 			b.desktopInstaller = ""
 			return fail(errors.New("本地安装包已丢失或校验失败，请重新下载"), "download"), nil
 		}
-		approved, checkErr := desktopNative(b, "window.prepareClose")
-		if checkErr != nil || approved == false {
-			return state, checkErr
+		// REQ-283：点击安装后先检测执行中任务，由前端弹出一次确认；确认结果只在本轮更新内有效。
+		if !b.UpdateInstallConfirmed() {
+			if !desktopBool(desktopArg(args, 0)) {
+				actions, e := b.Workspace.ActiveExecutionActions()
+				if e != nil {
+					return fail(errors.New("无法检查执行中任务："+e.Error()), "install"), nil
+				}
+				if len(actions) > 0 {
+					pending := desktopCloneMap(state)
+					pending["confirmTasks"] = len(actions)
+					return pending, nil
+				}
+			}
+			b.setUpdateInstallConfirmed(true)
 		}
-		value, e := desktopNative(b, "shell.openPath", b.desktopInstaller)
+		state = b.desktopUpdateState()
+		state["phase"] = "installing"
+		state["step"] = "正在启动安装程序…"
+		delete(state, "error")
+		delete(state, "confirmTasks")
+		b.desktopUpdateSet(state)
+		// REQ-284：确认后由安装流程负责中断应用；安装器收到确认参数后不再重复询问任务状态，
+		// 并在需要时静默结束仍在运行的实例，然后替换程序文件。
+		value, e := desktopNative(b, "installer.launch", b.desktopInstaller, "/REQFLOW_UPDATE_CONFIRMED=1")
 		if e == nil && desktopString(value) != "" {
 			e = errors.New(desktopString(value))
 		}
 		if e != nil {
-			state["error"] = e.Error()
+			state["phase"], state["error"], state["retry"] = "error", e.Error(), "install"
+			delete(state, "step")
 			b.desktopUpdateSet(state)
-			return state, nil
+			return b.desktopUpdateState(), nil
 		}
-		state["phase"] = "installing"
-		delete(state, "error")
+		state["step"] = "正在关闭 ReqFlow 并继续安装…"
 		b.desktopUpdateSet(state)
-		go func() { time.Sleep(300 * time.Millisecond); _, _ = desktopNative(b, "window.close") }()
-		return state, nil
+		// 留出时间让界面显示安装阶段；安装器会静默结束仍未退出的实例。
+		go func() { time.Sleep(800 * time.Millisecond); _, _ = desktopNative(b, "window.close") }()
+		return b.desktopUpdateState(), nil
 	}
 	return state, nil
 }

@@ -234,11 +234,11 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .revision { color: var(--muted); font-family: Consolas, monospace; font-size: 11px; }
 .item-title { display: block; text-align: left; font-size: 15.5px; font-weight: 650; margin: 7px 0 3px; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-title:hover { color: var(--accent-dark); }
-/* REQ-280：需求说明过长时在卡片内滚动查看；滚动条沿用面板的浅色描边配色，
-   短说明保持两行高度，超过六行才出现内部滚动条 */
-.body-copy { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; min-height: 3.2em; max-height: 9.6em; overflow-y: auto; padding-right: 2px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+/* REQ-280：需求说明过长时在卡片内滚动查看；滚动条与面板配色一致，带浅色轨道
+   便于识别可滚动区域，短说明保持两行高度，超过六行才出现内部滚动条 */
+.body-copy { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; min-height: 3.2em; max-height: 9.6em; overflow-y: auto; padding-right: 4px; }
 .body-copy::-webkit-scrollbar { width: 8px; }
-.body-copy::-webkit-scrollbar-track { background: transparent; }
+.body-copy::-webkit-scrollbar-track { background: var(--bg); border-radius: 4px; }
 .body-copy::-webkit-scrollbar-thumb { background-color: var(--line-2); border-radius: 4px; }
 .body-copy::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
 .failure-content { background: var(--danger-soft); border: 1px solid #fecaca; border-radius: 8px; padding: 9px 12px; margin: 0 0 8px; font-size: 12.5px; }
@@ -399,6 +399,10 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .update-control small { color: var(--side-ink); font-size: 12px; overflow-wrap: anywhere; }
 .update-control .update-error { color: #fca5a5; }
 .update-control progress { width: 100%; height: 5px; accent-color: var(--accent); }
+/* REQ-283/286：安装更新前的执行中任务确认，使用应用内弹窗而非系统消息框 */
+.update-confirm-dialog { width: min(460px, 100%); }
+.update-confirm-text { margin: 0 0 18px; color: var(--ink-2); font-size: 13.5px; line-height: 1.7; }
+.update-confirm-actions { justify-content: flex-end; }
 .help-panel { background: var(--panel); border-radius: 16px; width: min(860px, 100%); max-height: calc(100vh - 60px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 64px rgba(28, 25, 23, 0.3); }
 .help-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 24px; border-bottom: 1px solid var(--line); }
 .help-header h2 { margin: 0 0 4px; font-size: 18px; }

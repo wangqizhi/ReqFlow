@@ -63,7 +63,11 @@ func run() (int, error) {
 		return 1, err
 	}
 	args := os.Args[1:]
-	if len(args) == 2 && args[0] == "--prepare-install" {
+	if len(args) >= 2 && args[0] == "--prepare-install" {
+		// REQ-285：应用内更新已确认忽略执行中任务，安装器传入 --confirmed 时不再重复提示。
+		if len(args) > 2 && args[2] == "--confirmed" {
+			return 0, nil
+		}
 		if prepareShutdown(backendgo.NewWorkspaceService(args[1])) {
 			return 0, nil
 		}
@@ -180,6 +184,13 @@ func run() (int, error) {
 	shutdownApproved := reportPath != ""
 	native.prepareClose = func() bool {
 		var approved bool
+		if backend.UpdateInstallConfirmed() {
+			mygo.RunOnMain(func() {
+				shutdownApproved = true
+				backend.BeginShutdown()
+			})
+			return true
+		}
 		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {
 			showStartupError("此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。")
 			return false
@@ -198,6 +209,15 @@ func run() (int, error) {
 		// waiting for an interactive shutdown confirmation over its fixture claims.
 		if reportPath != "" {
 			shutdownApproved = true
+			return
+		}
+		// 关闭确认只处理一次；更新流程确认后直接退出，避免重复弹出任务提示（REQ-285）。
+		if shutdownApproved {
+			return
+		}
+		if backend.UpdateInstallConfirmed() {
+			shutdownApproved = true
+			backend.BeginShutdown()
 			return
 		}
 		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {

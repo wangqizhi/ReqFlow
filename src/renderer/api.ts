@@ -97,7 +97,7 @@ export interface ReqFlowBridge {
   /** 安装界面强制重新检测最新版本（REQ-257）：已下载的安装包不短路，可直接发现更新的版本。 */
   recheckUpdate?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;
-  installUpdate?(): Promise<UpdateState>;
+  installUpdate?(confirmed?: boolean): Promise<UpdateState>;
   openProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   closeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   maximizeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;

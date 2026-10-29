@@ -47,6 +47,9 @@ try {
     if (item.aiExecution?.runId && !item.aiExecution.endedAt) cli(['execution', 'release', '--project', project.id, '--id', item.id, '--run', item.aiExecution.runId]);
   }
   const project = workspace.projects[0].id;
+  // REQ-280：长正文需求用于验证需求池/排期表卡片的内部滚动（不排期，停留在需求池）
+  const longBody = Array.from({ length: 30 }, (_, n) => `第 ${n + 1} 行：长正文滚动检查，超过卡片高度后应出现内部滚动条。`).join('\n');
+  cli(['item', 'add', '--project', project, '--title', '长正文滚动UI检查', '--body', longBody]);
   const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
   cli(['generate', '--project', project, '--items', item]);
   cli(['complete', '--project', project, '--id', item, '--summary', '已补齐完成说明，CLI检查通过']);
