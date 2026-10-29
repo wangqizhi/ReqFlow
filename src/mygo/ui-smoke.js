@@ -10,6 +10,9 @@
     throw Error('UI check timed out after ' + lastAction + '; completed checks: ' + Object.keys(checks).join(','));
   };
   const button = text => [...document.querySelectorAll('button')].find(el => el.textContent.trim() === text);
+  // 保存按钮在保存中会变成「保存中…」，等待时先确认按钮已恢复。
+  const saveButtonReady = () => !!button('保存设置') && !button('保存设置').disabled;
+  const leaveSaveReady = () => !!button('保存并返回') && !button('保存并返回').disabled;
   let lastAction = 'initialization';
   const click = async el => {
     if (!el) throw Error('UI control missing after ' + lastAction);
@@ -133,7 +136,7 @@
     await waitFor(() => document.querySelectorAll('.cli-provider-card').length === 4);
     await click([...document.querySelectorAll('.cli-provider-card')].find(el => el.querySelector('strong').textContent === 'Pi'));
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled);
+    await waitFor(saveButtonReady);
     const savedAI = await window.mygo.call('ReqFlow.Invoke', 'ai:settings:get', []);
     checks.aiProfiles = { ok: savedAI.ok && savedAI.settings.kind === 'cli' && savedAI.settings.cli === 'pi' && savedAI.settings.profiles.length === profileCount + 1 && !!document.querySelector('.settings-page') && !document.querySelector('.input-action input') };
     await click(button('返回项目菜单'));
@@ -142,7 +145,7 @@
     checks.aiProfiles.ok &&= document.querySelector('.cli-provider-card[aria-pressed="true"] strong').textContent === 'Pi';
     await click(document.querySelector('.ai-profile-list button'));
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled);
+    await waitFor(saveButtonReady);
     const switchedAI = await window.mygo.call('ReqFlow.Invoke', 'ai:settings:get', []);
     checks.aiProfiles.ok &&= switchedAI.settings.activeProfileId === switchedAI.settings.profiles[0].id;
     const detectCLI = window.reqflow.detectAIProviderCLIs;
@@ -157,15 +160,14 @@
     checks.cliModels = { ok: document.querySelector('[aria-label="CLI 模型名称"]').value === 'test-model' && effortGroup.querySelector('[aria-pressed="true"]').textContent === '关闭' };
     await click([...effortGroup.querySelectorAll('button')].find(el => el.textContent === '高'));
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled);
+    await waitFor(saveButtonReady);
     const modelSettings = await window.mygo.call('ReqFlow.Invoke', 'ai:settings:get', []);
     checks.cliModels.ok &&= modelSettings.settings.model === 'test-model' && modelSettings.settings.reasoningEffort === 'high';
     await click([...document.querySelectorAll('.cli-provider-card')].find(el => el.querySelector('strong').textContent === 'Pi'));
     checks.cliModels.ok &&= !document.querySelector('[aria-label="CLI 模型名称"]').value && !document.querySelector('[aria-label="CLI 思考等级"]');
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled);
+    await waitFor(saveButtonReady);
     window.reqflow.detectAIProviderCLIs = detectCLI;
-    // Dirty state spans tabs. Failed saves keep the dialog and all drafts.
     const edit = async (element, value) => {
       const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
@@ -173,6 +175,38 @@
       await new Promise(resolve => setTimeout(resolve, 50));
     };
     const settingsTab = text => [...document.querySelectorAll('[aria-label="设置功能菜单"] button')].find(el => el.textContent === text);
+    // REQ-288：保存期间不锁定输入与滚动；重复提交只写入一次，完成后保持焦点和滚动位置。
+    const originalSaveAI = window.reqflow.saveAISettings;
+    let asyncSaves = 0;
+    window.reqflow.saveAISettings = async () => { asyncSaves++; await new Promise(resolve => setTimeout(resolve, 350)); return { ok: true }; };
+    const asyncInput = document.querySelector('.settings-page form input');
+    await edit(asyncInput, '异步保存检查');
+    asyncInput.focus();
+    const settingsBody = document.querySelector('.settings-page .settings-body');
+    settingsBody.scrollTop = Math.min(120, Math.max(0, settingsBody.scrollHeight - settingsBody.clientHeight));
+    const asyncScroll = settingsBody.scrollTop;
+    const asyncForm = document.querySelector('.settings-page form');
+    asyncForm.requestSubmit();
+    asyncForm.requestSubmit();
+    await waitFor(() => document.querySelector('.settings-page').dataset.saving === 'true');
+    const saveButton = () => document.querySelector('.settings-footer .primary');
+    const savingState = {
+      inputEnabled: !asyncInput.disabled,
+      focused: document.activeElement === asyncInput,
+      scrollBefore: asyncScroll, scrollDuring: settingsBody.scrollTop,
+      savingButton: !!saveButton() && saveButton().disabled && saveButton().textContent.includes('保存中'),
+      duplicateBlocked: asyncSaves === 1,
+    };
+    await waitFor(() => !document.querySelector('.settings-page').dataset.saving);
+    await waitFor(() => !!button('保存设置') && !button('保存设置').disabled);
+    savingState.scrollAfter = settingsBody.scrollTop;
+    savingState.focusedAfter = document.activeElement === asyncInput;
+    savingState.saves = asyncSaves;
+    checks.settingsAsyncSave = { ok: savingState.inputEnabled && savingState.focused && savingState.scrollDuring === asyncScroll && savingState.scrollAfter === asyncScroll && savingState.focusedAfter && savingState.savingButton && savingState.duplicateBlocked && asyncSaves === 1, ...savingState };
+    window.reqflow.saveAISettings = originalSaveAI;
+    await click(button('保存设置'));
+    await waitFor(() => !!button('保存设置') && !button('保存设置').disabled);
+    // Dirty state spans tabs. Failed saves keep the dialog and all drafts.
     await edit(document.querySelector('.settings-page form input'), '未保存配置测试');
     await click(settingsTab('提示词模板'));
     await click(button('核心需求'));
@@ -181,12 +215,12 @@
     checks.corePromptTemplate = { ok: coreDefault.includes('{{requirements}}') && coreDefault.includes('{{guidance}}') && coreDefault.includes('{{requirement_ids}}') };
     await edit(coreInput, coreDefault + '\n核心模板保存检查');
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled);
+    await waitFor(saveButtonReady);
     const coreSaved = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
     checks.corePromptTemplate.ok &&= coreSaved.state.corePromptTemplate.endsWith('核心模板保存检查');
     await edit(coreInput, '');
     await click(button('保存设置'));
-    await waitFor(() => !button('保存设置').disabled && coreInput.value === coreDefault);
+    await waitFor(() => saveButtonReady() && coreInput.value === coreDefault);
     const coreReset = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
     checks.corePromptTemplate.ok &&= !coreReset.state.corePromptTemplate && coreInput.getBoundingClientRect().bottom < innerHeight;
     await click(button('基线需求'));
@@ -200,7 +234,7 @@
     const saveAI = window.reqflow.saveAISettings;
     window.reqflow.saveAISettings = async () => ({ ok: false, error: '保存失败测试' });
     await click(button('保存并返回'));
-    await waitFor(() => !button('保存并返回').disabled);
+    await waitFor(leaveSaveReady);
     checks.settingsUnsaved.ok &&= !!document.querySelector('[aria-labelledby="unsaved-settings-title"]') && document.querySelector('.settings-page textarea').value.endsWith('跨页保存检查');
     window.reqflow.saveAISettings = saveAI;
     await click(button('保存并返回'));

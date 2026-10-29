@@ -179,6 +179,11 @@ export default function App() {
   // Project snapshots are immutable: reuse derived indexes across Flow switches.
   const scheduledIds = useMemo(() => new Set((p?.items || []).filter(i => scheduledBatch(p!, i)).map(i => i.id)), [p]);
   const pendingCommitIds = useMemo(() => new Map((data?.projects || []).map(project => [project.id, new Set(pendingCommitItems(project).map(i => i.id))])), [data]);
+  // REQ-289：项目列表计数随 data 缓存，设置保存等无关重渲染不再逐个项目扫描需求。
+  const sidebarCounts = useMemo(() => new Map<string, { active: number; pending: number }>((data?.projects || []).map(project => {
+    const active = project.items.filter(i => !i.archived);
+    return [project.id, { active: active.length, pending: active.filter(i => i.status === 'pending_verification').length }];
+  })), [data]);
   const terminalEnabled = terminalSettingEnabled || !!agentSessions[p?.id || ''];
   const publishing = !!publishStates[p?.id || '']?.running;
   const publishStep = publishStates[p?.id || '']?.step || '';
@@ -666,21 +671,21 @@ export default function App() {
   const executing = (i: Item) => itemExecuting(i, agentSession);
   const [diffOpen, setDiffOpen] = useState(false);
   const [executionView, setExecutionView] = useState<'executing' | 'pending'>('executing');
-  const globalPending = (data?.projects || []).flatMap(project => project.items.filter(i => !i.archived && i.status === 'pending_verification').map(item => ({ project, item })));
-  const globalExecuting = (data?.projects || []).flatMap(project => project.items.filter(i => itemExecuting(i, agentSessions[project.id])).map(item => ({ project, item })));
+  const globalPending = useMemo(() => (data?.projects || []).flatMap(project => project.items.filter(i => !i.archived && i.status === 'pending_verification').map(item => ({ project, item }))), [data]);
+  const globalExecuting = useMemo(() => (data?.projects || []).flatMap(project => project.items.filter(i => itemExecuting(i, agentSessions[project.id])).map(item => ({ project, item }))), [data, agentSessions]);
   const eligible = (i: Item) => !i.archived && !executing(i) && (i.status === 'ready' || i.status === 'in_progress');
   const bulkEligible = (i: Item) => eligible(i) && !i.deferred;
   const actionEligible = (i: Item) => tab === 'generate' ? allInProgress.some(x => x.id === i.id) : tab === 'executing' ? !!activeAIExecution(i) : bulkEligible(i);
   const picked = selected.map((id) => p?.items.find((i) => i.id === id)).filter((i): i is Item => !!i && eligible(i));
   // 「提交验证」页顶部按钮：把待执行与执行中的全部需求合成一条 Prompt
-  const executingItems = (p?.items || []).filter(i => executing(i));
-  const allInProgress = (p?.items || []).filter((i) => !i.archived && !executing(i) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && scheduledIds.has(i.id))));
+  const executingItems = useMemo(() => (p?.items || []).filter(i => itemExecuting(i, agentSession)), [p, agentSession]);
+  const allInProgress = useMemo(() => (p?.items || []).filter((i) => !i.archived && !itemExecuting(i, agentSession) && (i.status === 'in_progress' || (i.status === 'ready' && !!p && scheduledIds.has(i.id)))), [p, agentSession, scheduledIds]);
   // 待验证需求（REQ-090）：存在时点击「发布」先弹确认浮层，提示先完成验证
-  const pendingVerifyItems = (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification');
-  const inProgressIds = new Set(allInProgress.map(i => i.id));
-  const inProgress = allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
+  const pendingVerifyItems = useMemo(() => (p?.items || []).filter((i) => !i.archived && i.status === 'pending_verification'), [p]);
+  const inProgressIds = useMemo(() => new Set(allInProgress.map(i => i.id)), [allInProgress]);
+  const inProgress = useMemo(() => allInProgress.filter(i => matchesSchedule(i.scheduledDate, scheduleMode, scheduleDate)
     && (typeFilter === 'all' || i.type === typeFilter)
-    && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase()));
+    && [i.title, i.number, i.body].join(' ').toLowerCase().includes(query.toLowerCase())), [allInProgress, scheduleMode, scheduleDate, typeFilter, query]);
   useEffect(() => {
     if (!executingItems.length) setTab(current => current === 'executing' ? 'generate' : current);
     if (!globalExecuting.length) return;
@@ -960,9 +965,8 @@ export default function App() {
   }
 
   function renderSidebarProject(pr: Project) {
-    const activeItems = pr.items.filter((i) => !i.archived);
-    const pendingCount = activeItems.filter((i) => i.status === 'pending_verification').length;
-    const countLabel = `${activeItems.length} 条未归档需求，${pendingCount} 条待验证`;
+    const counts = sidebarCounts.get(pr.id) || { active: 0, pending: 0 };
+    const countLabel = `${counts.active} 条未归档需求，${counts.pending} 条待验证`;
     return (<div key={pr.id} role="button" tabIndex={0}
               draggable={!busy} onDragEnd={projectDragEnd} onDragStart={(e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
               onDragOver={busy ? undefined : projectDragOver} onDragLeave={projectDragLeave} onDrop={e => { if (!busy) projectDrop(e, pr.id, act); }}
@@ -979,7 +983,7 @@ export default function App() {
                   aria-label={sshConnections[pr.dir!]?.ok ? '远程连接正常' : '远程连接已断开'}
                   title={sshConnections[pr.dir!]?.ok ? '远程连接正常' : (sshConnections[pr.dir!]?.error || '远程连接已断开')} />
               )}
-              <span className={'small-count' + (pendingCount > 0 ? ' has-pending' : '')} title={countLabel} aria-label={countLabel}>{activeItems.length}</span>
+              <span className={'small-count' + (counts.pending > 0 ? ' has-pending' : '')} title={countLabel} aria-label={countLabel}>{counts.active}</span>
               <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
                 e.stopPropagation();
                 const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });

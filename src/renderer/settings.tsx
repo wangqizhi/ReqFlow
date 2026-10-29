@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { bridge } from './api';
 import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI, AIReasoningEffort } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
@@ -115,6 +115,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const [backup, setBackup] = useState<BackupSettings>({ ...emptyBackup });
   const [status, setStatus] = useState<BackupStatus>({ running: false });
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [messageKind, setMessageKind] = useState<'info' | 'ok' | 'err'>('info');
+  const [templateConflict, setTemplateConflict] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [backupLoaded, setBackupLoaded] = useState(false);
   const [importConfirm, setImportConfirm] = useState(false);
@@ -162,7 +166,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   }
   useEffect(() => { void detectCLIs(); }, []);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
-  useEffect(() => { setMessage(''); setImportConfirm(false); }, [tab]);
+  useEffect(() => { setMessage(''); setImportConfirm(false); setTemplateConflict(false); }, [tab]);
   useEffect(() => {
     if (!importConfirm || busy) return;
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setImportConfirm(false); } };
@@ -228,10 +232,26 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
-  async function perform(action: () => Promise<any>, success: string): Promise<boolean> {
-    setBusy(true); setMessage('');
-    try { const r = await action(); if (!r?.ok) throw Error(r?.error || '操作失败'); setMessage(success); notify(success); return true; }
-    catch (e: any) { setMessage(e.message); notify(e.message, 'err'); return false; }
+  // REQ-288：保存走独立的 saving 状态，不锁定输入与滚动；只有阻塞性操作才使用 busy。
+  // 保存成功只更新当前面板的已保存快照，避免触发项目列表与 Flow 的无关重算。
+  async function perform(action: () => Promise<any>, success: string, kind: 'save' | 'action' = 'action'): Promise<boolean> {
+    if (kind === 'save') {
+      if (savingRef.current || busy) return false;
+      savingRef.current = true; setSaving(true); setMessage(''); setMessageKind('info');
+      try {
+        const r = await action();
+        if (!r?.ok) throw Error(r?.error || '操作失败');
+        setMessage(success); setMessageKind('ok');
+        return true;
+      } catch (e: any) {
+        setMessage(e.message); setMessageKind('err');
+        return false;
+      } finally { savingRef.current = false; setSaving(false); }
+    }
+    if (savingRef.current) { setMessage('设置正在保存，请稍候…'); setMessageKind('info'); return false; }
+    setBusy(true); setMessage(''); setMessageKind('info');
+    try { const r = await action(); if (!r?.ok) throw Error(r?.error || '操作失败'); setMessage(success); setMessageKind('ok'); notify(success); return true; }
+    catch (e: any) { setMessage(e.message); setMessageKind('err'); notify(e.message, 'err'); return false; }
     finally { setBusy(false); }
   }
   async function importRemoteBackup() {
@@ -254,65 +274,101 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     : tab === 'server' || tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
-    if (tab === 'ai') return perform(async () => { const r = await bridge.saveAISettings(configuration()); if (r.ok) setSavedAI(fingerprint(configuration())); return r; }, 'AI 配置已保存，当前供应商已生效');
-    if (tab === 'template') return perform(async () => {
-      const r = await bridge.apply({ op: templateOp(templateKind), text: templateText, expectedVersion: templateVersion === null ? undefined : templateVersion });
-      if (!r.ok) throw Error(r.error || '保存失败');
-      setTemplateVersion(r.version);
-      const effective = templateText.trim() || (templateKind === 'core' ? DEFAULT_CORE_PROMPT_TEMPLATE : templateKind === 'publish' ? DEFAULT_PUBLISH_TEMPLATE : DEFAULT_BASELINE_TEMPLATE);
-      if (templateKind === 'core') setCoreTpl(effective); else if (templateKind === 'publish') setPublishTpl(effective); else setBaselineTpl(effective);
-      setSavedTemplates(previous => ({ ...previous, [templateKind]: effective }));
-      return r;
-    }, templateKind === 'core' ? '核心需求模板已保存' : templateKind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存');
-    if (tab === 'logs') return perform(async () => {
-      const aiResult = await bridge.saveAISettings(configuration());
-      if (!aiResult.ok) return aiResult;
-      setSavedAI(fingerprint(configuration()));
-      const r = bridge.savePublishLogSettings ? await bridge.savePublishLogSettings({ enabled: publishLogging }) : aiResult;
-      if (r.ok) setSavedPublishLogging(publishLogging);
-      return r;
-    }, '日志设置已保存');
+    if (savingRef.current) return false;
+    // 保存前固定本次写入的编辑态快照；保存期间的新输入不会被误标为已保存（REQ-288）。
+    if (tab === 'ai') {
+      const payload = configuration();
+      return perform(async () => { const r = await bridge.saveAISettings(payload); if (r.ok) setSavedAI(fingerprint(payload)); return r; }, 'AI 配置已保存，当前供应商已生效', 'save');
+    }
+    if (tab === 'template') {
+      const kind = templateKind, text = templateText, version = templateVersion;
+      setTemplateConflict(false);
+      return perform(async () => {
+        const r = await bridge.apply({ op: templateOp(kind), text, expectedVersion: version === null ? undefined : version });
+        if (!r.ok) {
+          if (r.code === 'VERSION_CONFLICT') setTemplateConflict(true);
+          throw Error(r.error || '保存失败');
+        }
+        setTemplateVersion(r.version);
+        const effective = text.trim() || (kind === 'core' ? DEFAULT_CORE_PROMPT_TEMPLATE : kind === 'publish' ? DEFAULT_PUBLISH_TEMPLATE : DEFAULT_BASELINE_TEMPLATE);
+        // 保存期间没有继续编辑时才回填规范化文本，避免覆盖新的输入与光标位置。
+        if (kind === 'core') setCoreTpl(current => current === text ? effective : current);
+        else if (kind === 'publish') setPublishTpl(current => current === text ? effective : current);
+        else setBaselineTpl(current => current === text ? effective : current);
+        setSavedTemplates(previous => ({ ...previous, [kind]: effective }));
+        return r;
+      }, kind === 'core' ? '核心需求模板已保存' : kind === 'publish' ? '全局发布模板已保存' : '全局基准模板已保存', 'save');
+    }
+    if (tab === 'logs') {
+      const payloadAI = configuration();
+      const payloadLogging = publishLogging;
+      return perform(async () => {
+        const aiResult = await bridge.saveAISettings(payloadAI);
+        if (!aiResult.ok) return aiResult;
+        setSavedAI(fingerprint(payloadAI));
+        const r = bridge.savePublishLogSettings ? await bridge.savePublishLogSettings({ enabled: payloadLogging }) : aiResult;
+        if (r.ok) setSavedPublishLogging(payloadLogging);
+        return r;
+      }, '日志设置已保存', 'save');
+    }
     if (tab === 'server' || tab === 'data') return true;
-    return perform(async () => { const r = await bridge.saveBackupSettings!(backup); if (r.ok) setSavedBackup(fingerprint(backup)); return r; }, '备份设置已保存');
+    const payload = backup;
+    return perform(async () => { const r = await bridge.saveBackupSettings!(payload); if (r.ok) setSavedBackup(fingerprint(payload)); return r; }, '备份设置已保存', 'save');
   }
   async function saveAndFinish() {
     await saveCurrentTab();
+  }
+  // REQ-288：版本冲突保留当前输入，只刷新并发版本号供重试。
+  async function refreshTemplateVersion() {
+    if (saving || busy) return;
+    try {
+      const r = await bridge.getWorkspace();
+      if (!r.ok) throw Error(r.error || '刷新失败');
+      setTemplateVersion(r.version);
+      setTemplateConflict(false);
+      setMessage('已刷新到最新版本，请重新保存'); setMessageKind('ok');
+    } catch (e: any) { setMessage(e.message); setMessageKind('err'); }
   }
   const aiDirty = loaded && fingerprint(configuration()) !== savedAI;
   const backupDirty = backupLoaded && fingerprint(backup) !== savedBackup;
   const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish || coreTpl !== savedTemplates.core);
   const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
   const dirty = aiDirty || backupDirty || templateDirty || logDirty;
-  useImperativeHandle(ref, () => ({ requestLeave() { if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
+  useImperativeHandle(ref, () => ({ requestLeave() { if (savingRef.current) { setMessage('设置正在保存，请稍候…'); setMessageKind('info'); return; } if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
   useEffect(() => {
-    if (!leaveConfirm || busy) return;
+    if (!leaveConfirm || busy || saving) return;
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setLeaveConfirm(false); } };
     window.addEventListener('keydown', escape, true);
     return () => window.removeEventListener('keydown', escape, true);
-  }, [leaveConfirm, busy]);
+  }, [leaveConfirm, busy, saving]);
   async function saveAllAndLeave() {
-    if (busy) return;
+    if (busy || savingRef.current) return;
+    setTemplateConflict(false);
+    const payloadAI = configuration();
+    const payloadBackup = backup;
+    const payloadLogging = publishLogging;
+    const templateTexts: Record<string, string> = { baseline: baselineTpl, publish: publishTpl, core: coreTpl };
     const success = await perform(async () => {
-      if (aiDirty) { const r = await bridge.saveAISettings(configuration()); if (!r.ok) return r; setSavedAI(fingerprint(configuration())); }
+      if (aiDirty) { const r = await bridge.saveAISettings(payloadAI); if (!r.ok) return r; setSavedAI(fingerprint(payloadAI)); }
       if (templateDirty) {
         let version = templateVersion;
-        for (const [kind, text, saved] of [['baseline', baselineTpl, savedTemplates.baseline], ['publish', publishTpl, savedTemplates.publish], ['core', coreTpl, savedTemplates.core]]) {
+        for (const [kind, text, saved] of [['baseline', templateTexts.baseline, savedTemplates.baseline], ['publish', templateTexts.publish, savedTemplates.publish], ['core', templateTexts.core, savedTemplates.core]]) {
           if (text === saved) continue;
           const r = await bridge.apply({ op: templateOp(kind), text, expectedVersion: version });
-          if (!r.ok) return r;
+          if (!r.ok) { if (r.code === 'VERSION_CONFLICT') setTemplateConflict(true); return r; }
           version = r.version; setTemplateVersion(version); setSavedTemplates(previous => ({ ...previous, [kind]: text }));
         }
       }
-      if (backupDirty) { const r = await bridge.saveBackupSettings!(backup); if (!r.ok) return r; setSavedBackup(fingerprint(backup)); }
-      if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: publishLogging }); if (!r.ok) return r; setSavedPublishLogging(publishLogging); }
+      if (backupDirty) { const r = await bridge.saveBackupSettings!(payloadBackup); if (!r.ok) return r; setSavedBackup(fingerprint(payloadBackup)); }
+      if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: payloadLogging }); if (!r.ok) return r; setSavedPublishLogging(payloadLogging); }
       return { ok: true };
-    }, '设置已保存');
+    }, '设置已保存', 'save');
     if (success) onLeave();
   }
-  return <section className="settings-page" aria-label="设置">
+  return <section className="settings-page" aria-label="设置" data-saving={saving ? 'true' : undefined}>
       <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
-        {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && tabReady) void saveAndFinish(); }}>
+        {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
           <div className="ai-profile-toolbar"><div className="ai-profile-list" role="group" aria-label="AI 配置">{profiles.map(profile => <button className={'tag-btn' + (form.activeProfileId === profile.id ? ' on' : '')} type="button" key={profile.id} disabled={busy || !loaded} aria-pressed={form.activeProfileId === profile.id} onClick={() => chooseProfile(profile.id!)}>{form.activeProfileId === profile.id ? form.provider || '未命名配置' : profile.provider || '未命名配置'}</button>)}</div><button type="button" className="btn" disabled={busy || !loaded || profiles.length >= 50} onClick={addProfile}><Plus size={16} />新增配置</button><button type="button" className="btn" disabled={busy || !loaded || profiles.length < 2} onClick={removeProfile}><Trash size={16} />删除配置</button></div>
           <p className="settings-hint">选择配置后点击「保存设置」切换供应商；切换前的编辑会保留在本页，返回项目菜单前请保存。</p>
@@ -348,12 +404,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
         </form>}
         {tab === 'template' && <form onSubmit={(e) => {
           e.preventDefault();
-          if (!busy && tabReady) void saveAndFinish();
+          if (!busy && !saving && tabReady) void saveAndFinish();
         }}>
-          <div className="segmented" role="group" aria-label="提示词模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求'], ['core', '核心需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); }}>{label}</button>)}</div>
+          <div className="segmented" role="group" aria-label="提示词模板类型">{[['baseline', '基线需求'], ['publish', '发布功能需求'], ['core', '核心需求']].map(([id, label]) => <button type="button" key={id} disabled={busy} aria-pressed={templateKind === id} className={templateKind === id ? 'on' : ''} onClick={() => { setTemplateKind(id); setMessage(''); setTemplateConflict(false); }}>{label}</button>)}</div>
           <p className="settings-hint">{templateKind === 'core' ? '指派给 CLI 时使用此核心提示词。占位词：{{requirement_count}} 数量、{{requirement_ids}} 编号及 ID、{{project_name}} 名称、{{project_dir}} 目录、{{project_description}} 背景、{{guidance_version}} 引导词版本、{{guidance}} 引导词、{{context_rules}} 项目守则、{{requirements}} 需求及验收、{{delivery_guidance}} 交付引导。保存后对下一次指派生效。' : templateKind === 'publish' ? '「记录新需求 → 发布功能需求」使用这里的模板。发布入口应调用用户部署脚本；没有部署配置时先确认目标位置和部署细节。' : '「记录新需求 → 基线需求」用这里的模板预填一条需求。优先级：项目模板 > 全局模板 > 内置默认模板。'}</p>
           <label className="field">{templateKind === 'core' ? '核心需求模板' : templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateText} disabled={busy || templateVersion === null} onChange={(e) => templateKind === 'core' ? setCoreTpl(e.target.value) : templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
           <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存设置」。</p>
+          {templateConflict && <div className="settings-message err settings-conflict" role="alert"><span>设置已被其他方式修改，请刷新版本后重试。</span><button type="button" className="btn sm" disabled={saving || busy} onClick={() => void refreshTemplateVersion()}>刷新版本</button></div>}
         </form>}
         {tab === 'logs' && <>
           <div className="validation-setting"><div><label htmlFor="ai-request-logging">记录 AI 请求日志</label><p>默认开启，记录请求时间、模型、响应状态和耗时；关闭后停止新增记录。</p></div><label className="switch"><input id="ai-request-logging" type="checkbox" checked={form.requestLogging ?? true} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, requestLogging: e.target.checked })} /><span className="slider" /><span className="switch-state">{form.requestLogging === false ? '已关闭' : '已开启'}</span></label></div>
@@ -376,9 +433,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
         </>}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
-      {message && <p className="settings-message" role="status">{message}</p>}
-      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && tab !== 'server' && <button className="btn primary" disabled={busy || !tabReady} onClick={() => void saveAndFinish()}>保存设置</button>}</div>
-      {importConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title"><div className="dialog-head"><h2 id="remote-import-title">从远端导入备份</h2></div><p>将先保存当前备份仓库设置，再读取所选分支的备份。仅补充本机缺失内容，相同 ID 的项目设置与需求保留本机版本；远端执行锁不会恢复。</p><p>导入前的本机工作区会保存在数据目录的 before-remote-import.json 中。</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setImportConfirm(false)}>取消</button><button className="btn primary" disabled={busy || status.running} onClick={() => void importRemoteBackup()}>{busy ? '正在导入…' : '确认导入'}</button></div></div></div>}
-      {leaveConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title"><div className="dialog-head"><h2 id="unsaved-settings-title">设置尚未保存</h2></div><p>存在未保存的设置，是否保存后返回项目菜单？</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setLeaveConfirm(false)}>继续编辑</button><button className="btn" disabled={busy} onClick={onLeave}>放弃更改</button><button className="btn primary" disabled={busy || (backupDirty && status.running)} onClick={() => void saveAllAndLeave()}>{busy ? '保存中…' : '保存并返回'}</button></div></div></div>}
+      {message && <p className={'settings-message' + (messageKind === 'err' ? ' err' : '')} role={messageKind === 'err' ? 'alert' : 'status'}>{message}</p>}
+      <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && tab !== 'server' && <button className="btn primary" disabled={busy || saving || !tabReady} onClick={() => void saveAndFinish()}>{saving ? '保存中…' : '保存设置'}</button>}</div>
+      {importConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title"><div className="dialog-head"><h2 id="remote-import-title">从远端导入备份</h2></div><p>将先保存当前备份仓库设置，再读取所选分支的备份。仅补充本机缺失内容，相同 ID 的项目设置与需求保留本机版本；远端执行锁不会恢复。</p><p>导入前的本机工作区会保存在数据目录的 before-remote-import.json 中。</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy} onClick={() => setImportConfirm(false)}>取消</button><button className="btn primary" disabled={busy || saving || status.running} onClick={() => void importRemoteBackup()}>{busy ? '正在导入…' : '确认导入'}</button></div></div></div>}
+      {leaveConfirm && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title"><div className="dialog-head"><h2 id="unsaved-settings-title">设置尚未保存</h2></div><p>存在未保存的设置，是否保存后返回项目菜单？</p>{message && <p role="alert">{message}</p>}<div className="dialog-actions"><button className="btn" disabled={busy || saving} onClick={() => setLeaveConfirm(false)}>继续编辑</button><button className="btn" disabled={busy || saving} onClick={onLeave}>放弃更改</button><button className="btn primary" disabled={busy || saving || (backupDirty && status.running)} onClick={() => void saveAllAndLeave()}>{busy || saving ? '保存中…' : '保存并返回'}</button></div></div></div>}
   </section>;
 });
