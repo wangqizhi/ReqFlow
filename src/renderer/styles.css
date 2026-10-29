@@ -234,9 +234,13 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .revision { color: var(--muted); font-family: Consolas, monospace; font-size: 11px; }
 .item-title { display: block; text-align: left; font-size: 15.5px; font-weight: 650; margin: 7px 0 3px; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-title:hover { color: var(--accent-dark); }
-/* REQ-066：列表中过长的需求说明缩略为固定两行（min-height 让短说明也占满两行，
-   卡片高度不随正文长度变化）；悬停 title 与详情弹窗可看全文 */
-.body-copy { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 3.2em; }
+/* REQ-280：需求说明过长时在卡片内滚动查看；滚动条沿用面板的浅色描边配色，
+   短说明保持两行高度，超过六行才出现内部滚动条 */
+.body-copy { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; min-height: 3.2em; max-height: 9.6em; overflow-y: auto; padding-right: 2px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.body-copy::-webkit-scrollbar { width: 8px; }
+.body-copy::-webkit-scrollbar-track { background: transparent; }
+.body-copy::-webkit-scrollbar-thumb { background-color: var(--line-2); border-radius: 4px; }
+.body-copy::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
 .failure-content { background: var(--danger-soft); border: 1px solid #fecaca; border-radius: 8px; padding: 9px 12px; margin: 0 0 8px; font-size: 12.5px; }
 .failure-content strong { color: var(--danger); display: block; margin-bottom: 3px; }
 .failure-content p { margin: 2px 0; color: #7f1d1d; }
@@ -1278,6 +1282,10 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 @media (prefers-reduced-motion: reduce) { .browser-window-loading-bar { animation: none; width: 100%; opacity: 0.4; } }
 
 .verification-version { margin: 8px 0; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--ink-2); font-size: 12.5px; }
+.verification-version p { margin: 0; }
+.verification-version p + p, .verification-components { margin-top: 5px; }
+.verification-components { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.verification-components span { overflow-wrap: anywhere; min-width: 0; }
 
 .browser-window-message { position: fixed; z-index: 100; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); color: var(--ink); padding: 10px 16px; border: 1px solid var(--line); border-radius: 8px; }
 

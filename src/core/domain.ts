@@ -26,6 +26,17 @@ function completionSummary(a: any): string {
   return Array.from(note).slice(0, 50).join('');
 }
 
+export function versionComponents(value: unknown): Record<string, string> {
+  const result: Record<string, string> = Object.create(null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+  const valid = (text: unknown): text is string => typeof text === 'string' && !!text.trim() && [...text.trim()].length <= 100 && !/[\r\n]/.test(text.trim());
+  for (const [name, raw] of Object.entries(value)) {
+    const version = raw && typeof raw === 'object' ? (raw as { version?: unknown }).version : raw;
+    if (valid(name) && valid(version)) result[name] = version.trim();
+  }
+  return result;
+}
+
 export type Item = {
   id: string;
   number: string;
@@ -47,6 +58,7 @@ export type Item = {
   gitCommitHash?: string;
   executionVersion?: number;
   verificationVersion?: string;
+  verificationComponents?: Record<string, string>;
   completionNote?: string;
   completionNoteVersion?: number;
   scheduledDate?: string;
@@ -504,12 +516,21 @@ async function applyOperation(s: Workspace, a: any) {
   }
   if (a.op === 'projectReorder') {
     // REQ-167：远程项目并入各文件夹后，排序分组只看文件夹，不再按本地/远程拆分
+    if (!['top', 'before', 'after'].includes(a.position)) throw Error('排序目标无效');
+    let target: Project | undefined;
+    if (a.position === 'top') {
+      target = s.projects.find(pr => pr.folderId === p.folderId && pr !== p);
+      if (!target) return; // 已在当前文件夹顶部
+    } else {
+      // REQ-281：拖到其他文件夹的项目上时，先迁移分组再按目标位置排序
+      target = s.projects.find(pr => pr.id === a.target);
+      if (!target) throw Error('排序目标无效');
+      if (target === p) return;
+      p.folderId = target.folderId;
+    }
     const peers = s.projects.filter(pr => pr.folderId === p.folderId);
-    const target = a.position === 'top' ? peers[0] : peers.find(pr => pr.id === a.target);
-    if (!['top', 'before', 'after'].includes(a.position) || !target) throw Error('排序目标无效');
-    if (target === p) return;
     const ordered = peers.filter(pr => pr !== p);
-    ordered.splice(ordered.indexOf(target) + (a.position === 'after' ? 1 : 0), 0, p);
+    ordered.splice(a.position === 'top' ? 0 : ordered.indexOf(target) + (a.position === 'after' ? 1 : 0), 0, p);
     let index = 0;
     s.projects = s.projects.map(pr => peers.includes(pr) ? ordered[index++] : pr);
     return;
@@ -898,8 +919,11 @@ async function applyOperation(s: Workspace, a: any) {
     finishAIExecution(i, now, 'completed');
     i.status = 'pending_verification';
     delete i.verificationVersion;
+    delete i.verificationComponents;
     const verificationVersion = String(a.verificationVersion || '').trim();
     if (verificationVersion && [...verificationVersion].length <= 100 && !/[\r\n]/.test(verificationVersion)) i.verificationVersion = verificationVersion;
+    const components = versionComponents(a.verificationComponents);
+    if (Object.keys(components).length) i.verificationComponents = components;
     i.link = String(a.link || '');
     if (completionNote) {
       i.completionNote = completionNote;
@@ -916,6 +940,10 @@ async function applyOperation(s: Workspace, a: any) {
     const value = String(a.value || '').trim();
     if ([...value].length > 100 || /[\r\n]/.test(value)) throw Error('验证版本须为 100 字以内的单行文字');
     if (value) i.verificationVersion = value; else delete i.verificationVersion;
+    if (a.components !== undefined) {
+      const components = versionComponents(a.components);
+      if (Object.keys(components).length) i.verificationComponents = components; else delete i.verificationComponents;
+    }
     return;
   }
   if (a.op === 'completionNote') {

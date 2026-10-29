@@ -466,7 +466,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 					_ = os.WriteFile(name+".png", png, 0600)
 				}
 				if surface == "terminal" {
-					value, err := w.Page().EvalContext(ctx, `(async()=>{const dock=document.querySelector('.publish-terminal');const id=dock.dataset.runId;dock.querySelector('[aria-label="在独立窗口打开终端"]').click();const end=Date.now()+5000;while(document.querySelector('.publish-terminal')){if(Date.now()>end)throw Error('Terminal did not detach');await new Promise(r=>setTimeout(r,30));}return id;})()`)
+					value, err := w.Page().EvalContext(ctx, `(async()=>{const selector='.terminal-tab-panel[aria-label="发布"] .publish-terminal';const dock=document.querySelector(selector);const id=dock.dataset.runId;dock.querySelector('[aria-label="在独立窗口打开终端"]').click();const end=Date.now()+5000;while(document.querySelector(selector)){if(Date.now()>end)throw Error('Terminal did not detach');await new Promise(r=>setTimeout(r,30));}return id;})()`)
 					id, _ := value.(string)
 					var child *mygo.Window
 					var ready chan struct{}
@@ -498,7 +498,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 						child.Close()
 					}
 					_ = writeReport(fmt.Sprintf("%s.detached-%d.json", path, height), detached)
-					_, _ = w.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+3000;while(!document.querySelector('.publish-terminal')){if(Date.now()>end)throw Error('Terminal did not reattach');await new Promise(r=>setTimeout(r,30));}})()`)
+					_, _ = w.Page().EvalContext(ctx, `(async()=>{const end=Date.now()+3000;while(!document.querySelector('.terminal-tab-panel[aria-label="发布"] .publish-terminal')){if(Date.now()>end)throw Error('Terminal did not reattach');await new Promise(r=>setTimeout(r,30));}})()`)
 				}
 
 			}

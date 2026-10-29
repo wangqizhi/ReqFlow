@@ -1,4 +1,5 @@
 import { FileDiff } from './file-diff';
+import { VerificationVersions } from './verification-versions';
 // ReqFlow 主界面 —— 移植自线上 app/page.tsx 的完整工作台逻辑，
 // 交互与状态流与线上一致；新增「帮助 / CLI 参考」入口。
 
@@ -1121,7 +1122,7 @@ export default function App() {
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="segmented" aria-label="执行状态"><button aria-pressed={executionView === 'executing'} onClick={() => setExecutionView('executing')}>执行中 · {globalExecuting.length}</button><button aria-pressed={executionView === 'pending'} onClick={() => setExecutionView('pending')}>待验证 {globalPending.length > 0 && <span className="pending-count">{globalPending.length}</span>}</button></div><div className="execution-list">{executionView === 'pending' ? <>{!globalPending.length && <div className="empty">暂无待验证需求</div>}{globalPending.map(({ project, item }) => <article className="req-card" key={item.id}><div className="card-body"><div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('pending_verification'); }}>{project.name}</button><code>{item.number}</code><span className="status pending_verification">待验证</span></div><p className="body-copy">{item.title || item.body}</p></div></article>)}</> : <>
+        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="segmented" aria-label="执行状态"><button aria-pressed={executionView === 'executing'} onClick={() => setExecutionView('executing')}>执行中 · {globalExecuting.length}</button><button aria-pressed={executionView === 'pending'} onClick={() => setExecutionView('pending')}>待验证 {globalPending.length > 0 && <span className="pending-count">{globalPending.length}</span>}</button></div><div className="execution-list">{executionView === 'pending' ? <>{!globalPending.length && <div className="empty">暂无待验证需求</div>}{globalPending.map(({ project, item }) => <article className="req-card" key={item.id}><div className="card-body"><div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('pending_verification'); }}>{project.name}</button><code>{item.number}</code><span className="status pending_verification">待验证</span></div><p className="body-copy">{item.title || item.body}</p><VerificationVersions item={item} /></div></article>)}</> : <>
           {globalExecuting.some(({ item }) => !!activeAIExecution(item)) && <div className="settings-actions"><label className="check-label"><input type="checkbox" checked={globalExecuting.filter(({ item }) => !!activeAIExecution(item)).every(({ project, item }) => globalSelected.includes(project.id + ':' + item.id))} onChange={e => setGlobalSelected(e.target.checked ? globalExecuting.filter(({ item }) => !!activeAIExecution(item)).map(({ project, item }) => project.id + ':' + item.id) : [])} />全选可释放任务</label><button className="btn" disabled={busy || !globalSelected.length} onClick={() => setBulkConfirm('global')}>批量释放 · 已选 {globalSelected.length} 条</button></div>}
           {!globalExecuting.length && <div className="empty">暂无执行中的任务</div>}
           {globalExecuting.map(({ project, item: i }) => {
@@ -1346,7 +1347,7 @@ export default function App() {
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
-                      {i.status === 'pending_verification' && <p className="verification-version">在版本：{i.verificationVersion || '项目版本未提供'}{i.verificationVersion ? ' 及以上验证' : ''}</p>}
+                      {i.status === 'pending_verification' && <VerificationVersions item={i} />}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
                         {activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。'
@@ -1740,8 +1741,8 @@ export default function App() {
                   {guideTab === 'run' && <>
  <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{[['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi']].map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
  <label className="field inline"><input type="checkbox" checked={terminalFullAccess} onChange={e => setTerminalFullAccess(e.target.checked)} />完整控制权限启动</label>
- <label className="field">版本号定位文件<input value={versionFile} onChange={e => setVersionFile(e.target.value)} placeholder="项目内相对路径，如 VERSION 或 frontend/package.json" /></label>
- <p className="settings-hint">留空读取项目根 package.json 的 version；指定文件支持 JSON 的 version 或单行版本文本。读取失败不使用 ReqFlow 版本。多组件请指定统一发布清单或需要验证组件的版本文件。</p>
+ <label className="field">版本号定位文件<input value={versionFile} onChange={e => setVersionFile(e.target.value)} placeholder="如 VERSION、release-versions.json 或 release-versions.json#components.frontend" /></label>
+ <p className="settings-hint">留空读取项目根 package.json；支持单行版本文本或 JSON 的 version。多组件清单的 components 可填版本字符串或含 version 的对象，待验证同时显示交付与组件版本。仅验证某组件可用 文件路径#components.frontend（也可指定 .version）；读取失败不使用 ReqFlow 版本。版本在完成需求时记录，修改配置不追溯更新旧需求。</p>
                     <div className="field"><span>验证源</span>
                       <div className="segmented" role="group" aria-label="验证源类型">
                         {[['none', '不使用'], ['exe', '本地程序'], ['url', '网页地址']].map(([v, l]) => (

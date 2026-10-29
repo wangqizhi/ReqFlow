@@ -1,3 +1,26 @@
+# ReqFlow 2.15.2 更新
+
+- 修复项目列表拖拽排序：从 default 拖到其他文件夹的项目位置也能移动，并自动归入目标文件夹，不再提示「排序目标无效」。
+- 需求列表卡片正文过长时改为在卡片内滚动查看，滚动条沿用面板的浅色描边与主题配色；短正文仍保持两行高度。
+
+# ReqFlow 2.15.1 更新
+
+- 待验证卡片与全局待验证列表同时显示统一交付版本和各组件版本，完成需求时保存版本快照，后续发布不会覆盖旧需求的验证依据。
+- 项目设置「验证与发布 → 版本号定位文件」支持 `release-versions.json`，以及 `release-versions.json#components.frontend` 或 `release-versions.json#components.backend.version` 等字段路径；留空仍读取根 `package.json`，`VERSION` 单行文本继续支持。
+- 多组件清单示例（组件可为字符串或含 `version` 的对象；`file` 仅记录来源，不自动读取该文件）：
+
+```json
+{
+  "version": "3.0.0",
+  "components": {
+    "frontend": "1.2.3",
+    "backend": { "version": "2.3.4", "file": "backend/package.json" }
+  }
+}
+```
+
+版本配置在需求完成时生效，不追溯填充已有待验证需求。无效或缺失组件版本会忽略；读取失败不使用 ReqFlow 自身版本。显式指定 CLI `--verify-version` 时以该版本为准，不混入自动读取的组件版本。详见 [2.15.1 版本说明](docs/release-2.15.1.md)。
+
 # ReqFlow 2.13.14 更新
 
 - 修复确认关闭应用后，内置 Agent 终端退出仍将执行中任务退回排期表的问题；保留运行记录，重开后 CLI 可继续回写。

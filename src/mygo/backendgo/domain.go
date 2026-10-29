@@ -991,25 +991,39 @@ func coreApplyOperation(s, a map[string]any) error {
 		return nil
 	case "projectReorder":
 		// REQ-167：远程项目并入各文件夹后，排序分组只看文件夹，不再按本地/远程拆分
+		position := coreString(a["position"])
+		if !coreIn(position, "top", "before", "after") {
+			return errors.New("排序目标无效")
+		}
+		var target map[string]any
+		if position == "top" {
+			for _, v := range projects {
+				pr := coreMap(v)
+				if pr["folderId"] == p["folderId"] && pr["id"] != p["id"] {
+					target = pr
+					break
+				}
+			}
+			if target == nil {
+				return nil // 已在当前文件夹顶部
+			}
+		} else {
+			// REQ-281：拖到其他文件夹的项目上时，先迁移分组再按目标位置排序
+			target = coreFind(projects, a["target"])
+			if target == nil {
+				return errors.New("排序目标无效")
+			}
+			if target["id"] == p["id"] {
+				return nil
+			}
+			p["folderId"] = target["folderId"]
+		}
 		peers := []any{}
 		for _, v := range projects {
 			pr := coreMap(v)
 			if pr["folderId"] == p["folderId"] {
 				peers = append(peers, v)
 			}
-		}
-		position := coreString(a["position"])
-		var target map[string]any
-		if position == "top" && len(peers) > 0 {
-			target = coreMap(peers[0])
-		} else {
-			target = coreFind(peers, a["target"])
-		}
-		if !coreIn(position, "top", "before", "after") || target == nil {
-			return errors.New("排序目标无效")
-		}
-		if target["id"] == p["id"] {
-			return nil
 		}
 		ordered := coreRemove(peers, p["id"])
 		for n, v := range ordered {
@@ -1460,9 +1474,13 @@ func coreApplyOperation(s, a map[string]any) error {
 		finishAIExecution(i, now, "completed")
 		i["status"] = "pending_verification"
 		delete(i, "verificationVersion")
+		delete(i, "verificationComponents")
 		// REQ-242：完成时记录包含该实现的版本，告诉验证人员从哪个版本起可以验证。
 		if v := strings.TrimSpace(coreString(a["verificationVersion"])); v != "" && len([]rune(v)) <= 100 && !strings.ContainsAny(v, "\r\n") {
 			i["verificationVersion"] = v
+		}
+		if components := versionComponents(a["verificationComponents"]); len(components) > 0 {
+			i["verificationComponents"] = components
 		}
 		i["link"] = coreString(a["link"])
 		history := map[string]any{"event": "实现完成", "time": now, "link": i["link"], "note": coreString(a["note"])}
@@ -1497,6 +1515,12 @@ func coreApplyOperation(s, a map[string]any) error {
 			delete(i, "verificationVersion")
 		} else {
 			i["verificationVersion"] = v
+		}
+		if coreHas(a, "components") {
+			delete(i, "verificationComponents")
+			if components := versionComponents(a["components"]); len(components) > 0 {
+				i["verificationComponents"] = components
+			}
 		}
 		return nil
 	case "completionNote":

@@ -104,11 +104,23 @@ func TestProjectDragOrderAndPinPersist(t *testing.T) {
 	check(c, b, a)
 	mutate(map[string]any{"op": "folder", "name": "grouping"})
 	folders := coreList(coreMap(coreTestGet(t, svc)["state"])["folders"])
-	mutate(map[string]any{"op": "projectFolder", "project": b, "folderId": coreMap(folders[len(folders)-1])["id"]})
-	if _, e := svc.Mutate(map[string]any{"op": "projectReorder", "project": a, "target": b, "position": "after"}, nil); e == nil {
-		t.Fatal("cross-folder reorder accepted")
-	}
+	grouping := coreMap(folders[len(folders)-1])["id"]
+	mutate(map[string]any{"op": "projectFolder", "project": b, "folderId": grouping})
+	// REQ-281：把项目拖到其他文件夹的项目上时，迁移分组并在目标文件夹内排序
+	mutate(map[string]any{"op": "projectReorder", "project": a, "target": b, "position": "after"})
 	ps := coreList(coreMap(coreTestGet(t, svc)["state"])["projects"])
+	if moved := coreFind(ps, a); moved["folderId"] != grouping {
+		t.Fatal("cross-folder reorder did not move grouping", moved)
+	}
+	group := []any{}
+	for _, v := range ps {
+		if coreMap(v)["folderId"] == grouping {
+			group = append(group, coreMap(v)["id"])
+		}
+	}
+	if len(group) != 2 || group[0] != b || group[1] != a {
+		t.Fatal("wrong order after cross-folder reorder", group)
+	}
 	i := coreMap(coreList(coreFind(ps, a)["items"])[0])
 	if i["body"] != "排序不会改动需求" || coreNum(i["version"]) != 1 || i["status"] != "ready" {
 		t.Fatal("reorder changed requirement", i)

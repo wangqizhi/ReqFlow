@@ -367,15 +367,28 @@ func (s *WorkspaceService) remoteMutate(action map[string]any, expected *int64) 
 // 完成后若远程记录缺少版本，再以 verificationVersion 操作（2.13.0 起服务端支持）补写一次。失败不影响完成结果。
 func (s *WorkspaceService) remoteVerificationVersion(action, result map[string]any) map[string]any {
 	version := strings.TrimSpace(aiString(action["verificationVersion"]))
-	if aiString(action["op"]) != "complete" || version == "" || result == nil {
+	components := versionComponents(action["verificationComponents"])
+	if aiString(action["op"]) != "complete" || (version == "" && len(components) == 0) || result == nil {
 		return result
 	}
 	p := coreFind(coreList(coreMap(result["state"])["projects"]), aiString(action["project"]))
 	i := coreFind(coreList(p["items"]), aiString(action["id"]))
-	if i == nil || i["status"] != "pending_verification" || aiString(i["verificationVersion"]) != "" {
+	if i == nil || i["status"] != "pending_verification" {
 		return result
 	}
-	next, handled, err := s.remoteMutate(map[string]any{"op": "verificationVersion", "project": action["project"], "id": action["id"], "version": i["version"], "value": version}, nil)
+	missingVersion := version != "" && aiString(i["verificationVersion"]) == ""
+	missingComponents := len(components) > 0 && len(versionComponents(i["verificationComponents"])) == 0
+	if !missingVersion && !missingComponents {
+		return result
+	}
+	if !missingVersion {
+		version = aiString(i["verificationVersion"])
+	}
+	patch := map[string]any{"op": "verificationVersion", "project": action["project"], "id": action["id"], "version": i["version"], "value": version}
+	if missingComponents {
+		patch["components"] = components
+	}
+	next, handled, err := s.remoteMutate(patch, nil)
 	if !handled || err != nil || next == nil {
 		return result
 	}

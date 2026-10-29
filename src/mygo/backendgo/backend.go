@@ -437,9 +437,6 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 			return nil, e
 		}
 	}
-	if desktopString(action["op"]) == "complete" && desktopString(action["verificationVersion"]) == "" {
-		action["verificationVersion"] = b.Workspace.projectVersion(desktopString(action["project"]))
-	}
 	if desktopString(action["op"]) == "project" {
 		if strings.TrimSpace(desktopString(action["name"])) == "" {
 			return nil, errors.New("请填写项目名称")

@@ -531,6 +531,10 @@
     const globalTime = document.querySelector('.execution-info').textContent;
     await new Promise(resolve => setTimeout(resolve, 1100));
     checks.globalExecutionList.ok &&= document.querySelector('.execution-info').textContent !== globalTime;
+    await click([...document.querySelectorAll('.execution-page .segmented button')].find(el => el.textContent.startsWith('待验证')));
+    const globalVersionCard = [...document.querySelectorAll('.execution-list .req-card')].find(card => card.querySelector('.body-copy')?.textContent === '完成说明UI检查');
+    checks.globalComponentVersions = { ok: globalVersionCard?.querySelector('.verification-version')?.textContent.includes('3.0.0') && globalVersionCard.querySelector('.verification-components')?.textContent.includes('frontend：1.2.3') && globalVersionCard.querySelector('.verification-components')?.textContent.includes('backend：2.3.4') };
+    await click([...document.querySelectorAll('.execution-page .segmented button')].find(el => el.textContent.startsWith('执行中')));
     await click([...document.querySelectorAll('.execution-list .req-card')].find(card => projectExecutionCards.includes(card.querySelector('code').textContent)).querySelector('.card-actions button'));
     await waitFor(() => !!document.querySelector('.navtab.active')?.textContent.startsWith('执行中'));
     checks.globalExecutionList.ok &&= !document.querySelector('.execution-page') && document.querySelectorAll('.req-card').length === 5;
@@ -555,6 +559,13 @@
     const reportCard = [...document.querySelectorAll('.card-body')].find(el => el.querySelector('.item-title')?.textContent === '完成说明UI检查');
     const completionNote = reportCard?.querySelector('.completion-note');
     checks.completionNote = { ok: completionNote?.querySelector('p').textContent === '已补齐完成说明，CLI检查通过' && !!(completionNote.compareDocumentPosition(reportCard.querySelector('.next-step')) & Node.DOCUMENT_POSITION_FOLLOWING), project: originalProject, titles: [...document.querySelectorAll('.item-title')].map(el => el.textContent), text: completionNote?.textContent || '', card: !!reportCard };
+    const versions = reportCard?.querySelector('.verification-version');
+    const componentRows = [...(versions?.querySelectorAll('.verification-components span') || [])];
+    checks.componentVersions = { ok: versions?.textContent.includes('3.0.0') && componentRows.length === 2 && componentRows.some(el => el.textContent === 'frontend：1.2.3') && componentRows.some(el => el.textContent === 'backend：2.3.4') && componentRows.every(el => el.getBoundingClientRect().right <= reportCard.getBoundingClientRect().right), text: versions?.textContent };
+    // REQ-280：需求说明改为卡片内滚动，不再按两行截断
+    const bodyCopy = reportCard?.querySelector('.body-copy');
+    const bodyStyle = bodyCopy && getComputedStyle(bodyCopy);
+    checks.requirementBodyScroll = { ok: !!bodyStyle && bodyStyle.overflowY === 'auto' && parseFloat(bodyStyle.maxHeight) > 0 && bodyStyle.webkitLineClamp === 'none', overflowY: bodyStyle?.overflowY, maxHeight: bodyStyle?.maxHeight, lineClamp: bodyStyle?.webkitLineClamp };
     if (completionProject.name !== originalProject) {
       await switchProject(originalProject);
       await waitFor(() => document.querySelector('.main h1')?.textContent === originalProject);

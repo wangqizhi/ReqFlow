@@ -161,53 +161,10 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 	return code
 }
 
-// projectVersion 读取项目目录 package.json 的版本号，作为完成需求的可验证版本；读不到时留空。
+// projectVersion returns the configured delivery (or selected component) version.
 func (s *WorkspaceService) projectVersion(project string) string {
-	r, e := s.localService().Get()
-	if e != nil {
-		return ""
-	}
-	p := coreFind(coreList(coreMap(r["state"])["projects"]), project)
-	file := coreString(p["versionFile"])
-	if file == "" {
-		return versionInDirectory(coreString(p["dir"]))
-	}
-	root := coreString(p["dir"])
-	if !filepath.IsAbs(root) || filepath.IsAbs(file) || strings.Contains(strings.ReplaceAll(file, "\\", "/"), "..") {
-		return ""
-	}
-	raw, err := os.ReadFile(filepath.Join(root, file))
-	if err != nil {
-		return ""
-	}
-	value := strings.TrimSpace(string(raw))
-	var manifest struct {
-		Version string `json:"version"`
-	}
-	if json.Unmarshal(raw, &manifest) == nil {
-		value = strings.TrimSpace(manifest.Version)
-	}
-	if value == "" || len([]rune(value)) > 100 || strings.ContainsAny(value, "\r\n") {
-		return ""
-	}
-	return value
-}
-
-func versionInDirectory(dir string) string {
-	if dir == "" || !filepath.IsAbs(dir) {
-		return ""
-	}
-	raw, e := os.ReadFile(filepath.Join(dir, "package.json"))
-	if e != nil {
-		return ""
-	}
-	var pkg struct {
-		Version string `json:"version"`
-	}
-	if json.Unmarshal(raw, &pkg) != nil {
-		return ""
-	}
-	return strings.TrimSpace(pkg.Version)
+	version, _ := s.projectVersions(project)
+	return version
 }
 
 func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, version string) (map[string]any, error) {
@@ -484,9 +441,6 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 				}
 			}
 			action["verificationVersion"] = coreString(a["verify-version"])
-			if action["verificationVersion"] == "" {
-				action["verificationVersion"] = s.projectVersion(coreString(a["project"]))
-			}
 		}
 		if command == "verify" {
 			v := coreString(a["pass"])
