@@ -108,6 +108,9 @@ export default function App() {
   const [deleteRulesConfirm, setDeleteRulesConfirm] = useState(false);
   const [rulesLimit, setRulesLimit] = useState(DEFAULT_CONTEXT_RULES_LIMIT); // 守则字数上限（REQ-185）
   const [guideTab, setGuideTab] = useState('guide'); // REQ-151：编辑设置浮层按功能分 tab
+  const [guideSaving, setGuideSaving] = useState(false);
+  const guideSavingRef = useRef(false);
+  const [guideSaveMessage, setGuideSaveMessage] = useState('');
   const [guideSyncServer, setGuideSyncServer] = useState(''); // REQ-240：项目关联的 Server Agent
   const [serverAgents, setServerAgents] = useState<ServerAgentEntry[]>([]);
   const [terminalCli, setTerminalCli] = useState('codex');
@@ -443,12 +446,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [dirConfirm]);
 
-  async function act(a: any, quiet = false): Promise<(Workspace & { createdProjectId?: string }) | false> {
+  async function act(a: any, quiet = false, interactive = false): Promise<(Workspace & { createdProjectId?: string }) | false> {
     if (busyRef.current) {
       if (!quiet) notify('正在保存，请稍后再试', 'err');
       return false;
     }
-    busyRef.current = true; setBusy(true); setSaved('保存中…');
+    busyRef.current = true; if (!interactive) setBusy(true); setSaved('保存中…');
     try {
       // 默认作用于当前项目；操作显式携带 project 时（如删除其他项目）以传入值为准
       const action = { project: p?.id, ...a };
@@ -490,10 +493,11 @@ export default function App() {
       return { ...r.state, createdProjectId: r.createdProjectId };
     } catch (e: any) {
       setError(e.message); setSaved('保存失败');
+      if (interactive) setGuideSaveMessage('保存失败，输入已保留：' + e.message);
       notify(e.message, 'err');
       return false;
     } finally {
-      busyRef.current = false; setBusy(false);
+      busyRef.current = false; if (!interactive) setBusy(false);
     }
   }
 
@@ -932,7 +936,7 @@ export default function App() {
 
   async function closeModal() {
     setDeleteRulesConfirm(false);
-    if (busyRef.current) return;
+    if (busyRef.current || guideSavingRef.current) return;
     clearTimeout(autoRef.current);
     if (modal === 'item' && !editing && dirtyRef.current) {
       if (!await act({ op: 'requirementDraft', draft: formRef.current }, true)) return;
@@ -1192,6 +1196,7 @@ export default function App() {
             </div>
           </div>
           <button className="btn plain" onClick={() => {
+            setGuideSaveMessage('');
             setGuide(p!.guidance); setDelivery(p!.deliveryGuidance);
             setRulesLimit(p!.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT);
             setTerminalCli(p!.terminalCli || 'codex'); setTerminalFullAccess(p!.terminalFullAccess !== false); setVersionFile(p!.versionFile || '');
@@ -1334,7 +1339,7 @@ export default function App() {
                         <span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement" title="全选时跳过，仍可手动勾选或单条排期">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitIds.get(p!.id)?.has(i.id) && <span className="badge improvement">待 Git 提交</span>}
                       </div>
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
-                      <p className="body-copy" title={i.body || undefined}>{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
+                      <p className="body-copy" tabIndex={0} aria-label="需求正文">{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
                       {unresolvedFailures(i).length > 0 && (
                         <div className="failure-content">
                           <strong>未通过的问题</strong>
@@ -1609,7 +1614,7 @@ export default function App() {
                   : modal === 'deleteItem' ? '删除后无法恢复该需求；已有批次中的历史快照仍会保留。'
                   : '修改与操作记录会保留在工作区。'}</p>
               </div>
-              <button className="icon-btn" disabled={busy} aria-label="关闭" onClick={() => void closeModal()}><X size={18} /></button>
+              <button className="icon-btn" disabled={busy || guideSaving} aria-label="关闭" onClick={() => void closeModal()}><X size={18} /></button>
             </div>
 
             {(modal === 'moveItem' || modal === 'deleteItem') && editing && (
@@ -1822,22 +1827,35 @@ export default function App() {
                 </div>
                 <div className="settings-footer">
                   <span className="guide-footer-note">保存会应用全部标签页的修改</span>
-                  <button className="btn primary" disabled={busy || !guide.trim() || !delivery.trim() || !Number.isInteger(rulesLimit) || rulesLimit < MIN_CONTEXT_RULES_LIMIT || rulesLimit > MAX_CONTEXT_RULES_LIMIT || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
+                  <button className="btn primary" disabled={busy || guideSaving || !guide.trim() || !delivery.trim() || !Number.isInteger(rulesLimit) || rulesLimit < MIN_CONTEXT_RULES_LIMIT || rulesLimit > MAX_CONTEXT_RULES_LIMIT || (verifyKind !== 'none' && !verifyValue.trim()) || (publishMode === 'script' && !publishPath.trim())}
                     onClick={async () => {
-                      if (!await act({ op: 'projectRuntime', cli: terminalCli, fullAccess: terminalFullAccess, versionFile }, true)) return;
-                      if (!await act({ op: 'publishScript', script: publishMode === 'auto' ? null : publishMode === 'none' ? '' : publishPath }, true)) return;
-                      if (!await act({ op: 'verifySource', source: verifyKind === 'none' ? null : { kind: verifyKind, value: verifyValue.trim() } }, true)) return;
-                      if (!await act({ op: 'baselineTemplate', text: baselineTpl }, true)) return;
-                      if ((p!.serverAgent?.id || '') !== (guideSyncServer || '') && !await act({ op: 'projectSync', server: guideSyncServer || null }, true)) return;
-                      const changed = guide.trim() !== p!.guidance || delivery.trim() !== p!.deliveryGuidance;
-                      if (!await act({ op: 'guidance', text: guide, deliveryGuidance: delivery, contextRulesLimit: rulesLimit }, true)) return;
-                      setModal('');
-                      if (changed) { setTab('feature'); setSelected([]); setBatchId(''); setQuery(''); setTypeFilter('all'); notify('引导词已更新，仅影响下次执行，本轮继续使用原引导词'); }
-                      else notify('设置已保存');
+                      if (guideSavingRef.current || busyRef.current) return;
+                      guideSavingRef.current = true; setGuideSaving(true); setGuideSaveMessage('');
+                      // Snapshot only changed settings: a normal save used to hash, transfer,
+                      // write and rerender the entire workspace up to six times.
+                      const current = p!;
+                      const script = publishMode === 'auto' ? undefined : publishMode === 'none' ? '' : publishPath.trim().replaceAll('\\', '/');
+                      const source = verifyKind === 'none' ? undefined : { kind: verifyKind, value: verifyValue.trim() };
+                      const operations: any[] = [];
+                      if (terminalCli !== (current.terminalCli || 'codex') || terminalFullAccess !== (current.terminalFullAccess !== false) || versionFile.trim() !== (current.versionFile || '')) operations.push({ op: 'projectRuntime', cli: terminalCli, fullAccess: terminalFullAccess, versionFile });
+                      if (script !== current.publishScript) operations.push({ op: 'publishScript', script: script ?? null });
+                      if (source?.kind !== current.verifySource?.kind || source?.value !== current.verifySource?.value) operations.push({ op: 'verifySource', source: source ?? null });
+                      if (baselineTpl.trim() !== (current.baselineTemplate || '')) operations.push({ op: 'baselineTemplate', text: baselineTpl });
+                      if ((current.serverAgent?.id || '') !== guideSyncServer) operations.push({ op: 'projectSync', server: guideSyncServer || null });
+                      const changed = guide.trim() !== current.guidance || delivery.trim() !== current.deliveryGuidance;
+                      if (changed || rulesLimit !== (current.contextRulesLimit ?? DEFAULT_CONTEXT_RULES_LIMIT)) operations.push({ op: 'guidance', text: guide, deliveryGuidance: delivery, contextRulesLimit: rulesLimit });
+                      try {
+                        await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+                        for (const operation of operations) {
+                          if (!await act({ project: current.id, ...operation }, true, true)) return;
+                        }
+                        setGuideSaveMessage(changed ? '引导词已更新，仅影响下次执行，本轮继续使用原引导词' : '设置已保存');
+                      } finally { guideSavingRef.current = false; setGuideSaving(false); }
                     }}>
-                    保存设置
+                    {guideSaving ? '保存中…' : '保存设置'}
                   </button>
                 </div>
+                {guideSaveMessage && <p className="settings-message" role="status">{guideSaveMessage}</p>}
               </>
             )}
 

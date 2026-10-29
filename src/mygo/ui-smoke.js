@@ -563,6 +563,17 @@
       clientHeight: longBody?.clientHeight, scrollHeight: longBody?.scrollHeight, clientWidth: longBody?.clientWidth, offsetWidth: longBody?.offsetWidth,
       maxHeight: longStyle?.maxHeight, upperBound: longCard ? longCard.getBoundingClientRect().height : 0, scrollTop: longBody?.scrollTop
     };
+    const scrollCheck = element => {
+      if (!element) return { ok: false };
+      element.scrollTop = element.scrollHeight;
+      const style = getComputedStyle(element);
+      return { ok: element.scrollTop > 0 && element.scrollHeight > element.clientHeight && element.offsetWidth > element.clientWidth && style.textOverflow !== 'ellipsis' && style.webkitLineClamp === 'none', scrollTop: element.scrollTop, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollbarColor: style.scrollbarColor };
+    };
+    checks.requirementTitleScroll = scrollCheck([...document.querySelectorAll('.item-title')].find(el => el.textContent.startsWith('长标题滚动UI检查')));
+    await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
+    const scheduledLongCard = [...document.querySelectorAll('.req-card')].find(card => card.querySelector('.item-title')?.textContent.startsWith('排期长标题滚动UI检查'));
+    checks.scheduledTitleScroll = scrollCheck(scheduledLongCard?.querySelector('.item-title'));
+    checks.scheduledBodyScroll = scrollCheck(scheduledLongCard?.querySelector('.body-copy'));
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
     const executionCards = [...document.querySelectorAll('.req-card')];
     checks.executionTab = { ok: executionCards.length === 5 && ['Codex', 'ZCode', 'Pi', 'Claude Code', 'OpenCode'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
@@ -855,8 +866,65 @@
     checks.guideRunTab = { ok: guideDialog.querySelectorAll('[aria-label="验证源类型"] button').length === 3 && guideDialog.querySelectorAll('[aria-label="发布设置"] button').length === 3 };
     await click(guideTabs.find(el => el.textContent === '基线模板'));
     checks.guideTemplateTab = { ok: !!guideDialog.querySelector('.settings-body textarea') };
+    // REQ-288: exercise a real project write, retaining edits typed during its
+    // pending response, and verify no-op saves avoid workspace writes entirely.
+    const projectApply = window.reqflow.apply;
+    const templateInput = guideDialog.querySelector('.settings-body textarea');
+    const originalTemplate = templateInput.value;
+    let projectWrites = 0;
+    window.reqflow.apply = async action => { projectWrites++; await new Promise(resolve => setTimeout(resolve, 300)); return projectApply(action); };
+    await edit(templateInput, originalTemplate + '\n项目异步保存检查');
+    const projectSave = guideDialog.querySelector('.settings-footer .primary');
+    projectSave.click(); projectSave.click();
+    await waitFor(() => projectSave.disabled && projectSave.textContent.includes('保存中'));
+    const projectInputsEnabled = !templateInput.disabled;
+    await edit(templateInput, originalTemplate + '\n保存期间的新输入');
+    await waitFor(() => !projectSave.disabled);
+    const firstProjectWrites = projectWrites;
+    const retainedNewInput = templateInput.value.endsWith('保存期间的新输入');
+    const savedProjectState = await window.mygo.call('ReqFlow.Invoke', 'workspace:get', []);
+    const projectID = savedProjectState.state.projects.find(p => p.name === document.querySelector('.main h1').textContent).id;
+    const firstPersisted = savedProjectState.state.projects.find(p => p.id === projectID).baselineTemplate.endsWith('项目异步保存检查');
+    await click(projectSave); await waitFor(() => !projectSave.disabled);
+    const writesBeforeNoop = projectWrites;
+    await click(projectSave); await waitFor(() => !projectSave.disabled);
+    const noopWrites = projectWrites - writesBeforeNoop;
+    window.reqflow.apply = async () => ({ ok: false, code: 'VERSION_CONFLICT', error: '版本冲突，请刷新后重试' });
+    await edit(templateInput, originalTemplate + '\n失败后保留的输入');
+    await click(projectSave); await waitFor(() => !projectSave.disabled);
+    const failureRetained = templateInput.value.endsWith('失败后保留的输入') && guideDialog.textContent.includes('版本冲突');
+    window.reqflow.apply = projectApply;
+    await edit(templateInput, originalTemplate);
+    await click(projectSave); await waitFor(() => !projectSave.disabled);
+    checks.projectSettingsAsyncSave = { ok: firstProjectWrites === 1 && projectInputsEnabled && retainedNewInput && firstPersisted && noopWrites === 0 && failureRetained, firstProjectWrites, projectInputsEnabled, retainedNewInput, firstPersisted, noopWrites, failureRetained };
     guideDialog.closest('.overlay').click();
     await waitFor(() => !document.querySelector('.project-guide-dialog'));
+    // Render the actual update confirmation without ever starting an installer.
+    const updateState = window.reqflow.updateState, installUpdate = window.reqflow.installUpdate;
+    window.reqflow.updateState = async () => ({ phase: 'ready', version: __REQFLOW_VERSION__ });
+    window.reqflow.installUpdate = async () => ({ phase: 'ready', confirmTasks: 3 });
+    await waitFor(() => !!button('安装'));
+    await click(button('安装'));
+    await waitFor(() => !!document.querySelector('.update-confirm-dialog'));
+    const confirmation = document.querySelector('.update-confirm-dialog');
+    const darkRules = [...document.styleSheets].flatMap(sheet => [...sheet.cssRules]).filter(rule => rule.media?.mediaText.includes('prefers-color-scheme: dark'));
+    const mediaBefore = darkRules.map(rule => rule.media.mediaText);
+    const luminance = css => {
+      const channels = css.match(/[\d.]+/g).slice(0, 3).map(v => Number(v) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const confirmationThemes = {};
+    for (const theme of ['light', 'dark']) {
+      darkRules.forEach(rule => { rule.media.mediaText = theme === 'dark' ? 'all' : 'not all'; });
+      const title = getComputedStyle(confirmation.querySelector('h3'));
+      const foreground = luminance(title.color), background = luminance(getComputedStyle(confirmation).backgroundColor);
+      const contrast = (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      confirmationThemes[theme] = { ok: contrast >= 4.5 && parseFloat(title.fontSize) >= 17, contrast, color: title.color, background: getComputedStyle(confirmation).backgroundColor };
+    }
+    darkRules.forEach((rule, index) => { rule.media.mediaText = mediaBefore[index]; });
+    checks.updateConfirmationContrast = { ok: Object.values(confirmationThemes).every(value => value.ok), ...confirmationThemes };
+    await click([...confirmation.querySelectorAll('button')].find(el => el.textContent === '取消'));
+    window.reqflow.updateState = updateState; window.reqflow.installUpdate = installUpdate;
     await click(button('记录新需求'));
     checks.reopenDraft = { ok: reset() && !document.querySelector('.requirement-advanced') };
     const buttons = [...document.querySelectorAll('.editor-footer button')];

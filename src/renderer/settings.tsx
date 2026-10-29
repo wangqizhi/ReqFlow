@@ -239,6 +239,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
       if (savingRef.current || busy) return false;
       savingRef.current = true; setSaving(true); setMessage(''); setMessageKind('info');
       try {
+        // Let the saving state paint before serialization or a native bridge call.
+        await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
         const r = await action();
         if (!r?.ok) throw Error(r?.error || '操作失败');
         setMessage(success); setMessageKind('ok');
