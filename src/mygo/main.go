@@ -424,6 +424,22 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 		for _, height := range []int{900, 720} {
 			w.SetSize(1440, height)
 			time.Sleep(150 * time.Millisecond)
+			for _, phase := range []string{"需求池", "排期"} {
+				phaseJSON, _ := json.Marshal(phase)
+				check, err := w.Page().EvalContext(ctx, `window.__reqflowCheckCardOverflow(`+string(phaseJSON)+`)`)
+				if err != nil {
+					check = map[string]any{"ok": false, "error": err.Error()}
+				}
+				name := "pool"
+				if phase == "排期" {
+					name = "schedule"
+				}
+				suffix := fmt.Sprintf(".card-%s-%d", name, height)
+				_ = writeReport(path+suffix+".json", check)
+				if png, err := w.CapturePage(); err == nil {
+					_ = os.WriteFile(path+suffix+".png", png, 0600)
+				}
+			}
 			for _, surface := range []string{"terminal", "sidebar", "stats", "milestones", "directory"} {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));

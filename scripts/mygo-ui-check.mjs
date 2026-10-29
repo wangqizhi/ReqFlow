@@ -47,12 +47,24 @@ try {
     if (item.aiExecution?.runId && !item.aiExecution.endedAt) cli(['execution', 'release', '--project', project.id, '--id', item.id, '--run', item.aiExecution.runId]);
   }
   const project = workspace.projects[0].id;
-  // REQ-280：长正文需求用于验证需求池/排期表卡片的内部滚动（不排期，停留在需求池）
+  // Cover every text region, including the criteria and failure notes omitted
+  // from the original long-title/body regression fixtures.
   const longBody = Array.from({ length: 30 }, (_, n) => `第 ${n + 1} 行：长正文滚动检查，超过卡片高度后应出现内部滚动条。`).join('\n');
-  cli(['item', 'add', '--project', project, '--title', '长正文滚动UI检查', '--body', longBody]);
+  const shortCriteria = ['同步入口可触发并显示同步结果（成功/失败条目数）', '同步过程中不泄露明文密码到日志', '同步失败时保留原始数据并支持重试'];
+  const longCriteria = [...shortCriteria, '长中文验收条件，换行后也不能隐藏。'.repeat(45), 'UnbrokenCriteriaText'.repeat(80), '第六项应完整显示', '第七项应完整显示', '验收条件末尾可见'];
+  const longFailure = Array.from({ length: 20 }, (_, n) => `第 ${n + 1} 行：退回的问题必须完整显示，允许换行和滚动，不允许两行截断。`).join('\n') + '\n未通过说明末尾可见';
+  const addFailure = id => {
+    cli(['generate', '--project', project, '--items', id]);
+    cli(['complete', '--project', project, '--id', id, '--summary', '隔离测试，生成验证退回说明']);
+    cli(['verify', '--project', project, '--id', id, '--pass', 'false', '--note', longFailure]);
+  };
+  cli(['item', 'add', '--project', project, '--title', '三条验收条件UI检查', '--body', '复现截图中的三条验收条件，第三条必须完整显示。', '--criteria', shortCriteria.join(';')]);
+  const poolLong = cli(['item', 'add', '--project', project, '--title', '长正文滚动UI检查', '--body', longBody, '--criteria', longCriteria.join(';')]).item.id;
+  addFailure(poolLong);
   const longTitle = '长标题滚动UI检查' + '这是一段直接记录在标题中的长需求，必须能够滚动查看完整内容。'.repeat(80);
   cli(['item', 'add', '--project', project, '--title', longTitle]);
-  const scheduledLong = cli(['item', 'add', '--project', project, '--title', '排期' + longTitle, '--body', longBody]).item.id;
+  const scheduledLong = cli(['item', 'add', '--project', project, '--title', '排期' + longTitle, '--body', longBody, '--criteria', longCriteria.join(';')]).item.id;
+  addFailure(scheduledLong);
   cli(['generate', '--project', project, '--items', scheduledLong]);
   const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
   cli(['generate', '--project', project, '--items', item]);
@@ -65,7 +77,7 @@ try {
   assert.equal(componentFixture.status, 0, componentFixture.error?.message || componentFixture.stderr);
   assert.equal(JSON.parse(componentFixture.stdout).ok, true, componentFixture.stdout);
   const executionItems = ['codex', 'zcode', 'pi', 'claude-code', 'opencode'].map(client => ({ client,
-    id: cli(['item', 'add', '--project', project, '--title', '领取状态UI检查 ' + client]).item.id }));
+    id: cli(['item', 'add', '--project', project, '--title', '领取状态UI检查 ' + client, '--criteria', longCriteria.join(';')]).item.id }));
   const executionBatch = cli(['generate', '--project', project, '--items', executionItems.map(i => i.id).join(',')]).batch;
   for (const entry of executionItems) cli(['execution', 'claim', '--project', project, '--run', randomUUID(), '--client', entry.client,
     '--claims', JSON.stringify([{ id: entry.id, version: 1, batchId: executionBatch.id, hash: executionBatch.hash }])]);
@@ -106,6 +118,13 @@ try {
   const schedule = JSON.parse(await readFile(reportPath + '.schedule.json', 'utf8'));
   assert.equal(schedule.ok, true, JSON.stringify(schedule));
   await copyFile(reportPath + '.schedule.png', path.join(root, 'tmp/mygo-schedule-compact.png'));
+  for (const height of [900, 720]) for (const phase of ['pool', 'schedule']) {
+    const suffix = `.card-${phase}-${height}`;
+    const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
+    await writeFile(path.join(root, `tmp/mygo${suffix}.json`), JSON.stringify(layout, null, 2));
+    await copyFile(reportPath + suffix + '.png', path.join(root, `tmp/mygo${suffix}.png`));
+    assert.equal(layout.ok, true, JSON.stringify(layout));
+  }
   for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'milestones', 'directory', 'content', 'projects', 'guide', 'ssh', 'project-import', 'settings-api', 'settings-cli', 'settings-data', 'mods-protocol', 'mods-agents', 'mods-lab']) {
     const suffix = `.${surface}-${height}`;
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));

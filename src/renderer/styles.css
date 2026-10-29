@@ -237,17 +237,15 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 /* REQ-280：需求说明过长时在卡片内滚动查看；滚动条与面板配色一致，带浅色轨道
    标题也可能承载完整需求；标题和正文都不能用省略号代替可访问的内容。 */
 .body-copy { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; min-height: 3.2em; max-height: 4.8em; overflow-y: auto; padding-right: 4px; }
-.item-title, .body-copy { scrollbar-gutter: stable; scrollbar-color: var(--muted) var(--bg); }
-.item-title:focus-visible, .body-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.item-title::-webkit-scrollbar, .body-copy::-webkit-scrollbar { width: 10px; }
-.item-title::-webkit-scrollbar-track, .body-copy::-webkit-scrollbar-track { background: var(--bg); border-radius: 5px; }
-.item-title::-webkit-scrollbar-thumb, .body-copy::-webkit-scrollbar-thumb { background: var(--muted); border: 2px solid var(--bg); border-radius: 5px; background-clip: padding-box; }
-.item-title::-webkit-scrollbar-thumb:hover, .body-copy::-webkit-scrollbar-thumb:hover { background-color: var(--ink-2); }
-.failure-content { background: var(--danger-soft); border: 1px solid #fecaca; border-radius: 8px; padding: 9px 12px; margin: 0 0 8px; font-size: 12.5px; }
+.item-title, .body-copy, .criteria, .failure-content { scrollbar-gutter: stable; scrollbar-color: var(--muted) var(--bg); }
+.item-title:focus-visible, .body-copy:focus-visible, .criteria:focus-visible, .failure-content:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.item-title::-webkit-scrollbar, .body-copy::-webkit-scrollbar, .criteria::-webkit-scrollbar, .failure-content::-webkit-scrollbar { width: 10px; }
+.item-title::-webkit-scrollbar-track, .body-copy::-webkit-scrollbar-track, .criteria::-webkit-scrollbar-track, .failure-content::-webkit-scrollbar-track { background: var(--bg); border-radius: 5px; }
+.item-title::-webkit-scrollbar-thumb, .body-copy::-webkit-scrollbar-thumb, .criteria::-webkit-scrollbar-thumb, .failure-content::-webkit-scrollbar-thumb { background: var(--muted); border: 2px solid var(--bg); border-radius: 5px; background-clip: padding-box; }
+.item-title::-webkit-scrollbar-thumb:hover, .body-copy::-webkit-scrollbar-thumb:hover, .criteria::-webkit-scrollbar-thumb:hover, .failure-content::-webkit-scrollbar-thumb:hover { background-color: var(--ink-2); }
+.failure-content { background: var(--danger-soft); border: 1px solid #fecaca; border-radius: 8px; padding: 9px 12px; margin: 0 0 8px; font-size: 12.5px; max-height: 180px; overflow-y: auto; }
 .failure-content strong { color: var(--danger); display: block; margin-bottom: 3px; }
-.failure-content p { margin: 2px 0; color: #7f1d1d; }
-/* 列表里的未通过问题每条最多两行，避免退回说明撑高卡片（完整内容在退回弹窗与下一轮 Prompt 中） */
-.failure-content p:not(:last-child) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.failure-content p { margin: 2px 0; color: #7f1d1d; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .failure-content p:last-child { color: var(--muted); margin-top: 4px; }
 
 /* 二次退回：确认旧问题修复状态 */
@@ -262,9 +260,11 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .prior-failure-choice { display: flex; gap: 5px; flex-shrink: 0; }
 .prior-failure-choice label { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line-2); border-radius: 99px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
 .prior-failure-choice label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
-.criteria { max-height: 46px; overflow: hidden; }
-.criteria p { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 12.5px; color: var(--ink-2); }
-.criteria p svg { color: var(--ok); flex-shrink: 0; }
+/* 验收条件也是需求内容；多条/长条件必须能滚动到最后一行。 */
+.criteria { max-height: 132px; overflow-y: auto; padding-right: 4px; }
+.criteria p { display: flex; align-items: flex-start; gap: 6px; margin: 2px 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.criteria p span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.criteria p svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
 .requirement-settings-summary { margin-top: 7px; font-size: 11.5px; color: var(--muted); }
 .next-step { margin-top: 3px; font-size: 12px; color: var(--muted); font-style: italic; }
 .card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }

@@ -567,20 +567,60 @@
       if (!element) return { ok: false };
       element.scrollTop = element.scrollHeight;
       const style = getComputedStyle(element);
-      return { ok: element.scrollTop > 0 && element.scrollHeight > element.clientHeight && element.offsetWidth > element.clientWidth && style.textOverflow !== 'ellipsis' && style.webkitLineClamp === 'none', scrollTop: element.scrollTop, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollbarColor: style.scrollbarColor };
+      const scrollbarWidth = element.offsetWidth - element.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
+      return { ok: element.scrollTop > 0 && element.scrollHeight > element.clientHeight && scrollbarWidth >= 8 && ['auto', 'scroll'].includes(style.overflowY) && style.textOverflow !== 'ellipsis' && style.webkitLineClamp === 'none', scrollTop: element.scrollTop, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollbarWidth, overflowY: style.overflowY, scrollbarColor: style.scrollbarColor };
     };
     checks.requirementTitleScroll = scrollCheck([...document.querySelectorAll('.item-title')].find(el => el.textContent.startsWith('长标题滚动UI检查')));
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('排期')));
     const scheduledLongCard = [...document.querySelectorAll('.req-card')].find(card => card.querySelector('.item-title')?.textContent.startsWith('排期长标题滚动UI检查'));
     checks.scheduledTitleScroll = scrollCheck(scheduledLongCard?.querySelector('.item-title'));
     checks.scheduledBodyScroll = scrollCheck(scheduledLongCard?.querySelector('.body-copy'));
+    const completeRegion = (element, endText) => {
+      const scrolling = scrollCheck(element);
+      if (!element) return scrolling;
+      const paragraphs = [...element.querySelectorAll('p')];
+      const last = paragraphs.find(p => p.textContent.endsWith(endText));
+      const rect = element.getBoundingClientRect();
+      const lastRect = last?.getBoundingClientRect();
+      const unclamped = paragraphs.every(p => getComputedStyle(p).webkitLineClamp === 'none' && p.scrollHeight <= p.clientHeight + 1);
+      const wrapped = element.scrollWidth <= element.clientWidth;
+      const lastVisible = !!lastRect && lastRect.bottom <= rect.bottom + 1 && lastRect.bottom > rect.top;
+      element.focus({ preventScroll: true });
+      return { ...scrolling, ok: scrolling.ok && unclamped && wrapped && lastVisible && document.activeElement === element, unclamped, wrapped, lastVisible, paragraphs: paragraphs.length };
+    };
+    window.__reqflowCheckCardOverflow = async phase => {
+      if (!document.querySelector('.navtab')) {
+        await click(button('返回项目菜单') || button('返回项目'));
+        if (button('放弃更改')) await click(button('放弃更改'));
+        await waitFor(() => !!document.querySelector('.navtab'));
+      }
+      if (document.querySelector('.main h1')?.textContent !== completionProject.name) await switchProject(completionProject.name);
+      await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith(phase)));
+      const card = [...document.querySelectorAll('.req-card')].find(card => phase === '需求池'
+        ? card.querySelector('.item-title')?.textContent === '长正文滚动UI检查'
+        : card.querySelector('.item-title')?.textContent.startsWith('排期长标题滚动UI检查'));
+      const criteria = completeRegion(card?.querySelector('.criteria'), '验收条件末尾可见');
+      const failures = completeRegion(card?.querySelector('.failure-content'), '未通过说明末尾可见');
+      let threeCriteria = { ok: true };
+      if (phase === '需求池') {
+        const short = [...document.querySelectorAll('.req-card')].find(card => card.querySelector('.item-title')?.textContent === '三条验收条件UI检查')?.querySelector('.criteria');
+        const rows = short && [...short.querySelectorAll('p')];
+        threeCriteria = { ok: !!short && rows.length === 3 && short.scrollHeight <= short.clientHeight && rows.at(-1).getBoundingClientRect().bottom <= short.getBoundingClientRect().bottom + 1, rows: rows?.length };
+      }
+      card?.querySelector('.criteria')?.scrollIntoView({ block: 'center' });
+      return { ok: criteria.ok && failures.ok && threeCriteria.ok, phase, height: innerHeight, criteria, failures, threeCriteria };
+    };
+    checks.poolCardOverflow = await window.__reqflowCheckCardOverflow('需求池');
+    checks.scheduleCardOverflow = await window.__reqflowCheckCardOverflow('排期');
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('执行中')));
     const executionCards = [...document.querySelectorAll('.req-card')];
+    checks.executionCriteriaScroll = completeRegion(executionCards[0]?.querySelector('.criteria'), '验收条件末尾可见');
     checks.executionTab = { ok: executionCards.length === 5 && ['Codex', 'ZCode', 'Pi', 'Claude Code', 'OpenCode'].every(client => executionCards.some(card => card.querySelector('.execution-info strong')?.textContent.includes(client))) && executionCards.every(card => card.querySelector('.execution-info').textContent.includes('已执行')) };
     const projectExecutionCards = executionCards.map(card => card.querySelector('code').textContent);
     await click([...document.querySelectorAll('.side-label-action')].find(el => el.textContent.startsWith('执行中')));
     await waitFor(() => !!document.querySelector('.execution-page'));
     const globalCards = [...document.querySelectorAll('.execution-list .req-card')];
+    checks.globalExecutionCriteriaScroll = completeRegion(globalCards.find(card => card.querySelector('.item-title')?.textContent.startsWith('领取状态UI检查'))?.querySelector('.criteria'), '验收条件末尾可见');
     const executingWorkspace = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state;
     const running = executingWorkspace.projects.flatMap(project => project.items.filter(i => !i.archived && i.status !== 'pending_verification' && i.aiExecution?.runId && !i.aiExecution.endedAt).map(item => ({ project, item })));
     checks.globalExecutionList = { ok: globalCards.length === running.length && running.every(({project,item}) => globalCards.some(card => card.querySelector('code').textContent === item.number && card.querySelector('.meta button').textContent === project.name && card.querySelector('.execution-info').textContent.includes('已执行'))) };

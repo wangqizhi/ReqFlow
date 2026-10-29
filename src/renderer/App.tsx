@@ -1139,8 +1139,8 @@ export default function App() {
               <div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>{project.name}</button><code>{i.number}</code><span className={'badge ' + i.type}>{labels[i.type]}</span><span className="priority">{i.priority}</span><span className="status executing">执行中</span><span className="revision">v{i.version}</span>{i.deferred && <span className="badge improvement">已延迟</span>}<span className="revision">{executorLabel(i.executor)}</span>{i.scheduledDate && <span className="revision">计划 {i.scheduledDate}</span>}{pendingCommitIds.get(project.id)?.has(i.id) && <span className="badge improvement">待 Git 提交</span>}</div>
               {i.title && <strong className="item-title">{i.title}</strong>}<p className="body-copy">{i.body || '暂无详细说明'}</p>
               {!!i.attachments?.length && <p className="muted">参考图片 · {i.attachments.map(a => a.label).join('、')}</p>}
-              {unresolvedFailures(i).length > 0 && <div className="failure-content"><strong>未通过的问题</strong>{unresolvedFailures(i).map((f, n) => <p key={n}>{f.note}</p>)}</div>}
-              <div className="criteria">{i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} />{c}</p>) : <p>按需求说明确认结果即可。</p>}</div>
+              {unresolvedFailures(i).length > 0 && <div className="failure-content" tabIndex={0} role="region" aria-label="未通过的问题"><strong>未通过的问题</strong>{unresolvedFailures(i).map((f, n) => <p key={n}>{f.note}</p>)}</div>}
+              <div className="criteria" tabIndex={0} role="region" aria-label="验收条件">{i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} /><span>{c}</span></p>) : <p>按需求说明确认结果即可。</p>}</div>
               <ExecutionInfo item={i} session={session} now={executionClock} />
               <div className="next-step">{activeAIExecution(i) ? '任务已被独占领取；AI 完成后会进入待验证。中断后可手动释放任务。' : '已在交互终端执行；可进入项目在终端输入沟通，完成后自动转入待验证。'}</div>
               <div className="card-actions"><button className="btn" onClick={() => { switchProject(project.id); setTabState('executing'); }}>进入项目</button></div>
@@ -1341,7 +1341,7 @@ export default function App() {
                       {i.title && <button className="item-title" title={i.title} onClick={() => { setEditing(i); setModal('detail'); }}>{i.title}</button>}
                       <p className="body-copy" tabIndex={0} aria-label="需求正文">{i.body || '暂无详细说明'}</p>{!!i.attachments?.length && <button className="btn sm" onClick={() => { setEditing(i); setModal('detail'); }}>参考图片 · {i.attachments.map((a) => a.label).join('、')}</button>}
                       {unresolvedFailures(i).length > 0 && (
-                        <div className="failure-content">
+                        <div className="failure-content" tabIndex={0} role="region" aria-label="未通过的问题">
                           <strong>未通过的问题</strong>
                           {unresolvedFailures(i).map((f, n) => (
                             <p key={n}>
@@ -1351,8 +1351,8 @@ export default function App() {
                           <p>重新生成 Prompt 时会自动带上以上内容。</p>
                         </div>
                       )}
-                      <div className="criteria">
-                        {i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} />{c}</p>)
+                      <div className="criteria" tabIndex={0} role="region" aria-label="验收条件">
+                        {i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} /><span>{c}</span></p>)
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
                       {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
