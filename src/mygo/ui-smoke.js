@@ -129,7 +129,7 @@
     await click(button('设置'));
     await waitFor(() => document.querySelector('.settings-page') && !button('新增配置').disabled);
     const settingsNav = document.querySelector('[aria-label="设置功能菜单"]');
-    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 6 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
+    checks.settingsWorkspace = { ok: settingsNav.querySelectorAll('button').length === 7 && !document.querySelector('.overlay') && !footer.textContent.includes('导出全部数据') && document.querySelector('.settings-page').getBoundingClientRect().width > 900 };
     const profileCount = document.querySelectorAll('.ai-profile-list button').length;
     await click(button('新增配置'));
     await click(button('本地 CLI'));
@@ -175,6 +175,17 @@
       await new Promise(resolve => setTimeout(resolve, 50));
     };
     const settingsTab = text => [...document.querySelectorAll('[aria-label="设置功能菜单"] button')].find(el => el.textContent === text);
+    // REQ-294：全局记忆可在设置中配置预留大小与手动记忆，保存后生成文件并拼接进开发 Prompt。
+    await click(settingsTab('全局记忆'));
+    await waitFor(() => document.querySelectorAll('.memory-note textarea').length === 6 && !document.querySelector('.memory-note textarea').disabled);
+    const memoryLimit = [...document.querySelectorAll('.memory-settings input[type="number"]')][0];
+    await edit(memoryLimit, '120');
+    await edit(document.querySelector('.memory-note textarea'), 'UI冒烟：使用 Go + React 技术方案');
+    await click(document.querySelector('.settings-footer .primary'));
+    await waitFor(() => !document.querySelector('.settings-page').dataset.saving);
+    const memory = await window.mygo.call('ReqFlow.Invoke', 'memory:get', []);
+    checks.globalMemory = { ok: memory.ok && memory.settings.limitKB === 120 && memory.limit === 120 * 1024 && memory.files.some(f => f.key === 'tech' && f.content.includes('UI冒烟')) && memory.files.some(f => f.key === 'projects') && memory.prompt.includes('tech-solutions.md') && memory.used <= memory.limit && !!document.querySelector('.memory-preview'), used: memory.used };
+    await click(settingsTab('AI 供应商'));
     // REQ-288：保存期间不锁定输入与滚动；重复提交只写入一次，完成后保持焦点和滚动位置。
     const originalSaveAI = window.reqflow.saveAISettings;
     let asyncSaves = 0;
@@ -654,7 +665,9 @@
     await click([...document.querySelectorAll('.navtab')].find(el => el.textContent.startsWith('待验证')));
     const reportCard = [...document.querySelectorAll('.card-body')].find(el => el.querySelector('.item-title')?.textContent === '完成说明UI检查');
     const completionNote = reportCard?.querySelector('.completion-note');
-    checks.completionNote = { ok: completionNote?.querySelector('p').textContent === '已补齐完成说明，CLI检查通过' && !!(completionNote.compareDocumentPosition(reportCard.querySelector('.next-step')) & Node.DOCUMENT_POSITION_FOLLOWING), project: originalProject, titles: [...document.querySelectorAll('.item-title')].map(el => el.textContent), text: completionNote?.textContent || '', card: !!reportCard };
+    const noteText = completionNote?.querySelector('p');
+    checks.completionNoteFull = { ok: !!noteText && noteText.textContent.includes('第20行：完整说明不截断') && noteText.scrollHeight > noteText.clientHeight && getComputedStyle(noteText).overflowY === 'auto', length: noteText?.textContent.length };
+    checks.completionNote = { ok: completionNote?.querySelector('p').textContent.startsWith('已补齐完成说明，CLI检查通过') && !!(completionNote.compareDocumentPosition(reportCard.querySelector('.next-step')) & Node.DOCUMENT_POSITION_FOLLOWING), project: originalProject, titles: [...document.querySelectorAll('.item-title')].map(el => el.textContent), text: completionNote?.textContent || '', card: !!reportCard };
     const versions = reportCard?.querySelector('.verification-version');
     const componentRows = [...(versions?.querySelectorAll('.verification-components span') || [])];
     checks.componentVersions = { ok: versions?.textContent.includes('3.0.0') && componentRows.length === 2 && componentRows.some(el => el.textContent === 'frontend：1.2.3') && componentRows.some(el => el.textContent === 'backend：2.3.4') && componentRows.every(el => el.getBoundingClientRect().right <= reportCard.getBoundingClientRect().right), text: versions?.textContent };
@@ -777,6 +790,16 @@
     const textarea = document.querySelector('.requirement-dialog textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, '长中文说明、附件与高级字段清空检查。'.repeat(35));
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    // REQ-292：放大编辑必须打开明显更高的输入框，且位于需求弹窗之上。
+    await waitFor(() => !!document.querySelector('.body-expand-toggle'));
+    const smallHeight = textarea.getBoundingClientRect().height;
+    await click(document.querySelector('.body-expand-toggle'));
+    await waitFor(() => !!document.querySelector('.body-expand-input'));
+    const expandInput = document.querySelector('.body-expand-input').getBoundingClientRect();
+    const expandTop = document.elementFromPoint(expandInput.left + expandInput.width / 2, expandInput.top + 20);
+    checks.bodyExpand = { ok: expandInput.height >= Math.min(380, innerHeight - 240) - 1 && expandInput.height > smallHeight * 2 && !!expandTop?.closest('.body-expand-dialog') && expandInput.bottom <= innerHeight, small: smallHeight, large: expandInput.height };
+    await click(document.querySelector('[aria-label="收起放大编辑"]'));
+    await waitFor(() => !document.querySelector('.body-expand-input'));
     await click(document.querySelector('[aria-label="需求类型"] button:nth-child(3)'));
     await click(document.querySelector('[aria-label="优先级"] button'));
     await click(button('清空需求'));

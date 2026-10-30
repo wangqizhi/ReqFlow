@@ -17,9 +17,9 @@ func TestCompletionNoteLifecycle(t *testing.T) {
 		t.Fatal("ready item accepted completion note")
 	}
 	coreTestApply(t, s, map[string]any{"op": "generate", "project": p["id"], "ids": []any{i["id"]}})
-	complete := map[string]any{"op": "complete", "project": p["id"], "id": i["id"], "summary": strings.Repeat("中", 51)}
+	complete := map[string]any{"op": "complete", "project": p["id"], "id": i["id"], "summary": "   "}
 	if Apply(s, complete) == nil || i["status"] != "ready" {
-		t.Fatal("oversize summary changed lifecycle")
+		t.Fatal("blank summary changed lifecycle")
 	}
 	delete(complete, "summary")
 	complete["note"] = "[ReqFlow Codex run test]\n已实现CLI字段\n验证：生命周期测试通过"
@@ -27,21 +27,21 @@ func TestCompletionNoteLifecycle(t *testing.T) {
 	if i["completionNote"] != "已实现CLI字段\n验证：生命周期测试通过" || coreNum(i["completionNoteVersion"]) != coreNum(i["version"]) {
 		t.Fatal(i)
 	}
-	for _, invalid := range []string{"", "   ", strings.Repeat("😀", 51)} {
+	for _, invalid := range []string{"", "   "} {
 		a["summary"] = invalid
 		if Apply(s, a) == nil {
 			t.Fatal("invalid summary accepted")
 		}
 	}
-	a["summary"] = strings.Repeat("😀", 50)
+	a["summary"] = strings.Repeat("😀", 500)
 	a["version"] = 99
 	if Apply(s, a) == nil {
 		t.Fatal("stale version accepted")
 	}
 	a["version"] = i["version"]
 	coreTestApply(t, s, a)
-	if len([]rune(coreString(i["completionNote"]))) != 50 {
-		t.Fatal("Unicode limit mismatch")
+	if len([]rune(coreString(i["completionNote"]))) != 500 {
+		t.Fatal("long completion note truncated")
 	}
 	version := i["version"]
 	coreTestApply(t, s, map[string]any{"op": "verify", "project": p["id"], "id": i["id"], "pass": false, "note": "返工"})

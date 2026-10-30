@@ -133,7 +133,15 @@ export async function readRun(config, cwd, runDir, options = {}) {
     await fs.writeFile(runFile, JSON.stringify(run, null, 2), { flag: 'wx', mode: 0o600 });
   }
   const selected = new Set(eligible.map(i => i.batchId));
-  return { ok: true, runFile, project: { id: p.id, name: p.name, dir: root,
+  // Global memory is optional reference material; failures never block a claim.
+  let memory;
+  if (eligible.length && w.capabilities.includes('global-memory-v1')) {
+    try {
+      const m = await callCli(config, ['memory', 'show']);
+      if (m.settings?.enabled && m.files?.length) memory = { dir: m.dir, files: m.files.map(f => ({ title: f.title, path: f.path })), instruction: '开始实现前先阅读这些全局记忆文件；与引导词或需求冲突时以引导词和需求为准。' };
+    } catch {}
+  }
+  return { ok: true, runFile, ...(memory ? { memory } : {}), project: { id: p.id, name: p.name, dir: root,
     description: p.description, guidance: p.guidance },
     requirements: eligible.map(({ signature, ...i }) => i), skipped,
     batches: p.batches.filter(b => selected.has(b.id)).map(b => ({ id: b.id, hash: b.hash, prompt: b.text })),
@@ -199,7 +207,7 @@ export async function completeRun(runFile, report, cwd) {
       if (result.usage !== undefined && !w.capabilities.includes('task-token-usage-v1')) fail('ReqFlow 需升级至支持任务用量的版本，未回写');
       const note = `[ReqFlow Codex run ${run.id}]\n${result.summary}\n验证：${result.validation}`;
       // Legacy CLI has no conditional-write API. Pre/post checks narrow but cannot eliminate the race.
-      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', [...result.summary.trim()].slice(0, 50).join(''), '--run', run.id, ...(result.usage !== undefined ? ['--usage', JSON.stringify(result.usage)] : report.sessionId ? ['--session', String(report.sessionId)] : [])]);
+      await callCli(run.config, ['complete', '--project', p.id, '--id', i.id, '--batch', b.id, '--item-version', String(i.version), '--note', note, '--summary', result.summary.trim(), '--run', run.id, ...(result.usage !== undefined ? ['--usage', JSON.stringify(result.usage)] : report.sessionId ? ['--session', String(report.sessionId)] : [])]);
       const after = await workspace(run.config);
       const updated = after.state.projects.find(p => p.id === run.projectId)?.items.find(x => x.id === i.id);
       if (updated?.status !== 'pending_verification' || updated.version !== i.version || updated.history[0]?.note !== note)

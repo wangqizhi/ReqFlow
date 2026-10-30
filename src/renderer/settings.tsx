@@ -1,12 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { bridge } from './api';
+import { bridge, type MemoryInfo, type MemorySettings } from './api';
+import { MemorySettingsPanel, emptyMemory } from './memory-settings';
 import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI, AIReasoningEffort } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CORE_PROMPT_TEMPLATE } from '../core/domain';
 import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['memory', '全局记忆'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -134,6 +135,28 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const [savedBackup, setSavedBackup] = useState('');
   const [savedTemplates, setSavedTemplates] = useState({ baseline: '', publish: '', core: '' });
   const [savedPublishLogging, setSavedPublishLogging] = useState(true);
+  const [memory, setMemory] = useState<MemorySettings>(emptyMemory);
+  const [memoryInfo, setMemoryInfo] = useState<MemoryInfo | null>(null);
+  const [savedMemory, setSavedMemory] = useState('');
+  const [memoryLoaded, setMemoryLoaded] = useState(false);
+  const [memoryError, setMemoryError] = useState('');
+  function acceptMemory(info: MemoryInfo, payload?: MemorySettings) {
+    setMemoryInfo(info); setSavedMemory(fingerprint(payload || info.settings));
+    // 保存期间没有继续编辑时才回填服务端规范化后的设置（REQ-288）。
+    if (!payload) setMemory(info.settings);
+    else setMemory(current => fingerprint(current) === fingerprint(payload) ? info.settings : current);
+    setMemoryLoaded(true);
+  }
+  useEffect(() => {
+    if (tab !== 'memory') return;
+    if (!bridge.getMemory) { setMemoryError('全局记忆仅桌面版可用'); return; }
+    bridge.getMemory().then((r) => {
+      if (!r.ok) throw Error(r.error || '读取全局记忆失败');
+      setMemoryError('');
+      if (memoryLoaded) setMemoryInfo(r); else acceptMemory(r);
+    }).catch((e: any) => setMemoryError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
   const profiles = form.profiles || [];
   function draftProfiles(): AISettings[] {
     const { profiles: _, activeProfileId: __, ...current } = form;
@@ -273,6 +296,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
     : tab === 'logs' ? loaded && (!bridge.savePublishLogSettings || publishLogLoaded)
+    : tab === 'memory' ? memoryLoaded
     : tab === 'server' || tab === 'data' ? true
     : backupLoaded && !status.running;
   async function saveCurrentTab(): Promise<boolean> {
@@ -313,6 +337,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
         return r;
       }, '日志设置已保存', 'save');
     }
+    if (tab === 'memory') {
+      const payload = memory;
+      return perform(async () => { const r = await bridge.saveMemory!(payload); if (r.ok) acceptMemory(r, payload); return r; }, '全局记忆已保存，后续开发 Prompt 会引用最新记忆', 'save');
+    }
     if (tab === 'server' || tab === 'data') return true;
     const payload = backup;
     return perform(async () => { const r = await bridge.saveBackupSettings!(payload); if (r.ok) setSavedBackup(fingerprint(payload)); return r; }, '备份设置已保存', 'save');
@@ -335,7 +363,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
   const backupDirty = backupLoaded && fingerprint(backup) !== savedBackup;
   const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish || coreTpl !== savedTemplates.core);
   const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
-  const dirty = aiDirty || backupDirty || templateDirty || logDirty;
+  const memoryDirty = memoryLoaded && fingerprint(memory) !== savedMemory;
+  const dirty = aiDirty || backupDirty || templateDirty || logDirty || memoryDirty;
   useImperativeHandle(ref, () => ({ requestLeave() { if (savingRef.current) { setMessage('设置正在保存，请稍候…'); setMessageKind('info'); return; } if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
   useEffect(() => {
     if (!leaveConfirm || busy || saving) return;
@@ -349,6 +378,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
     const payloadAI = configuration();
     const payloadBackup = backup;
     const payloadLogging = publishLogging;
+    const payloadMemory = memory;
     const templateTexts: Record<string, string> = { baseline: baselineTpl, publish: publishTpl, core: coreTpl };
     const success = await perform(async () => {
       if (aiDirty) { const r = await bridge.saveAISettings(payloadAI); if (!r.ok) return r; setSavedAI(fingerprint(payloadAI)); }
@@ -363,12 +393,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
       }
       if (backupDirty) { const r = await bridge.saveBackupSettings!(payloadBackup); if (!r.ok) return r; setSavedBackup(fingerprint(payloadBackup)); }
       if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: payloadLogging }); if (!r.ok) return r; setSavedPublishLogging(payloadLogging); }
+      if (memoryDirty) { const r = await bridge.saveMemory!(payloadMemory); if (!r.ok) return r; acceptMemory(r, payloadMemory); }
       return { ok: true };
     }, '设置已保存', 'save');
     if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置" data-saving={saving ? 'true' : undefined}>
-      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、远程同步服务端、备份与本机数据</p></div>
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、全局记忆、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -433,6 +464,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
           <p className="settings-hint">导入会读取远端备份，补充缺失项目、需求与历史；相同 ID 保留本机内容。导入前保留本机恢复副本，不上传本机数据。</p>
           <p className="backup-status" role="status">{!backupLoaded ? '同步备份仅桌面版可用' : status.running ? '正在同步…' : status.error ? '同步失败：' + status.error : status.lastSuccess ? '最近同步：' + new Date(status.lastSuccess).toLocaleString('zh-CN') : '尚未同步'}</p>
         </>}
+        {tab === 'memory' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
+          <MemorySettingsPanel value={memory} change={setMemory} info={memoryInfo} disabled={busy || !memoryLoaded} error={memoryError} notify={notify} />
+        </form>}
         {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className={'settings-message' + (messageKind === 'err' ? ' err' : '')} role={messageKind === 'err' ? 'alert' : 'status'}>{message}</p>}

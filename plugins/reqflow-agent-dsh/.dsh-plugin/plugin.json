@@ -1,6 +1,6 @@
 {
   "name": "reqflow-agent-dsh",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "按当前项目目录领取 ReqFlow AI 排期任务，实现后转入待验证（DeepSeek Harness 版）。",
   "author": {
     "name": "ReqFlow"

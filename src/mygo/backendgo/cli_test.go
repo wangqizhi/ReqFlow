@@ -31,7 +31,7 @@ func TestCoreCLIProtocolAndLifecycle(t *testing.T) {
 		t.Fatal(version)
 	}
 	help := coreTestCLI(t, dir, "--help")
-	if len(coreList(help["groups"])) != 6 {
+	if len(coreList(help["groups"])) != 7 {
 		t.Fatal("help lost groups")
 	}
 	p := coreMap(coreTestCLI(t, dir, "project", "create", "--name", "CLI")["project"])

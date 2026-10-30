@@ -170,6 +170,8 @@ func (s *workspaceStore) write(record map[string]any, expected *int64) (map[stri
 				record["contextWarning"] = "上下文已保存，但目录或 Git 同步失败：" + syncErr.Error()
 			}
 		}
+		// REQ-294：全局记忆随工作区更新，失败不影响本次保存。
+		_ = refreshMemoryFiles(s.dir, coreMap(record["data"]))
 		return record, nil
 	})
 }

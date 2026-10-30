@@ -39,7 +39,12 @@ try {
   const completed = cli(['complete', '--project', project, '--batch', batch, '--id', item, '--item-version', String(scheduled.items[0].version), '--summary', '已实现字段并完成CLI检查']);
   assert.equal(completed.ok, true);
   assert.equal(cli(['item', 'show', '--project', project, '--id', item]).item.completionNote, '已实现字段并完成CLI检查');
-  cli(['item', 'completion-note', '--project', project, '--id', item, '--summary', '中'.repeat(51)], false);
+  cli(['item', 'completion-note', '--project', project, '--id', item, '--summary', '   '], false);
+  // REQ-293：完成说明不再限制 50 字，完整保存。
+  cli(['item', 'completion-note', '--project', project, '--id', item, '--summary', '中'.repeat(300)]);
+  assert.equal(cli(['item', 'show', '--project', project, '--id', item]).item.completionNote, '中'.repeat(300));
+  const memory = cli(['memory', 'show']);
+  assert.ok(memory.settings.enabled && memory.limit === 100 * 1024 && memory.files.some(f => f.key === 'projects') && memory.used <= memory.limit);
   cli(['item', 'completion-note', '--project', project, '--id', item, '--summary', '补充说明', '--item-version', '99'], false);
   cli(['item', 'completion-note', '--project', project, '--id', item, '--summary', '已补写完成说明，CLI检查通过']);
   assert.equal(cli(['item', 'show', '--project', project, '--id', item]).item.completionNote, '已补写完成说明，CLI检查通过');

@@ -15,6 +15,12 @@ export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
   | { ok: false; error: string; code?: string };
 
+/** 全局记忆（REQ-294）：跨项目记忆设置与已生成的 Markdown 文件。 */
+export type MemorySettings = { enabled: boolean; limitKB: number; recentLimit: number; notes: Record<string, string> };
+export type MemorySection = { key: string; file: string; title: string; hint: string; auto: boolean };
+export type MemoryFile = MemorySection & { path: string; size: number; content?: string };
+export type MemoryInfo = { settings: MemorySettings; sections: MemorySection[]; files: MemoryFile[]; dir: string; used: number; limit: number; prompt: string };
+
 /** 「浏览项目」的目录条目（rel 为相对关联目录、以 / 分隔的路径）。 */
 export type FileEntry = { name: string; rel: string; dir: boolean; size: number };
 
@@ -82,6 +88,8 @@ export interface ReqFlowBridge {
   /** 实验室「指派」开关（REQ-207）：开启后「提交验证」弹窗才会显示指派浮层。 */
   getAssignSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveAssignSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
+  getMemory?(): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
+  saveMemory?(settings: MemorySettings): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
   getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
   saveContextSettings?(dir: string): Promise<{ ok: boolean; dir?: string; error?: string }>;
   listSSH?(root: string): Promise<{ ok: boolean; error?: string; dir?: string; path?: string; entries?: { name: string; path: string }[] }>;

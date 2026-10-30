@@ -28,7 +28,7 @@ metadata:
 1. 使用当前会话的项目工作目录作为 cwd。不要把插件目录当项目目录，不按项目名称猜测绑定，不自行更改 ReqFlow 项目目录。
 2. 调用 `reqflow_read`，`execute=true` 表示领取，省略或 `false` 表示只读。首次未配置时先使用 `reqflow-setup` 技能。
 3. 解析返回。只执行 `requirements` 中的需求；领取有效排期批次中 executor 为 ai 的需求；兼容旧需求未设置 executor 时默认为 ai。ready 或 in_progress 都可以领取，无需先点击提交。未排期、人工执行、指定其他插件/agent、pending_verification、archived、已取消及过期快照不领取。
-4. 工具已在本会话保存领取快照。完整正文、验收条件、交付引导在 requirement 字段；项目背景与引导词在 project；未解决的验证问题以批次 Prompt 为准。batch Prompt 可能包含本轮之外的需求，只视为参考，不扩大执行范围。
+4. 工具已在本会话保存领取快照。完整正文、验收条件、交付引导在 requirement 字段；项目背景与引导词在 project；返回 memory 时，开始实现前先阅读其中列出的 ReqFlow 全局记忆文件作为参考（与引导词或需求冲突时以引导词和需求为准）；未解决的验证问题以批次 Prompt 为准。batch Prompt 可能包含本轮之外的需求，只视为参考，不扩大执行范围。
 5. 返回 `selectionRequired` 时必须让用户从 `projects` 中选择项目，再用 `projectId` 重试，禁止自行猜测。没有 requirements 时说明无可执行需求及 skipped 原因，结束。不得自行 generate / submit 来扩大任务。
 
 ## 实现

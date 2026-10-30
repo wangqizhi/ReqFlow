@@ -27,9 +27,7 @@ func coreCompletionSummary(a map[string]any) (string, error) {
 		if !ok || text == "" {
 			return "", errors.New("完成说明不能为空")
 		}
-		if len([]rune(text)) > 50 {
-			return "", errors.New("完成说明不能超过50字")
-		}
+		// REQ-293：完成说明完整保存，界面中过长时滚动查看。
 		return text, nil
 	}
 	note := coreString(a["note"])
@@ -38,11 +36,7 @@ func coreCompletionSummary(a map[string]any) (string, error) {
 			note = note[end+2:]
 		}
 	}
-	runes := []rune(strings.TrimSpace(note))
-	if len(runes) > 50 {
-		runes = runes[:50]
-	}
-	return string(runes), nil
+	return strings.TrimSpace(note), nil
 }
 
 const DefaultGuidance = "请结合项目背景实现需求，遵循现有技术栈与代码规范。完成后说明改动、运行方式、验证结果与剩余问题。"
@@ -476,7 +470,7 @@ const DefaultProjectPromptTemplate = `# 项目：{{project_name}}
 {{requirements}}{{delivery_guidance}}`
 
 func BuildPrompt(p map[string]any, items []any) string {
-	return buildPromptTemplate(DefaultProjectPromptTemplate, p, items, nil)
+	return buildPromptTemplate(DefaultProjectPromptTemplate, p, items, nil) + memoryPromptSuffix()
 }
 func buildPromptTemplate(template string, p map[string]any, items []any, extra []string) string {
 	sections := []string{}

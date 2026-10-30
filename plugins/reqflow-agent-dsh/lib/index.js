@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { main, matchProject, completeRun } from '../scripts/reqflow.mjs';
 
 const PLUGIN_NAME = 'reqflow-agent-dsh';
-const PLUGIN_VERSION = '0.1.4';
+const PLUGIN_VERSION = '0.1.5';
 const PLUGIN_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const name = PLUGIN_NAME;

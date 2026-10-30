@@ -33,6 +33,7 @@ description: 从 ReqFlow 读取与当前项目目录匹配的 AI 排期任务，
 - 执行领取：`{"execute": true}`，必要时加 `{"projectId": "..."}`。
 - 工具会把本轮 `runFile` 和 `executionCwd` 保存在当前会话；后续 `reqflow_complete` 使用该快照。
 - 只执行返回的 `requirements`。有效范围是有效排期批次中 `executor` 为 `ai` 的 `ready` / `in_progress` 需求；未排期、人工执行、指定其他插件/agent、`pending_verification`、`archived`、已取消及过期快照不领取。
+- 返回 `memory` 时，开始实现前先阅读其中列出的 ReqFlow 全局记忆文件作为参考；与引导词或需求冲突时以引导词和需求为准。
 - `batch` Prompt 可能包含本轮之外的需求，只作参考，不扩大执行范围。
 - 没有 `requirements` 时说明无可执行需求及 `skipped` 原因并结束；不得自行 generate / submit 来扩大任务。
 

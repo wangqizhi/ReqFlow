@@ -30,7 +30,7 @@ read / doctor / complete 会先向 ReqFlow 查询本宿主插件版本。版本�
 1. 使用当前聊天的项目工作目录作为 cwd。不要把插件目录当项目目录，不按项目名称猜测绑定，不自行更改 ReqFlow 项目目录。
 2. 运行 `node "<script>" read --cwd "<当前项目绝对目录>"`。首次未配置时运行插件 setup 技能。
 3. 解析 JSON。只执行 `requirements` 中的需求；领取有效排期批次（draft 或 submitted）中 executor 为 ai 的需求；兼容旧需求未设置 executor 时默认为 ai。ready 或 in_progress 都可以领取，无需先点击提交。未排期、人工执行、指定其他插件/agent、pending_verification、archived、已取消及过期快照不领取。
-4. 保存返回的 runFile。完整正文、验收条件、交付引导在 requirement 字段；项目背景与引导词在 project；未解决的验证问题以批次 Prompt 为准。batch Prompt 可能包含本轮之外的需求，只视为参考，不扩大执行范围。
+4. 保存返回的 runFile。完整正文、验收条件、交付引导在 requirement 字段；项目背景与引导词在 project；返回 memory 时，开始实现前先阅读其中列出的 ReqFlow 全局记忆文件作为参考（与引导词或需求冲突时以引导词和需求为准）；未解决的验证问题以批次 Prompt 为准。batch Prompt 可能包含本轮之外的需求，只视为参考，不扩大执行范围。
 5. 没有 requirements 时说明无可执行需求及 skipped 原因，结束。不得自行 generate / submit 来扩大任务。
 
 ## 实现

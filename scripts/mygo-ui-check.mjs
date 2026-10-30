@@ -68,7 +68,10 @@ try {
   cli(['generate', '--project', project, '--items', scheduledLong]);
   const item = cli(['item', 'add', '--project', project, '--title', '完成说明UI检查', '--body', '仅存在于隔离副本']).item.id;
   cli(['generate', '--project', project, '--items', item]);
-  cli(['complete', '--project', project, '--id', item, '--summary', '已补齐完成说明，CLI检查通过']);
+  // REQ-293：完成说明不再截断为 50 字，长说明在卡片内滚动。
+  const longSummary = '已补齐完成说明，CLI检查通过' + Array.from({ length: 20 }, (_, n) => `
+第${n + 1}行：完整说明不截断`).join('');
+  cli(['complete', '--project', project, '--id', item, '--summary', longSummary]);
   const componentFixture = spawnSync(path.join(portable, 'ReqFlow.exe'), ['--test-invoke'], {
     windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30_000, env: { ...process.env, REQFLOW_DATA_DIR: data },
     input: JSON.stringify({ channel: 'workspace:apply', args: [{ op: 'verificationVersion', project, id: item, version: 1,
@@ -102,7 +105,7 @@ try {
   });
   child.stderr.on('data', value => { stderr += value; });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 180_000);
+    const timer = setTimeout(() => { child.kill(); reject(Error('MyGO UI check timed out')); }, 240_000);
     child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`MyGO exited ${code}: ${stderr}`)); });
   });
@@ -125,7 +128,7 @@ try {
     await copyFile(reportPath + suffix + '.png', path.join(root, `tmp/mygo${suffix}.png`));
     assert.equal(layout.ok, true, JSON.stringify(layout));
   }
-  for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'milestones', 'directory', 'content', 'projects', 'guide', 'ssh', 'project-import', 'settings-api', 'settings-cli', 'settings-data', 'mods-protocol', 'mods-agents', 'mods-lab']) {
+  for (const height of [900, 720]) for (const surface of ['terminal', 'sidebar', 'stats', 'milestones', 'directory', 'content', 'projects', 'guide', 'ssh', 'project-import', 'settings-api', 'settings-cli', 'settings-data', 'settings-memory', 'mods-protocol', 'mods-agents', 'mods-lab']) {
     const suffix = `.${surface}-${height}`;
     const layout = JSON.parse(await readFile(reportPath + suffix + '.json', 'utf8'));
     assert.equal(layout.ok, true, JSON.stringify(layout));

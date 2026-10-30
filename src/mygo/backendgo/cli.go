@@ -125,6 +125,7 @@ func RunCLI(argv []string, version, dataDir string, stdout io.Writer) int {
 	}
 	service := NewWorkspaceService(dataDir)
 	service.completionVersion = version
+	SetMemoryDataDir(dataDir)
 	var result map[string]any
 	var e error
 	if coreTruthy(a["help"]) {
@@ -234,13 +235,15 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 			return nil, errors.New("--feature 需要同时提供 --project")
 		}
 		return s.Mutate(action, nil)
+	case "memory show":
+		return s.memoryInfo()
 	case "context settings":
 		return s.contextSettings()
 	case "context migrate":
 		return s.moveContexts(coreString(a["dir"]))
 
 	case "version":
-		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1", "task-token-usage-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
+		return map[string]any{"app": "ReqFlow", "capabilities": []any{"scheduled-ai-complete", "plugin-release-v1", "ai-execution-claim-v1", "task-token-usage-v1", "global-memory-v1"}, "version": version, "dataFile": s.DataFile(), "storageBackend": s.StorageStatus(), "protocol": "workspace-json-v1"}, nil
 	case "plugin version", "plugin bundle":
 		return pluginRelease(command, a)
 	case "execution claim":
@@ -395,7 +398,7 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 		if command == "item completion-note" {
 			action["op"] = "completionNote"
 			if !coreHas(a, "summary") {
-				return nil, errors.New("缺少 --summary <50字内完成说明>")
+				return nil, errors.New("缺少 --summary <完成说明>")
 			}
 		}
 		if coreHas(a, "summary") {

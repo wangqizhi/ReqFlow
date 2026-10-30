@@ -30,6 +30,14 @@ ReqFlow.exe --cli <command> [options]
 | `context settings` | `` | 查看上下文数据目录及 Git 可用状态。 |
 | `context migrate` | `--dir <绝对路径>` | 迁移上下文到空目录并切换后续写入位置，原目录保留为恢复副本。 |
 
+## memory
+
+跨项目全局记忆：最近工作、项目索引、技术方案与 UI 设计要求等，开发 Prompt 自动引用。
+
+| 命令 | 参数 | 说明 |
+| --- | --- | --- |
+| `memory show` | `` | 刷新并返回全局记忆设置、预留大小与用量、各记忆文件路径及内容，以及附加到开发 Prompt 的引用段落；内容在设置「全局记忆」中编辑。<br/>例：`ReqFlow.exe --cli memory show` |
+
 ## 基础
 
 帮助、版本与工作区整体读写。
@@ -88,8 +96,8 @@ ReqFlow.exe --cli <command> [options]
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `complete` | `--project <id> --id <需求ID> [--link <链接>] [--note <完整报告>] [--summary <50字内完成说明>] [--batch <排期批次ID> --item-version <版本>] [--run <运行ID> [--usage <JSON数组> | --session <会话ID>]]` | 实现完成：执行中或有效排期 → 待验证；summary 显示在验证提示上方，省略时从 note 提取最多50字；带 batch/item-version 时原子核对 AI 执行标识及排期版本；带 run 未传 usage 时按领取客户端（Codex/Claude Code/Pi/ZCode/DeepSeek Harness）读取 --session 或继承会话变量对应的本机会话用量<br/>例：`ReqFlow.exe --cli complete --project <id> --id <需求ID> --summary "已完成布局调整，构建检查通过"` |
-| `item completion-note` | `--project <id> --id <需求ID> --summary <50字内完成说明> [--item-version <版本>]` | 补写当前版本待验证需求的开发完成说明；空白、超过50字或非待验证状态均拒绝<br/>例：`ReqFlow.exe --cli item completion-note --project <id> --id <需求ID> --summary "已补齐CLI接口，生命周期检查通过"` |
+| `complete` | `--project <id> --id <需求ID> [--link <链接>] [--note <完整报告>] [--summary <完成说明>] [--batch <排期批次ID> --item-version <版本>] [--run <运行ID> [--usage <JSON数组> | --session <会话ID>]]` | 实现完成：执行中或有效排期 → 待验证；summary 完整显示在验证提示上方（过长时卡片内滚动），省略时使用 note 正文；带 batch/item-version 时原子核对 AI 执行标识及排期版本；带 run 未传 usage 时按领取客户端（Codex/Claude Code/Pi/ZCode/DeepSeek Harness）读取 --session 或继承会话变量对应的本机会话用量<br/>例：`ReqFlow.exe --cli complete --project <id> --id <需求ID> --summary "已完成布局调整，构建检查通过"` |
+| `item completion-note` | `--project <id> --id <需求ID> --summary <完成说明> [--item-version <版本>]` | 补写当前版本待验证需求的开发完成说明；空白或非待验证状态均拒绝<br/>例：`ReqFlow.exe --cli item completion-note --project <id> --id <需求ID> --summary "已补齐CLI接口，生命周期检查通过"` |
 | `revert` | `--project <id> --id <需求ID> [--note <原因>]` | 退回待执行：执行中 → 待执行（退回后可编辑，同批次其他需求不受影响）<br/>例：`ReqFlow.exe --cli revert --project <id> --id <需求ID>` |
 | `verify` | `--project <id> --id <需求ID> --pass <true|false> [--note <原因>]` | 人工验证：通过 → 归档；未通过 → 退回待执行并记录原因<br/>例：`ReqFlow.exe --cli verify --project <id> --id <需求ID> --pass false --note "样式未生效"` |
 | `regress` | `--project <id> --id <需求ID> [--note <回归原因>]` | 归档需求回归：退回待执行，原因带入下一轮 Prompt<br/>例：`ReqFlow.exe --cli regress --project <id> --id <需求ID> --note "线上复现"` |

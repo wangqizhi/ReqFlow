@@ -324,7 +324,7 @@ func maximizeTerminalCheck(ctx context.Context, child *mygo.Window) any {
 func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 	// The smoke script grew with the terminal checks; keep one deadline for all stages
 	// so slower machines still reach the compact and surface layouts.
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	versionJSON, _ := json.Marshal(appVersion)
 	script := strings.ReplaceAll(uiSmokeScript, "__REQFLOW_VERSION__", string(versionJSON))
@@ -411,7 +411,9 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
           await waitFor(()=>document.querySelector('.workspace-toolbar'));
           await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
           const panel=document.querySelector('.workspace-toolbar');const buttons=[...panel.querySelectorAll('button')];
-          return {ok:panel.getBoundingClientRect().top>=document.querySelector('.list-scroll').getBoundingClientRect().bottom&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,bottom:panel.getBoundingClientRect().bottom};
+          const filters=panel.querySelector('.workspace-filters').getBoundingClientRect(),actions=panel.querySelector('.workspace-actions').getBoundingClientRect();
+          const oneRow=actions.top<filters.bottom&&filters.top<actions.bottom;
+          return {ok:oneRow&&panel.getBoundingClientRect().top>=document.querySelector('.list-scroll').getBoundingClientRect().bottom&&buttons.every(b=>b.getBoundingClientRect().bottom<=innerHeight)&&!document.querySelector('.page-foot')&&!document.querySelector('.overlay'),height:innerHeight,width:innerWidth,oneRow,bottom:panel.getBoundingClientRect().bottom};
         })()`)
 		if e != nil {
 			schedule = map[string]any{"ok": false, "error": e.Error()}
@@ -575,21 +577,23 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 					_ = os.WriteFile(name+".png", png, 0600)
 				}
 			}
-			for _, surface := range []string{"settings-api", "settings-cli", "settings-data"} {
+			for _, surface := range []string{"settings-api", "settings-cli", "settings-data", "settings-memory"} {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));
                   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+                  const page_ready=()=>document.querySelectorAll('.memory-note textarea').length===6&&!document.querySelector('.memory-note textarea').disabled;
                   document.querySelector('[aria-label="关闭远程目录"]')?.click();await pause();
                   document.querySelector('.overlay')?.click();await pause();
                   if(!document.querySelector('.settings-page')) { button('设置').click();await pause(); }
                   const nav=document.querySelector('[aria-label="设置功能菜单"]');
-                  const data=SURFACE==='settings-data';
-                  [...nav.querySelectorAll('button')].find(b=>b.textContent===(data?'数据':'AI 供应商')).click();await pause();
-                  if(!data){button(SURFACE==='settings-cli'?'本地 CLI':'API 服务').click();await pause();}
+                  const data=SURFACE==='settings-data',memory=SURFACE==='settings-memory';
+                  [...nav.querySelectorAll('button')].find(b=>b.textContent===(data?'数据':memory?'全局记忆':'AI 供应商')).click();await pause();
+                  if(memory){for(let n=0;n<30&&!page_ready();n++)await pause();}
+                  else if(!data){button(SURFACE==='settings-cli'?'本地 CLI':'API 服务').click();await pause();}
                   const page=document.querySelector('.settings-page');const rect=page.getBoundingClientRect();
                   const footer=page.querySelector('.settings-footer').getBoundingClientRect();
                   const body=page.querySelector('.settings-body');
-                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===6&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth;
+                  const ok=rect.top>=0&&rect.bottom<=innerHeight+1&&footer.bottom<=innerHeight+1&&footer.top>=body.getBoundingClientRect().bottom-1&&nav.querySelectorAll('button').length===7&&!document.querySelector('.overlay')&&page.clientWidth===document.querySelector('.main').clientWidth&&(SURFACE!=='settings-memory'||(page_ready()&&body.scrollWidth<=body.clientWidth+1));
                   return {ok,height:innerHeight,scrollable:body.scrollHeight>body.clientHeight};
                 })()`
 				code = strings.ReplaceAll(code, "SURFACE", fmt.Sprintf("%q", surface))

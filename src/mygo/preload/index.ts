@@ -5,6 +5,8 @@ const channels = {
   saveTerminalSetting: 'lab:terminal:save',
   getAssignSetting: 'lab:assign:get',
   saveAssignSetting: 'lab:assign:save',
+  getMemory: 'memory:get',
+  saveMemory: 'memory:save',
   getContextSettings: 'context:settings:get',
   saveContextSettings: 'context:settings:save',
   listSSH: 'ssh:list',

@@ -44,6 +44,7 @@ type Backend struct {
 func NewBackend(dataDir, appDir, version string) *Backend {
 	workspace := NewWorkspaceService(dataDir)
 	workspace.completionVersion = version
+	SetMemoryDataDir(dataDir)
 	return &Backend{DataDir: dataDir, AppDir: appDir, Version: version, Workspace: workspace, desktopUpdate: map[string]any{"phase": "idle"}, desktopCheckouts: make(map[string]bool)}
 }
 
@@ -253,6 +254,10 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return desktopOK(map[string]any{"settings": value}), nil
+	case "memory:get":
+		return b.Workspace.memoryInfo()
+	case "memory:save":
+		return b.Workspace.saveMemory(desktopArg(args, 0))
 	case "context:settings:get":
 		return b.Workspace.contextSettings()
 	case "context:settings:save":

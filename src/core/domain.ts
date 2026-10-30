@@ -17,13 +17,10 @@ function finishAIExecution(i: Item, now: string, outcome: 'completed' | 'release
 function completionSummary(a: any): string {
   if (a.summary !== undefined) {
     if (typeof a.summary !== 'string' || !a.summary.trim()) throw Error('完成说明不能为空');
-    const text = a.summary.trim();
-    if (Array.from(text).length > 50) throw Error('完成说明不能超过50字');
-    return text;
+    return a.summary.trim();
   }
-  // Existing agents send a full report in --note; keep that in history and show a short excerpt.
-  const note = String(a.note || '').replace(/^\[ReqFlow[^\n]*\]\s*\n/, '').trim();
-  return Array.from(note).slice(0, 50).join('');
+  // Existing agents send a full report in --note; show it in full when no summary is given.
+  return String(a.note || '').replace(/^\[ReqFlow[^\n]*\]\s*\n/, '').trim();
 }
 
 export function versionComponents(value: unknown): Record<string, string> {

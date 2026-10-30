@@ -475,5 +475,5 @@ func renderCorePrompt(template string, p map[string]any, items []any, labels []s
 		template = DefaultCorePromptTemplate
 	}
 	// One pass: placeholder-like text in user input must remain literal.
-	return buildPromptTemplate(template, p, items, []string{"{{requirement_count}}", fmt.Sprint(len(items)), "{{requirement_ids}}", strings.Join(labels, "、"), "{{project_prompt}}", BuildPrompt(p, items)})
+	return buildPromptTemplate(template, p, items, []string{"{{requirement_count}}", fmt.Sprint(len(items)), "{{requirement_ids}}", strings.Join(labels, "、"), "{{project_prompt}}", buildPromptTemplate(DefaultProjectPromptTemplate, p, items, nil)}) + memoryPromptSuffix()
 }

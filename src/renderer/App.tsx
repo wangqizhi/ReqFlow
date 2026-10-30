@@ -930,7 +930,10 @@ export default function App() {
 
   async function copyPrompt(items: Item[]) {
     if (!p || !items.length) return;
-    try { await navigator.clipboard.writeText(buildPrompt(p, items)); notify('Prompt 已复制'); }
+    // REQ-294：与后端生成的开发 Prompt 一致，末尾引用全局记忆文件。
+    const memory = await bridge.getMemory?.().catch(() => null);
+    const memoryPrompt = memory?.ok && memory.prompt ? '\n\n' + memory.prompt : '';
+    try { await navigator.clipboard.writeText(buildPrompt(p, items) + memoryPrompt); notify('Prompt 已复制'); }
     catch { notify('复制失败，请检查剪贴板权限', 'err'); }
   }
 
@@ -1355,7 +1358,7 @@ export default function App() {
                         {i.criteria.length ? i.criteria.map((c, n) => <p key={n}><Check size={13} /><span>{c}</span></p>)
                           : <p>按需求说明确认结果即可。</p>}
                       </div>
-                      {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p>{i.completionNote}</p></div>}
+                      {i.status === 'pending_verification' && i.completionNote && i.completionNoteVersion === i.version && <div className="completion-note"><strong>开发完成说明</strong><p tabIndex={0} role="region" aria-label="开发完成说明">{i.completionNote}</p></div>}
                       {i.status === 'pending_verification' && <VerificationVersions item={i} />}
                       <ExecutionInfo item={i} session={agentSession} now={executionClock} />
                       <div className="next-step">
@@ -1418,10 +1421,11 @@ export default function App() {
                   checked={visible.filter(bulkEligible).length > 0 && visible.filter(bulkEligible).every(i => selected.includes(i.id))}
                   onChange={e => setSelected(e.target.checked ? [...new Set([...selected, ...visible.filter(bulkEligible).map(i => i.id)])] : selected.filter(id => !visible.some(i => i.id === id)))} />全选需求</label>
                   <button className="btn primary" disabled={busy || picked.length === 0} onClick={() => generate()}>排期 · 已选 {picked.length} 条</button></>}
-                {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count">当前 {inProgress.length} / 全部 {allInProgress.length} 条</span>
-                  <label className="check-label"><input type="checkbox" checked={visible.filter(actionEligible).length > 0 && visible.filter(actionEligible).every(i => selected.includes(i.id))} onChange={e => setSelected(e.target.checked ? visible.filter(actionEligible).map(i => i.id) : [])} />全选需求</label><button className="btn" disabled={busy || !selected.length} onClick={() => setBulkConfirm('project')}>批量退回 · 已选 {selected.length} 条</button>
-                  <button className="btn" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制全部 Prompt</button>
-                  <button className="btn primary" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · 当前 {inProgress.length} 条</button></>}
+                {/* REQ-291：排期表操作区与筛选保持同一行，文案精简，完整含义放在提示与读屏标签中 */}
+                {tab === 'generate' && <><strong>本轮排期</strong><span className="gen-count" title={`当前 ${inProgress.length} 条 / 全部 ${allInProgress.length} 条`}>{inProgress.length}/{allInProgress.length} 条</span>
+                  <label className="check-label" title="全选需求"><input type="checkbox" aria-label="全选需求" checked={visible.filter(actionEligible).length > 0 && visible.filter(actionEligible).every(i => selected.includes(i.id))} onChange={e => setSelected(e.target.checked ? visible.filter(actionEligible).map(i => i.id) : [])} />全选</label><button className="btn" aria-label={`批量退回 · 已选 ${selected.length} 条`} title="批量退回已选需求" disabled={busy || !selected.length} onClick={() => setBulkConfirm('project')}>退回 · {selected.length}</button>
+                  <button className="btn" aria-label="复制全部 Prompt" title="复制全部 Prompt" disabled={inProgress.length === 0} onClick={() => copyPrompt(inProgress)}>复制 Prompt</button>
+                  <button className="btn primary" aria-label={`提交验证 · 当前 ${inProgress.length} 条`} title="提交当前排期需求进入验证" disabled={busy || inProgress.length === 0} onClick={completeBatch}><Check size={15} />提交验证 · {inProgress.length}</button></>}
                 {tab === 'executing' && <><strong>执行中</strong><span className="gen-count">{visible.length} 条任务正在由 AI 执行</span><label className="check-label"><input type="checkbox" checked={visible.filter(actionEligible).length > 0 && visible.filter(actionEligible).every(i => selected.includes(i.id))} onChange={e => setSelected(e.target.checked ? visible.filter(actionEligible).map(i => i.id) : [])} />全选任务</label><button className="btn" disabled={busy || !selected.length} onClick={() => setBulkConfirm('project')}>批量释放 · 已选 {selected.length} 条</button></>}
                 {tab === 'pending_verification' && <><strong>待验证</strong><span className="gen-count">{visible.length} 条需求</span></>}
                 {tab === 'archived' && <div className="archive-navigation segmented" role="group" aria-label="归档次级入口">
