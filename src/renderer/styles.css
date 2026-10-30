@@ -1349,8 +1349,10 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .memory-dir { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; min-width: 0; }
 .memory-dir code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .memory-heading { font-size: 14px; margin: 20px 0 10px; }
-.memory-note-head { display: flex; justify-content: space-between; gap: 12px; }
+.memory-note-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .memory-note-head small { color: var(--muted); font-weight: 400; }
+.memory-note-actions { display: inline-flex; align-items: center; gap: 10px; }
+.memory-note .guidance-compare textarea { resize: vertical; }
 .memory-note textarea { resize: vertical; }
 .memory-preview { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; background: var(--panel); }
 .memory-preview summary { cursor: pointer; padding: 9px 12px; font-size: 13px; color: var(--ink-2); }

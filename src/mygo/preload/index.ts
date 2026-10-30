@@ -69,6 +69,7 @@ const channels = {
   savePublishLogSettings: 'publish:logs:settings:save',
   optimizeCommitMessage: 'ai:commit:optimize',
   optimizeGuidance: 'ai:guidance:optimize',
+  fillMemory: 'ai:memory:fill',
   saveAISettings: 'ai:settings:save',
   testAISettings: 'ai:settings:test',
   getWorkspace: 'workspace:get',

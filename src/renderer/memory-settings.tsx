@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { bridge, type MemoryInfo, type MemorySettings } from './api';
-import { FolderOpen } from './icons';
+import { FolderOpen, Wand } from './icons';
 
 export const emptyMemory: MemorySettings = { enabled: true, limitKB: 100, recentLimit: 30, notes: {} };
 
@@ -32,11 +33,8 @@ export function MemorySettingsPanel({ value, change, info, disabled, error, noti
     </div>
     {info?.dir && <div className="memory-dir"><code title={info.dir}>{info.dir}</code><button type="button" className="btn sm" disabled={!bridge.openProjectDir || !files.length} onClick={async () => { const r = await bridge.openProjectDir!(info.dir); if (!r.ok) notify(r.error || '打开目录失败', 'err'); }}><FolderOpen size={14} />打开目录</button></div>}
     <h3 className="memory-heading">手动记忆</h3>
-    {sections.filter(s => !s.auto).map(s => {
-      const text = value.notes[s.key] || '';
-      return <label className="field memory-note" key={s.key}><span className="memory-note-head"><span>{s.title} · <small>{s.file}</small></span><small>{kb(byteLength(text))}</small></span>
-        <textarea rows={5} value={text} disabled={disabled} placeholder={s.hint} onChange={e => change({ ...value, notes: { ...value.notes, [s.key]: e.target.value } })} /></label>;
-    })}
+    <p className="settings-hint">每个条目可点「AI 填写」，调用 AI 供应商结合各项目相关 Git 提交、约定文件与近期完成需求生成内容，确认对比后写入草稿，保存设置后生效。</p>
+    {sections.filter(s => !s.auto).map(s => <MemoryNoteField key={s.key} section={s} value={value} change={change} disabled={disabled} />)}
     <h3 className="memory-heading">自动生成</h3>
     <p className="settings-hint">以下内容随需求完成、项目变更自动更新，无需手动编辑。</p>
     {sections.filter(s => s.auto).map(s => {
@@ -44,5 +42,51 @@ export function MemorySettingsPanel({ value, change, info, disabled, error, noti
       return <details className="memory-preview" key={s.key}><summary>{s.title} · {s.file}{file ? ' · ' + kb(file.size) : ' · 未生成'}</summary><pre tabIndex={0}>{file?.content || (value.enabled ? '暂无内容' : '全局记忆已关闭')}</pre></details>;
     })}
     {info?.prompt && <details className="memory-preview"><summary>开发 Prompt 中附加的内容</summary><pre tabIndex={0}>{info.prompt}</pre></details>}
+  </div>;
+}
+
+type MemorySection = MemoryInfo['sections'][number];
+type FillState = { running: boolean; error: string; compare: { original: string; generated: string; note: string } | null };
+
+/** 手动记忆单个条目（REQ-295）：输入框 + 「AI 填写」，生成结果先对比再应用到草稿。 */
+function MemoryNoteField({ section, value, change, disabled }: { section: MemorySection; value: MemorySettings; change(v: MemorySettings): void; disabled: boolean }) {
+  const [ai, setAi] = useState<FillState>({ running: false, error: '', compare: null });
+  const text = value.notes[section.key] || '';
+  const id = 'memory-note-' + section.key;
+  const setText = (next: string) => change({ ...value, notes: { ...value.notes, [section.key]: next } });
+  async function fill() {
+    if (ai.running || disabled) return;
+    if (!bridge.fillMemory) { setAi({ running: false, error: 'AI 填写仅桌面版可用', compare: null }); return; }
+    setAi({ running: true, error: '', compare: null });
+    try {
+      const others = Object.fromEntries(Object.entries(value.notes).filter(([k]) => k !== section.key));
+      const r = await bridge.fillMemory(section.key, text, others);
+      if (!r.ok || !r.text?.trim()) throw Error(r.error || 'AI 返回的内容为空');
+      setAi({ running: false, error: '', compare: { original: text, generated: r.text, note: r.contextNote || '' } });
+    } catch (e: any) {
+      setAi({ running: false, error: e?.message || 'AI 填写失败', compare: null });
+    }
+  }
+  return <div className="field memory-note">
+    <div className="memory-note-head">
+      <label htmlFor={id}>{section.title} · <small>{section.file}</small></label>
+      <span className="memory-note-actions"><small>{kb(byteLength(text))}</small>
+        <button type="button" className="btn sm" disabled={disabled || ai.running} aria-busy={ai.running}
+          title={'结合各项目相关 Git 提交、约定文件与近期完成需求，让 AI 填写' + section.title}
+          onClick={() => void fill()}><Wand size={14} />{ai.running ? 'AI 填写中…' : 'AI 填写'}</button></span>
+    </div>
+    <textarea id={id} rows={5} value={text} disabled={disabled} placeholder={section.hint} onChange={e => setText(e.target.value)} />
+    {ai.error && <p className="settings-message err" role="alert">{ai.error}</p>}
+    {ai.compare && <div className="guidance-compare" role="group" aria-label={section.title + ' AI 填写结果'}>
+      <div className="guidance-compare-head"><strong>AI 填写对比</strong>{ai.compare.note && <span title={ai.compare.note}>{ai.compare.note}</span>}</div>
+      <label className="field">当前内容<textarea rows={5} readOnly value={ai.compare.original} placeholder="（空）" /></label>
+      <label className="field">AI 生成 · 可编辑<textarea rows={8} value={ai.compare.generated}
+        onChange={e => setAi(s => s.compare ? { ...s, compare: { ...s.compare, generated: e.target.value } } : s)} /></label>
+      <div className="settings-actions">
+        <button type="button" className="btn primary" disabled={disabled || !ai.compare.generated.trim()}
+          onClick={() => { setText(ai.compare!.generated.trim()); setAi({ running: false, error: '', compare: null }); }}>应用到草稿</button>
+        <button type="button" className="btn" onClick={() => setAi({ running: false, error: '', compare: null })}>放弃</button>
+      </div>
+    </div>}
   </div>;
 }

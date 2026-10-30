@@ -150,6 +150,8 @@ export interface ReqFlowBridge {
   optimizeCommitMessage?(project: string, message: string): Promise<{ ok: boolean; message?: string; error?: string }>;
   // REQ-151：AI 优化项目引导词 / 交付引导词，携带最近提交与差异统计上下文；返回优化后文本供对比编辑
   optimizeGuidance?(project: string, kind: 'guidance' | 'delivery', text: string): Promise<{ ok: boolean; text?: string; contextNote?: string; error?: string }>;
+  /** 全局记忆手动条目 AI 填写（REQ-295）：key 为条目，current 为当前草稿，notes 为其他条目草稿。 */
+  fillMemory?(key: string, current: string, notes: Record<string, string>): Promise<{ ok: boolean; text?: string; contextNote?: string; error?: string }>;
   getWorkspace(): Promise<WorkspaceResult>;
   /** 只读本地备份，不触发远程刷新；用于独立窗口快速首屏。 */
   getLocalWorkspace?(): Promise<WorkspaceResult>;
