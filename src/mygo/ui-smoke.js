@@ -177,10 +177,28 @@
     const settingsTab = text => [...document.querySelectorAll('[aria-label="设置功能菜单"] button')].find(el => el.textContent === text);
     // REQ-294：全局记忆可在设置中配置预留大小与手动记忆，保存后生成文件并拼接进开发 Prompt。
     await click(settingsTab('全局记忆'));
-    await waitFor(() => document.querySelectorAll('.memory-note textarea').length === 6 && !document.querySelector('.memory-note textarea').disabled);
+    await waitFor(() => document.querySelectorAll('.memory-note-preview').length === 6 && !document.querySelector('.memory-settings input[type="number"]').disabled);
     const memoryLimit = [...document.querySelectorAll('.memory-settings input[type="number"]')][0];
     await edit(memoryLimit, '120');
-    await edit(document.querySelector('.memory-note textarea'), 'UI冒烟：使用 Go + React 技术方案');
+    // REQ-295：预览框打开详情弹窗，顶部页签切换到编辑；AI 填写的发送与回复打印在底部终端「AI 交互」。
+    await click(document.querySelector('.memory-note-preview'));
+    await waitFor(() => document.querySelector('.memory-detail'));
+    await click([...document.querySelectorAll('.memory-detail [role="tab"]')].find(el => el.textContent.includes('编辑')));
+    await waitFor(() => document.querySelector('.memory-detail textarea'));
+    await edit(document.querySelector('.memory-detail textarea'), '- UI冒烟：使用 Go + React 技术方案');
+    await click([...document.querySelectorAll('.memory-detail [role="tab"]')].find(el => el.textContent.includes('预览')));
+    const detailPreview = !!document.querySelector('.memory-detail .memory-md li')?.textContent.includes('UI冒烟');
+    await click([...document.querySelectorAll('.memory-detail button')].find(el => el.textContent === '完成'));
+    const originalPrepareMemory = window.reqflow.prepareMemoryFill, originalFillMemory = window.reqflow.fillMemory;
+    window.reqflow.prepareMemoryFill = async () => ({ ok: true, system: 'UI冒烟系统提示', payload: JSON.stringify({ section: { title: 'UI 设计要求' } }), contextNote: '冒烟上下文' });
+    window.reqflow.fillMemory = async () => { await new Promise(resolve => setTimeout(resolve, 200)); return { ok: true, text: '- 冒烟生成', raw: '- 冒烟生成' }; };
+    await click([...document.querySelectorAll('.memory-note')[1].querySelectorAll('button')].find(el => el.textContent.includes('AI 填写')));
+    await waitFor(() => document.querySelector('.ai-console .ai-console-entry.recv') && document.querySelector('.memory-note .guidance-compare'));
+    const consoleText = document.querySelector('.ai-console').textContent;
+    checks.memoryDetailAndAIConsole = { ok: detailPreview && !document.querySelector('.memory-detail') && document.querySelector('.memory-note-preview').textContent.includes('UI冒烟') && consoleText.includes('UI冒烟系统提示') && consoleText.includes('→ 发送') && consoleText.includes('← 收到') && consoleText.includes('冒烟生成') && !!document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.includes('AI 交互') };
+    await click([...document.querySelectorAll('.memory-note .guidance-compare button')].find(el => el.textContent === '放弃'));
+    await click(document.querySelector('.ai-console [aria-label="收起 AI 交互终端"]'));
+    window.reqflow.prepareMemoryFill = originalPrepareMemory; window.reqflow.fillMemory = originalFillMemory;
     await click(document.querySelector('.settings-footer .primary'));
     await waitFor(() => !document.querySelector('.settings-page').dataset.saving);
     const memory = await window.mygo.call('ReqFlow.Invoke', 'memory:get', []);

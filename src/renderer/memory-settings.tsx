@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
+import { aiConsole } from './ai-console';
+import { renderMarkdown } from './markdown';
 import { bridge, type MemoryInfo, type MemorySettings } from './api';
-import { FolderOpen, Wand } from './icons';
+import { Eye, FolderOpen, Pencil, Wand, X } from './icons';
 
 export const emptyMemory: MemorySettings = { enabled: true, limitKB: 100, recentLimit: 30, notes: {} };
 
@@ -33,7 +36,7 @@ export function MemorySettingsPanel({ value, change, info, disabled, error, noti
     </div>
     {info?.dir && <div className="memory-dir"><code title={info.dir}>{info.dir}</code><button type="button" className="btn sm" disabled={!bridge.openProjectDir || !files.length} onClick={async () => { const r = await bridge.openProjectDir!(info.dir); if (!r.ok) notify(r.error || '打开目录失败', 'err'); }}><FolderOpen size={14} />打开目录</button></div>}
     <h3 className="memory-heading">手动记忆</h3>
-    <p className="settings-hint">每个条目可点「AI 填写」，调用 AI 供应商结合各项目相关 Git 提交、约定文件与近期完成需求生成内容，确认对比后写入草稿，保存设置后生效。</p>
+    <p className="settings-hint">点击预览框或「详情」查看完整内容，在弹窗顶部切换到「编辑」修改。「AI 填写」调用 AI 供应商结合各项目相关 Git 提交、约定文件与近期完成需求生成内容，发送与收到的信息显示在底部终端「AI 交互」，确认对比后写入草稿，保存设置后生效。</p>
     {sections.filter(s => !s.auto).map(s => <MemoryNoteField key={s.key} section={s} value={value} change={change} disabled={disabled} />)}
     <h3 className="memory-heading">自动生成</h3>
     <p className="settings-hint">以下内容随需求完成、项目变更自动更新，无需手动编辑。</p>
@@ -48,34 +51,52 @@ export function MemorySettingsPanel({ value, change, info, disabled, error, noti
 type MemorySection = MemoryInfo['sections'][number];
 type FillState = { running: boolean; error: string; compare: { original: string; generated: string; note: string } | null };
 
-/** 手动记忆单个条目（REQ-295）：输入框 + 「AI 填写」，生成结果先对比再应用到草稿。 */
+/** 手动记忆单个条目（REQ-295）：Markdown 预览框 + 「详情」弹窗（预览 / 编辑页签）+ 「AI 填写」。
+ *  AI 填写先取得发送内容并打印到底部终端「AI 交互」，再发送请求并打印收到的回复；生成结果先对比再应用到草稿。 */
 function MemoryNoteField({ section, value, change, disabled }: { section: MemorySection; value: MemorySettings; change(v: MemorySettings): void; disabled: boolean }) {
   const [ai, setAi] = useState<FillState>({ running: false, error: '', compare: null });
+  const [detail, setDetail] = useState<'preview' | 'edit' | null>(null);
   const text = value.notes[section.key] || '';
-  const id = 'memory-note-' + section.key;
   const setText = (next: string) => change({ ...value, notes: { ...value.notes, [section.key]: next } });
   async function fill() {
     if (ai.running || disabled) return;
-    if (!bridge.fillMemory) { setAi({ running: false, error: 'AI 填写仅桌面版可用', compare: null }); return; }
+    if (!bridge.prepareMemoryFill || !bridge.fillMemory) { setAi({ running: false, error: 'AI 填写仅桌面版可用', compare: null }); return; }
     setAi({ running: true, error: '', compare: null });
+    aiConsole.begin();
+    aiConsole.log('info', 'AI 填写「' + section.title + '」：正在收集相关 Git 提交、项目文件与近期完成需求…');
+    const started = Date.now();
     try {
       const others = Object.fromEntries(Object.entries(value.notes).filter(([k]) => k !== section.key));
-      const r = await bridge.fillMemory(section.key, text, others);
+      const prepared = await bridge.prepareMemoryFill(section.key, text, others);
+      if (!prepared.ok || !prepared.payload) throw Error(prepared.error || '收集上下文失败');
+      aiConsole.log('send', '系统提示', prepared.system);
+      aiConsole.log('send', '上下文 · ' + (prepared.contextNote || section.title) + ' · ' + kb(byteLength(prepared.payload)), prepared.payload);
+      aiConsole.log('info', '已发送，等待 AI 供应商响应…');
+      const r = await bridge.fillMemory(section.key, prepared.payload);
       if (!r.ok || !r.text?.trim()) throw Error(r.error || 'AI 返回的内容为空');
-      setAi({ running: false, error: '', compare: { original: text, generated: r.text, note: r.contextNote || '' } });
+      aiConsole.log('recv', 'AI 回复 · 用时 ' + ((Date.now() - started) / 1000).toFixed(1) + ' 秒', r.raw || r.text);
+      setAi({ running: false, error: '', compare: { original: text, generated: r.text, note: prepared.contextNote || '' } });
     } catch (e: any) {
-      setAi({ running: false, error: e?.message || 'AI 填写失败', compare: null });
+      const message = e?.message || 'AI 填写失败';
+      aiConsole.log('error', message);
+      setAi({ running: false, error: message, compare: null });
+    } finally {
+      aiConsole.end();
     }
   }
   return <div className="field memory-note">
     <div className="memory-note-head">
-      <label htmlFor={id}>{section.title} · <small>{section.file}</small></label>
+      <span>{section.title} · <small>{section.file}</small></span>
       <span className="memory-note-actions"><small>{kb(byteLength(text))}</small>
+        <button type="button" className="btn sm" onClick={() => setDetail('preview')} title={'查看' + section.title + '详情，可在顶部切换到编辑'}><Eye size={14} />详情</button>
         <button type="button" className="btn sm" disabled={disabled || ai.running} aria-busy={ai.running}
-          title={'结合各项目相关 Git 提交、约定文件与近期完成需求，让 AI 填写' + section.title}
+          title={'结合各项目相关 Git 提交、约定文件与近期完成需求，让 AI 填写' + section.title + '；交互内容显示在底部终端「AI 交互」'}
           onClick={() => void fill()}><Wand size={14} />{ai.running ? 'AI 填写中…' : 'AI 填写'}</button></span>
     </div>
-    <textarea id={id} rows={5} value={text} disabled={disabled} placeholder={section.hint} onChange={e => setText(e.target.value)} />
+    <button type="button" className={'memory-note-preview' + (text.trim() ? '' : ' empty')} aria-label={section.title + '：打开详情'} title="点击打开详情"
+      onClick={() => setDetail(text.trim() || disabled ? 'preview' : 'edit')}>
+      {text.trim() ? <div className="md-preview fb-md memory-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} /> : <span>{section.hint} 点击填写。</span>}
+    </button>
     {ai.error && <p className="settings-message err" role="alert">{ai.error}</p>}
     {ai.compare && <div className="guidance-compare" role="group" aria-label={section.title + ' AI 填写结果'}>
       <div className="guidance-compare-head"><strong>AI 填写对比</strong>{ai.compare.note && <span title={ai.compare.note}>{ai.compare.note}</span>}</div>
@@ -88,5 +109,24 @@ function MemoryNoteField({ section, value, change, disabled }: { section: Memory
         <button type="button" className="btn" onClick={() => setAi({ running: false, error: '', compare: null })}>放弃</button>
       </div>
     </div>}
+    {detail && createPortal(<div className="overlay" role="dialog" aria-modal="true" aria-label={section.title + '详情'}
+      onClick={e => { if (e.target === e.currentTarget) setDetail(null); }} onKeyDown={e => { if (e.key === 'Escape') setDetail(null); }}>
+      <div className="dialog memory-detail">
+        <div className="dialog-head">
+          <div><h3>{section.title}</h3><p>{section.file} · {kb(byteLength(text))} · 修改写入草稿，保存设置后生效</p></div>
+          <div className="memory-detail-tools">
+            <div className="segmented" role="tablist" aria-label="查看方式">
+              <button type="button" role="tab" aria-selected={detail === 'preview'} className={detail === 'preview' ? 'on' : ''} onClick={() => setDetail('preview')}><Eye size={14} />预览</button>
+              <button type="button" role="tab" aria-selected={detail === 'edit'} className={detail === 'edit' ? 'on' : ''} disabled={disabled} onClick={() => setDetail('edit')}><Pencil size={13} />编辑</button>
+            </div>
+            <button type="button" className="icon-btn" aria-label="关闭详情" onClick={() => setDetail(null)}><X /></button>
+          </div>
+        </div>
+        {detail === 'preview'
+          ? <div className="md-preview fb-md memory-md memory-detail-body" tabIndex={0}>{text.trim() ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} /> : <p className="settings-hint">暂无内容，切换到「编辑」填写。</p>}</div>
+          : <textarea className="memory-detail-body" aria-label={section.title + '内容'} autoFocus value={text} disabled={disabled} placeholder={section.hint} onChange={e => setText(e.target.value)} />}
+        <div className="settings-actions"><button type="button" className="btn primary" onClick={() => setDetail(null)}>完成</button></div>
+      </div>
+    </div>, document.body)}
   </div>;
 }

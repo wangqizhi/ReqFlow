@@ -71,12 +71,20 @@ func TestAIMemoryFillUsesRelatedGitLog(t *testing.T) {
 	if _, err = b.saveAISettings(aiTestSettings(server.URL)); err != nil {
 		t.Fatal(err)
 	}
-	value, handled, err := b.InvokeAI("ai:memory:fill", []any{"ui", "旧内容", map[string]any{"lessons": "草稿经验"}})
-	if err != nil || !handled || aiMap(value)["ok"] != true || aiMap(value)["text"] != "- 按钮复用 .btn" {
+	prepared, handled, err := b.InvokeAI("ai:memory:prepare", []any{"ui", "旧内容", map[string]any{"lessons": "草稿经验"}})
+	payload := aiString(aiMap(prepared)["payload"])
+	if err != nil || !handled || payload == "" || !strings.Contains(aiString(aiMap(prepared)["system"]), "全局记忆") {
+		t.Fatalf("memory prepare failed: %v %v", prepared, err)
+	}
+	value, _, err := b.InvokeAI("ai:memory:fill", []any{"ui", payload})
+	if err != nil || aiMap(value)["ok"] != true || aiMap(value)["text"] != "- 按钮复用 .btn" || !strings.Contains(aiString(aiMap(value)["raw"]), "# UI 设计要求") {
 		t.Fatalf("memory fill failed: %v %v", value, err)
 	}
+	if _, _, err = b.InvokeAI("ai:memory:fill", []any{"tech", payload}); err == nil {
+		t.Fatal("payload of another section must be rejected")
+	}
 	for _, key := range []string{"recent", "unknown"} {
-		if _, _, err = b.InvokeAI("ai:memory:fill", []any{key, ""}); err == nil {
+		if _, _, err = b.InvokeAI("ai:memory:prepare", []any{key, ""}); err == nil {
 			t.Fatalf("section %s must be rejected", key)
 		}
 	}

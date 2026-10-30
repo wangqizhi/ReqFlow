@@ -31,6 +31,7 @@ import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnl
 import { ModsPage, modsTabs } from './mods';
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
+import { AIConsole, aiConsole, useAIConsole } from './ai-console';
 import { continuePrompt, itemExecuting, sessionOwnsItem, stalledSessionItems, type AgentSession } from './agent-session';
 
 const labels: Record<string, string> = {
@@ -179,6 +180,9 @@ export default function App() {
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
   const publishingIds = useRef(new Set<string>());
   const p = data?.projects.find((x) => x.id === pid && !x.hidden) || data?.projects.find(x => !x.hidden) || data?.projects[0];
+  // REQ-295：AI 交互开始时展开底部终端并切到「AI 交互」页签
+  const aiConsoleState = useAIConsole();
+  useEffect(() => { if (aiConsoleState.focus) setTerminalTabs(t => ({ ...t, [p?.id || '']: 'ai' })); }, [aiConsoleState.focus]); // eslint-disable-line react-hooks/exhaustive-deps
   // Project snapshots are immutable: reuse derived indexes across Flow switches.
   const scheduledIds = useMemo(() => new Set((p?.items || []).filter(i => scheduledBatch(p!, i)).map(i => i.id)), [p]);
   const pendingCommitIds = useMemo(() => new Map((data?.projects || []).map(project => [project.id, new Set(pendingCommitItems(project).map(i => i.id))])), [data]);
@@ -1012,7 +1016,9 @@ export default function App() {
   // 活动页签优先取上次选择，但只落在实际打开的会话上；所选页签已关闭时回退到仍打开的终端，避免全部隐藏
   const shellTabOpen = !!shellSession?.open, agentTabOpen = !!agentSession?.open && !agentTerminalDetached, publishTabOpen = publishTabVisible && !!terminalSession?.terminalOpen;
   const terminalPreference = terminalTabs[p?.id || ''];
-  const activeTerminalTab = previousAgents[p?.id || '']?.some(s => s.runId === terminalPreference) ? terminalPreference : terminalPreference === 'shell' && shellTabOpen ? 'shell' : terminalPreference === 'agent' && agentTabOpen ? 'agent' : terminalPreference === 'publish' && publishTabOpen ? 'publish' : shellTabOpen ? 'shell' : agentTabOpen ? 'agent' : 'publish';
+  const aiTabOpen = mode !== 'EXECUTING' && aiConsoleState.open, aiTabVisible = mode !== 'EXECUTING' && (aiConsoleState.open || aiConsoleState.entries.length > 0);
+  const activeTerminalTab = previousAgents[p?.id || '']?.some(s => s.runId === terminalPreference) ? terminalPreference : terminalPreference === 'ai' && aiTabOpen ? 'ai' : terminalPreference === 'shell' && shellTabOpen ? 'shell' : terminalPreference === 'agent' && agentTabOpen ? 'agent' : terminalPreference === 'publish' && publishTabOpen ? 'publish' : shellTabOpen ? 'shell' : agentTabOpen ? 'agent' : publishTabOpen || !aiTabOpen ? 'publish' : 'ai';
+  const projectTerminals = mode !== 'EXECUTING' && !!p && !!(shellSession || (agentSession && !agentTerminalDetached) || publishTabVisible);
   // REQ-243：展开 PowerShell；会话已退出时在项目目录重新启动一个
   async function openShell() {
     if (!p || !shellSession) return;
@@ -1034,17 +1040,22 @@ export default function App() {
     setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: true } } : s);
   }
   function minimizeTerminals() {
+    aiConsole.setOpen(false);
     if (!p) return;
     setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: false } } : s);
     setAgentSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], open: false } } : s);
     setTerminalOpen(p.id, false);
   }
-  const terminalPanelOpen = !!shellSession?.open || (!!agentSession?.open && !agentTerminalDetached) || (terminalEnabled && !terminalDetached && !!terminalSession?.terminalRunId && !!terminalSession.terminalOpen);
-  const terminalTabBar = p ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
+  const terminalPanelOpen = !!shellSession?.open || (!!agentSession?.open && !agentTerminalDetached) || (terminalEnabled && !terminalDetached && !!terminalSession?.terminalRunId && !!terminalSession.terminalOpen) || aiTabOpen;
+  const openAIConsole = () => { aiConsole.setOpen(true); setTerminalTabs(t => ({ ...t, [p?.id || '']: 'ai' })); };
+  const terminalTabBar = p || aiTabVisible ? (<div className="terminal-tabs" role="tablist" aria-label="终端会话">
+          {p && <>
           {shellSession && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'shell' && shellSession.open} onClick={() => void openShell()}>PowerShell{shellSession.done ? ' · 已退出' : ''}</button>}
           {(previousAgents[p.id] || []).map((session, index) => <button key={session.runId} className="terminal-tab" role="tab" aria-selected={activeTerminalTab === session.runId} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: session.runId })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(session.agent)} · {index + 1}</button>)}
           {agentSession && !agentTerminalDetached && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'agent' && agentSession.open} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)}{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {publishTabVisible && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'publish' && !!terminalSession?.terminalOpen} onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布{publishing ? ' · 执行中' : ''}</button>}
+          </>}
+          {aiTabVisible && <button className="terminal-tab" role="tab" aria-selected={activeTerminalTab === 'ai' && aiTabOpen} onClick={openAIConsole}>AI 交互{aiConsoleState.pending ? ' · 等待响应' : ''}</button>}
         </div>) : null;
 
   return (
@@ -1455,7 +1466,7 @@ export default function App() {
         ].join('\n\n') });
       }}><div className="dialog-head"><h3>功能转上下文</h3><button type="button" className="icon-btn" aria-label="关闭" onClick={() => setContextWizard(false)}><X /></button></div><label className="field">指定现有功能<input autoFocus required value={contextFeature} onChange={e => setContextFeature(e.target.value)} placeholder="例如：需求排期、终端" /></label><p className="muted">生成一条需求，由 Agent 阅读代码并通过 CLI 提交该功能与上下文的简短说明及相关代码。</p><div className="settings-actions"><button type="button" className="btn" onClick={() => setContextWizard(false)}>取消</button><button className="btn primary" disabled={!contextFeature.trim()}>生成需求</button></div></form></div>}
       {rulesOpen && p && <div className="overlay" role="dialog" aria-modal="true" aria-label="项目守则" onClick={e => { if (e.target === e.currentTarget) setRulesOpen(false); }}><div className="dialog"><div className="dialog-head"><div><h3>项目守则 · 自动生成</h3><p>{Array.from(p.contextRules || '').length} / {p.contextRulesLimit || DEFAULT_CONTEXT_RULES_LIMIT} 字 · 仅保留上下文与功能的联系</p></div><button className="icon-btn" aria-label="关闭守则" onClick={() => setRulesOpen(false)}><X /></button></div><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.contextRules || '') }} /></div></div>}
-      {mode !== 'EXECUTING' && p && (shellSession || (agentSession && !agentTerminalDetached) || publishTabVisible) && <>
+      {projectTerminals && p && <>
         {shellSession?.open && <div className="terminal-tab-panel" role="tabpanel" aria-label="PowerShell" style={{ display: activeTerminalTab === 'shell' ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} key={shellSession.runId} runId={shellSession.runId} project={p.name} agent="PowerShell" onClose={minimizeTerminals} onState={v => setShellSessions(s => s[p.id] ? { ...s, [p.id]: { ...s[p.id], done: v.done } } : s)} /></div>}
         {(previousAgents[p.id] || []).map(session => <div key={session.runId} className="terminal-tab-panel" role="tabpanel" aria-label={agentName(session.agent) + ' 历史会话'} style={{ display: agentSession?.open && activeTerminalTab === session.runId ? undefined : 'none' }}><AgentTerminal tabs={terminalTabBar} runId={session.runId} project={p.name} agent={agentName(session.agent)} onClose={minimizeTerminals} /></div>)}
         {agentSession?.open && !agentTerminalDetached && <div className="terminal-tab-panel" role="tabpanel" aria-label={agentName(agentSession.agent)} style={{ display: agentSession.open && activeTerminalTab === 'agent' ? undefined : 'none' }}>
@@ -1470,8 +1481,11 @@ export default function App() {
         {!terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端">
           {(shellSession || publishTabVisible || (agentSession && !agentTerminalDetached)) && <button className="publish-terminal-reopen" onClick={() => void openTerminal()}>终端</button>}
           {agentSession && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
+          {aiTabVisible && <button className="publish-terminal-reopen" onClick={openAIConsole}>AI 交互{aiConsoleState.pending ? ' · 等待响应' : ''}</button>}
         </div>}
       </>}
+      {aiTabOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="AI 交互" style={{ display: activeTerminalTab === 'ai' ? undefined : 'none' }}><AIConsole tabs={terminalTabBar} onClose={minimizeTerminals} /></div>}
+      {!projectTerminals && aiTabVisible && !terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端"><button className="publish-terminal-reopen" onClick={openAIConsole}>AI 交互{aiConsoleState.pending ? ' · 等待响应' : ''}</button></div>}
       </div>
 
       {bulkConfirm && <div className="overlay" role="dialog" aria-modal="true" aria-label="确认批量操作"><div className="dialog"><div className="dialog-head"><h3>确认批量{bulkConfirm === 'global' || tab === 'executing' ? '释放' : '退回'}</h3></div><p>将处理选中的 {bulkConfirm === 'global' ? globalSelected.length : selected.length} 条需求。{(bulkConfirm === 'global' || tab === 'executing') && '释放任务后，原执行者将无法回写。'}</p><div className="settings-actions"><button className="btn" disabled={busy} onClick={() => setBulkConfirm(null)}>取消</button><button className="btn primary" disabled={busy} onClick={() => { const target = bulkConfirm; setBulkConfirm(null); void (target === 'global' ? bulkReleaseGlobal() : bulkAction()); }}>确认</button></div></div></div>}

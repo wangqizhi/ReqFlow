@@ -601,6 +601,9 @@ func (b *Backend) InvokeAI(channel string, args []any) (any, bool, error) {
 	case "ai:guidance:optimize":
 		result, err := b.optimizeGuidance(args)
 		return result, true, err
+	case "ai:memory:prepare":
+		result, err := b.prepareMemoryFill(args)
+		return result, true, err
 	case "ai:memory:fill":
 		result, err := b.fillMemoryNote(args)
 		return result, true, err

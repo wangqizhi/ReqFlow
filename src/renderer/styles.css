@@ -1354,6 +1354,32 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .memory-note-actions { display: inline-flex; align-items: center; gap: 10px; }
 .memory-note .guidance-compare textarea { resize: vertical; }
 .memory-note textarea { resize: vertical; }
+.memory-note-preview { display: block; width: 100%; text-align: left; font: inherit; font-weight: 400; color: var(--ink-2); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 0; max-height: 180px; overflow: hidden; position: relative; cursor: pointer; }
+.memory-note-preview:hover { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.memory-note-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.memory-note-preview.empty { padding: 11px 13px; color: var(--muted); font-size: 13px; min-height: 50px; }
+.memory-note-preview:not(.empty)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+.memory-md { padding: 6px 13px 10px; max-width: none; margin: 0; font-size: 13px; line-height: 1.65; }
+.memory-md > :first-child, .memory-md > div > :first-child { margin-top: 0.3em; }
+.memory-note-actions .btn, .memory-detail-tools .btn, .memory-detail-tools .segmented button { white-space: nowrap; flex-shrink: 0; }
+.memory-detail { width: min(860px, 100%); display: flex; flex-direction: column; }
+.memory-detail-tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.memory-detail-tools .segmented button { display: inline-flex; align-items: center; gap: 5px; }
+.memory-detail-body { height: min(56vh, 520px); margin-bottom: 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); overflow: auto; scrollbar-color: var(--muted) var(--bg); }
+textarea.memory-detail-body { width: 100%; box-sizing: border-box; padding: 11px 13px; font: inherit; font-size: 13.5px; line-height: 1.65; color: var(--ink); resize: vertical; }
+textarea.memory-detail-body:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.memory-detail .settings-actions { margin: 0; justify-content: flex-end; }
+.ai-console-log { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 4px 14px 10px; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; line-height: 1.55; scrollbar-color: #78716c #292524; }
+.ai-console-log:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ai-console-entry + .ai-console-entry { margin-top: 6px; }
+.ai-console-line { color: var(--side-ink); overflow-wrap: anywhere; }
+.ai-console-time { color: var(--side-muted); }
+.ai-console-entry.send .ai-console-kind { color: #93c5fd; }
+.ai-console-entry.recv .ai-console-kind { color: #86efac; }
+.ai-console-entry.error .ai-console-kind, .ai-console-entry.error .ai-console-line { color: #fca5a5; }
+.ai-console-entry.info .ai-console-line { color: var(--side-muted); }
+.ai-console-entry pre { margin: 4px 0 0; padding: 6px 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--side-ink); background: rgba(255, 255, 255, .04); border-left: 2px solid #57534e; border-radius: 4px; font: inherit; scrollbar-color: #78716c #292524; }
+.ai-console header .icon-btn:disabled { opacity: .4; }
 .memory-preview { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; background: var(--panel); }
 .memory-preview summary { cursor: pointer; padding: 9px 12px; font-size: 13px; color: var(--ink-2); }
 .memory-preview summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
