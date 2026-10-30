@@ -197,6 +197,7 @@
     const consoleText = document.querySelector('.ai-console').textContent;
     checks.memoryDetailAndAIConsole = { ok: detailPreview && !document.querySelector('.memory-detail') && document.querySelector('.memory-note-preview').textContent.includes('UI冒烟') && consoleText.includes('UI冒烟系统提示') && consoleText.includes('→ 发送') && consoleText.includes('← 收到') && consoleText.includes('冒烟生成') && !!document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.includes('AI 交互') };
     await click([...document.querySelectorAll('.memory-note .guidance-compare button')].find(el => el.textContent === '放弃'));
+    await click(document.querySelector('.ai-console [aria-label="清空 AI 交互记录"]'));
     await click(document.querySelector('.ai-console [aria-label="收起 AI 交互终端"]'));
     window.reqflow.prepareMemoryFill = originalPrepareMemory; window.reqflow.fillMemory = originalFillMemory;
     await click(document.querySelector('.settings-footer .primary'));

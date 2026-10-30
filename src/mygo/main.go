@@ -581,7 +581,7 @@ func smokeUI(w *mygo.Window, path string, native *nativeHost) {
 				code := `(async()=>{
                   const pause=()=>new Promise(r=>setTimeout(r,100));
                   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
-                  const page_ready=()=>document.querySelectorAll('.memory-note textarea').length===6&&!document.querySelector('.memory-note textarea').disabled;
+                  const page_ready=()=>document.querySelectorAll('.memory-note-preview').length===6&&!document.querySelector('.memory-settings input[type="number"]').disabled;
                   document.querySelector('[aria-label="关闭远程目录"]')?.click();await pause();
                   document.querySelector('.overlay')?.click();await pause();
                   if(!document.querySelector('.settings-page')) { button('设置').click();await pause(); }
