@@ -380,7 +380,7 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		}
 		err = openProjectTerminal(root, coreString(p["terminalCli"]), p["terminalFullAccess"] != false)
 		return desktopOK(nil), err
-	case "dir:open":
+	case "dir:open", "dir:editor":
 		// REQ-146：从资源管理器打开项目目录；仅允许绝对路径下的目录。
 		value := desktopText(args, 0)
 		if !filepath.IsAbs(value) {
@@ -392,6 +392,9 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		}
 		if !info.IsDir() {
 			return nil, errors.New("路径不是目录")
+		}
+		if channel == "dir:editor" {
+			return desktopOK(nil), openProjectEditor(value)
 		}
 		r, e := desktopNative(b, "shell.openPath", value)
 		if e == nil && desktopString(r) != "" {

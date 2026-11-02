@@ -246,6 +246,7 @@ export default function App() {
   }
   const [publishConfirm, setPublishConfirm] = useState(false); // 待验证需求未处理时确认是否先验证（REQ-090）
   const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
+  const [editorOpening, setEditorOpening] = useState(false);
   // REQ-277：目录浮层与项目设置目录旁的图标按钮共用打开终端 CLI 逻辑，防重复提交
   const openTerminalCli = async () => {
     if (!p || terminalOpening || !bridge.openProjectTerminal) return;
@@ -331,6 +332,17 @@ export default function App() {
     const r = await bridge.openProjectDir(p.dir);
     setDirConfirm(false);
     if (!r.ok) notify(r.error || '打开目录失败', 'err');
+  }
+
+  async function openProjectEditor() {
+    if (!p?.dir || !bridge.openProjectEditor || editorOpening) return;
+    setEditorOpening(true);
+    try {
+      const result = await bridge.openProjectEditor(p.dir);
+      if (!result.ok) throw Error(result.error || '无法用 VS Code 打开目录，请确认已安装 VS Code');
+      setDirConfirm(false);
+    } catch (error: any) { notify(error.message || '打开编辑器失败', 'err'); }
+    finally { setEditorOpening(false); }
   }
 
   async function load(opts: { quiet?: boolean } = {}) {
@@ -579,8 +591,9 @@ export default function App() {
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
     const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
-    if (terminalRunId) { rememberTerminal(project.id, true); setTerminalTabs(tabs => ({ ...tabs, [project.id]: 'publish' })); }
-    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: !!terminalRunId, terminalProject: project.name });
+    const wasOpen = !!terminalRunId && (!!shellSessions[project.id]?.open || (!!agentSessions[project.id]?.open && !agentTerminalDetached) || (!!terminalSession?.terminalOpen && !terminalDetached) || aiConsoleState.open);
+    if (terminalRunId && wasOpen) setTerminalTabs(tabs => ({ ...tabs, [project.id]: 'publish' }));
+    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: wasOpen, terminalProject: project.name });
     try {
       const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
@@ -1034,6 +1047,7 @@ export default function App() {
   // 没有 PowerShell 会话（远程项目等）时依次退回发布终端、指派终端
   async function openTerminal() {
     if (!p) return;
+    if (publishTabVisible && publishing) { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); return; }
     if (shellSession) return openShell();
     if (publishTabVisible) { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); return; }
     setTerminalTabs(t => ({ ...t, [p.id]: 'agent' }));
@@ -1482,6 +1496,10 @@ export default function App() {
           {(shellSession || publishTabVisible || (agentSession && !agentTerminalDetached)) && <button className="publish-terminal-reopen" onClick={() => void openTerminal()}>终端</button>}
           {agentSession && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {aiTabVisible && <button className="publish-terminal-reopen" onClick={openAIConsole}>AI 交互{aiConsoleState.pending ? ' · 等待响应' : ''}</button>}
+          {publishTabVisible && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布输出</button>}
+          {publishTabVisible && <div className={'terminal-collapsed-status' + (!publishing && terminalSession?.result && !terminalSession.result.ok ? ' failure' : '')} role="status" title={publishing ? publishStep || '准备发布…' : terminalSession?.result?.error || '发布完成'}>
+            {publishing ? <RefreshCw size={14} className="terminal-spinner" /> : terminalSession?.result?.ok ? <Check size={14} /> : <X size={14} />}<span>{publishing ? publishStep || '准备发布…' : terminalSession?.result?.ok ? '发布完成' : '发布失败：' + (terminalSession?.result?.error || '执行失败')}</span>
+          </div>}
         </div>}
       </>}
       {aiTabOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="AI 交互" style={{ display: activeTerminalTab === 'ai' ? undefined : 'none' }}><AIConsole tabs={terminalTabBar} onClose={minimizeTerminals} /></div>}
@@ -1565,13 +1583,13 @@ export default function App() {
       )}
       {/* REQ-146：从资源管理器打开项目目录前的确认浮层 */}
       {dirConfirm && !!p?.dir && (
-        <div className="overlay" role="dialog" aria-modal="true" aria-label="从资源管理器打开项目目录"
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="打开项目目录"
           onClick={(e) => { if (e.target === e.currentTarget) setDirConfirm(false); }}>
           <div className="dialog">
             <div className="dialog-head">
               <div>
-                <h3>从资源管理器打开</h3>
-                <p>将在系统资源管理器中打开项目目录。</p>
+                <h3>打开项目目录</h3>
+                <p>选择资源管理器、VS Code 编辑器或终端 CLI。</p>
               </div>
               <button className="icon-btn" aria-label="关闭确认框" onClick={() => setDirConfirm(false)}><X size={18} /></button>
             </div>
@@ -1579,7 +1597,8 @@ export default function App() {
             <div className="settings-actions">
               <button className="btn" onClick={() => setDirConfirm(false)}>取消</button>
               <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={() => void openTerminalCli()}>打开终端 CLI</button>
- <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
+              <button className="btn" disabled={editorOpening || !bridge.openProjectEditor} title="使用 VS Code 打开项目文件夹" onClick={() => void openProjectEditor()}>{editorOpening ? '打开中…' : '从编辑器打开'}</button>
+              <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
             </div>
           </div>
         </div>

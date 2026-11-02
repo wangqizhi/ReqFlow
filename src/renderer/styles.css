@@ -1338,6 +1338,39 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 
 .token-usage-scroll { overflow-x: auto; margin: 12px 0; }
 .token-usage-scroll td:first-child { min-width: 180px; overflow-wrap: anywhere; }
+.token-usage-block .stats-chart-head { flex-wrap: wrap; gap: 12px; }
+.token-usage-scroll td:not(:first-child), .token-usage-scroll th:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.token-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.token-summary-card { display: flex; flex-direction: column; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.token-summary-card > span { color: var(--muted); font-size: 12px; }
+.token-summary-card strong { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 21px; font-variant-numeric: tabular-nums; }
+.token-summary-card small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.token-trend { margin: 20px 0; }
+.token-trend figcaption { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.token-trend figcaption span { color: var(--muted); font-size: 12px; }
+.token-trend > svg { width: 100%; display: block; overflow: visible; }
+.token-grid { stroke: var(--line); stroke-width: 1; }
+.token-trend-bar { fill: var(--accent); }
+.token-trend-hit { fill: transparent; }
+.token-trend-hit:hover, .token-trend-hit:focus-visible { fill: var(--accent-soft); fill-opacity: 0.35; stroke: var(--accent); stroke-width: 1; outline: none; }
+.token-trend summary, .token-usage-block > details > summary { cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.token-ranking { margin: 20px 0; }
+.token-ranking h4 { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.token-ranking h4 span { font-size: 12px; color: var(--muted); font-weight: 400; }
+.token-rank-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(40px, 1.3fr) 95px 52px; gap: 12px; align-items: center; margin: 12px 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.token-rank-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.token-rank-track { height: 8px; border-radius: 8px; background: var(--accent-soft); overflow: hidden; }
+.token-rank-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.token-rank-row > strong, .token-rank-row > span:last-child { text-align: right; }
+.token-rank-row > span:last-child { color: var(--muted); }
+.terminal-collapsed-status { color: var(--side-ink); font-size: 12px; display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: auto; padding: 0 10px; }
+.terminal-collapsed-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-collapsed-status > svg { flex-shrink: 0; }
+.terminal-collapsed-status.failure { color: var(--danger); }
+@media (max-width: 760px) {
+  .token-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .token-rank-row { grid-template-columns: minmax(80px, 1fr) minmax(24px, 1fr) 80px 48px; gap: 8px; }
+}
 
 /* 全局记忆（REQ-294）：用量条、目录与手动/自动记忆分区 */
 .memory-settings .settings-columns { grid-template-columns: repeat(2, minmax(0, 200px)); }

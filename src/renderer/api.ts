@@ -163,6 +163,7 @@ export interface ReqFlowBridge {
   // 项目目录（REQ-146）：从资源管理器打开关联的项目目录。仅桌面版提供。
   openProjectTerminal?(project: string): Promise<{ ok: boolean; error?: string }>;
   openProjectDir?(dir: string): Promise<{ ok: boolean; error?: string }>;
+  openProjectEditor?(dir: string): Promise<{ ok: boolean; error?: string }>;
   // 文件浏览仅桌面版提供；浏览器 mock 预览下为 undefined，界面做降级提示
   pickDir?(): Promise<{ ok: boolean; dir?: string; error?: string }>;
   importProject?(dir: string, remote?: RemoteSettings, overwrite?: boolean): Promise<{ ok: boolean; needsConfirmation?: boolean; dir?: string; name?: string; remote?: RemoteSettings; error?: string }>;

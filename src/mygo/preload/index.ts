@@ -81,6 +81,7 @@ const channels = {
   openConfigDir: 'app:openConfigDir',
   openProjectTerminal: 'dir:terminal',
   openProjectDir: 'dir:open',
+  openProjectEditor: 'dir:editor',
   pickDir: 'dir:pick',
   prepareDir: 'dir:prepare',
   importProject: 'git:import',
