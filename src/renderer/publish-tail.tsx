@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { bridge } from './api';
 
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
-const LINES = 3;
+const LINES = 1;
 
 /** 将终端字节流整理为可读文本行：去掉控制序列，\r 覆盖同一行内容。 */
 function visibleLines(text: string) {
@@ -13,7 +13,7 @@ function visibleLines(text: string) {
 }
 
 /**
- * REQ-297：终端收起时读取发布输出的最新几行，显示在最小化信息栏上方。
+ * REQ-297：终端收起时读取发布输出的最新一行，显示在原最小化信息栏内。
  * 只在 active 时轮询；输出结束后停止。
  */
 export function usePublishTail(runId: string | undefined, active: boolean) {
@@ -55,13 +55,9 @@ export function usePublishTail(runId: string | undefined, active: boolean) {
   return lines;
 }
 
-/** 收起状态下的发布输出预览条：显示最新几行，点击展开发布输出。 */
-export function PublishTail({ runId, failure, onOpen }: { runId: string; failure: boolean; onOpen: () => void }) {
+/** 在原最小化栏内显示单行发布进度。 */
+export function PublishTail({ runId, failure, status, onOpen }: { runId: string; failure: boolean; status: string; onOpen: () => void }) {
   const lines = usePublishTail(runId, true);
-  if (!lines.length) return null;
-  return (
-    <button type="button" className={'terminal-collapsed-output' + (failure ? ' failure' : '')} aria-label="发布输出最新内容，点击展开发布输出" title="点击展开发布输出" onClick={onOpen}>
-      {lines.map((line, n) => <span key={n}>{line}</span>)}
-    </button>
-  );
+  const text = lines.length ? status + ' · ' + lines[lines.length - 1] : status;
+  return <button type="button" className={'terminal-collapsed-output' + (failure ? ' failure' : '')} aria-label="发布进度，点击展开发布输出" title={text} onClick={onOpen}><span role="status">{text}</span></button>;
 }

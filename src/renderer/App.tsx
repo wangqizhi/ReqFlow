@@ -1494,16 +1494,12 @@ export default function App() {
           <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={minimizeTerminals} />
         </div>}
         {/* REQ-243/258：所有终端收起时只保留底部一行信息栏；PowerShell 与发布终端合并为一个「终端」按钮，默认展开 PowerShell */}
-        {/* REQ-297：终端收起时在信息栏上方显示发布输出的最新内容，点击可展开发布输出 */}
-        {!terminalPanelOpen && publishTabVisible && <PublishTail runId={terminalRunId!} failure={!publishing && !!terminalSession?.result && !terminalSession.result.ok} onOpen={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }} />}
         {!terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端">
           {(shellSession || publishTabVisible || (agentSession && !agentTerminalDetached)) && <button className="publish-terminal-reopen" onClick={() => void openTerminal()}>终端</button>}
           {agentSession && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
           {aiTabVisible && <button className="publish-terminal-reopen" onClick={openAIConsole}>AI 交互{aiConsoleState.pending ? ' · 等待响应' : ''}</button>}
           {publishTabVisible && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }}>发布输出</button>}
-          {publishTabVisible && <div className={'terminal-collapsed-status' + (!publishing && terminalSession?.result && !terminalSession.result.ok ? ' failure' : '')} role="status" title={publishing ? publishStep || '准备发布…' : terminalSession?.result?.error || '发布完成'}>
-            {publishing ? <RefreshCw size={14} className="terminal-spinner" /> : terminalSession?.result?.ok ? <Check size={14} /> : <X size={14} />}<span>{publishing ? publishStep || '准备发布…' : terminalSession?.result?.ok ? '发布完成' : '发布失败：' + (terminalSession?.result?.error || '执行失败')}</span>
-          </div>}
+          {publishTabVisible && <PublishTail runId={terminalRunId!} failure={!publishing && !!terminalSession?.result && !terminalSession.result.ok} status={publishing ? publishStep || '准备发布…' : terminalSession?.result?.ok ? '发布完成' : '发布失败：' + (terminalSession?.result?.error || '执行失败')} onOpen={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }} />}
         </div>}
       </>}
       {aiTabOpen && <div className="terminal-tab-panel" role="tabpanel" aria-label="AI 交互" style={{ display: activeTerminalTab === 'ai' ? undefined : 'none' }}><AIConsole tabs={terminalTabBar} onClose={minimizeTerminals} /></div>}

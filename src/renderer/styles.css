@@ -1368,7 +1368,7 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .terminal-collapsed-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-collapsed-status > svg { flex-shrink: 0; }
 .terminal-collapsed-status.failure { color: var(--danger); }
-.terminal-collapsed-output { flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 12px; border: 0; border-bottom: 1px solid var(--line); background: var(--side-bg); color: var(--side-ink); font: 12px/1.45 Consolas, 'Cascadia Mono', monospace; text-align: left; cursor: pointer; }
+.terminal-collapsed-output { flex: 1; min-width: 0; display: flex; align-items: center; margin-left: auto; padding: 0 10px; border: 0; background: transparent; color: var(--side-ink); font: 12px/1.45 Consolas, 'Cascadia Mono', monospace; text-align: left; cursor: pointer; }
 .terminal-collapsed-output > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .72; }
 .terminal-collapsed-output > span:last-child { opacity: 1; }
 .terminal-collapsed-output:hover { background: var(--side-hover, var(--side-bg)); }

@@ -1,11 +1,15 @@
 package backendgo
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // Launch the editor directly with argv so spaces and shell metacharacters in
@@ -32,16 +36,38 @@ func openProjectEditor(dir string) error {
 		if info, err := os.Stat(program); err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		// REQ-298：以普通窗口启动（后台命令的隐藏窗口参数会让 VS Code 窗口不显示），
-		// 并去掉会让 Code.exe 以 Node 方式运行的环境变量。
-		cmd := exec.Command(program, "--new-window", dir)
-		cmd.Dir = dir
-		cmd.Env = editorEnvironment(os.Environ())
-		desktopGUICommand(cmd)
-		if err := cmd.Start(); err != nil {
-			return err
+		// Use the installed CLI, including VS Code's versioned update layout.
+		cliCandidates := []string{filepath.Join(filepath.Dir(program), "resources", "app", "out", "cli.js")}
+		// Follow code.cmd's selected version rather than an older retained update.
+		if script, err := os.ReadFile(filepath.Join(filepath.Dir(program), "bin", "code.cmd")); err == nil {
+			match := regexp.MustCompile(`(?i)"%~dp0([^"\r\n]*resources[\\/]app[\\/]out[\\/]cli\.js)"`).FindSubmatch(script)
+			if len(match) > 1 {
+				cliCandidates = append([]string{filepath.Clean(filepath.Join(filepath.Dir(program), "bin", string(match[1])))}, cliCandidates...)
+			}
 		}
-		go func() { _ = cmd.Wait() }()
+		versioned, _ := filepath.Glob(filepath.Join(filepath.Dir(program), "*", "resources", "app", "out", "cli.js"))
+		cliCandidates = append(cliCandidates, versioned...)
+		launcher := ""
+		for _, candidate := range cliCandidates {
+			if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+				launcher = candidate
+				break
+			}
+		}
+		if launcher == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cmd := exec.CommandContext(ctx, program, launcher, "--new-window", dir)
+		cmd.Dir = dir
+		cmd.Env = append(editorEnvironment(os.Environ()), "ELECTRON_RUN_AS_NODE=1")
+		desktopHideCommand(cmd)
+		output, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("VS Code 打开失败：%w %s", err, strings.TrimSpace(string(output)))
+		}
+
 		return nil
 	}
 	return errors.New("未找到 VS Code，请先安装 VS Code，或将其安装目录加入 PATH")
