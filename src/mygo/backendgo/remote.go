@@ -311,6 +311,8 @@ func (b *Backend) performBackup(settings map[string]any) error {
 	if state == nil {
 		return errors.New("工作区尚未初始化")
 	}
+	// 备份需自包含：回填外置图片。
+	b.Workspace.hydrateImages(state)
 	destination := filepath.Join(repo, "reqflow-backup.json")
 	if info, err := os.Lstat(destination); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("备份目标不能为符号链接")

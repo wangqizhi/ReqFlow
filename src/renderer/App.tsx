@@ -26,6 +26,8 @@ import { ProjectManager } from './project-manager';
 import { SSHDirectory, isSSH } from './ssh-directory';
 import { projectDragType, projectDrop, projectDragOver, projectDragLeave, projectDragEnd } from './project-drag';
 import { renderMarkdown } from './markdown';
+import { AttachmentImage } from './attachment-image';
+import { PublishTail } from './publish-tail';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnly, TERMINAL_AGENTS } from './assignment';
 import { ModsPage, modsTabs } from './mods';
@@ -1492,6 +1494,8 @@ export default function App() {
           <PublishTerminal tabs={terminalTabBar} key={terminalSession.terminalRunId} runId={terminalSession.terminalRunId} project={p.name} session={terminalSession} onDetach={bridge.openPublishTerminal ? detachTerminal : undefined} onClose={minimizeTerminals} />
         </div>}
         {/* REQ-243/258：所有终端收起时只保留底部一行信息栏；PowerShell 与发布终端合并为一个「终端」按钮，默认展开 PowerShell */}
+        {/* REQ-297：终端收起时在信息栏上方显示发布输出的最新内容，点击可展开发布输出 */}
+        {!terminalPanelOpen && publishTabVisible && <PublishTail runId={terminalRunId!} failure={!publishing && !!terminalSession?.result && !terminalSession.result.ok} onOpen={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'publish' })); setTerminalOpen(p.id, true); }} />}
         {!terminalPanelOpen && <div className="terminal-collapsed-bar" role="toolbar" aria-label="终端">
           {(shellSession || publishTabVisible || (agentSession && !agentTerminalDetached)) && <button className="publish-terminal-reopen" onClick={() => void openTerminal()}>终端</button>}
           {agentSession && !agentTerminalDetached && <button className="publish-terminal-reopen" onClick={() => { setTerminalTabs(t => ({ ...t, [p.id]: 'agent' })); setAgentSessions(s => ({ ...s, [p.id]: { ...s[p.id], open: true } })); }}>{agentName(agentSession.agent)} 终端{agentSession.needsInput && !agentSession.done ? ' · 等待输入' : ''}</button>}
@@ -1740,7 +1744,7 @@ export default function App() {
                 {advanced && <div className="requirement-advanced">
                 <div className="image-settings"><input className="visually-hidden" ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple disabled={uploading} onChange={(e) => { uploadImages(e.target.files); e.target.value = ''; }} /><button type="button" className="btn sm" disabled={uploading} onClick={() => imageInput.current?.click()}><ImageIcon />{uploading ? '读取中…' : '选择参考图片'}</button>
                 <p>最多 12 张，每张 10MB；正文可引用“图片1”等标识。</p>
-                <div className="attachment-grid">{(form.attachments || []).map((a: any) => <figure key={a.id}><img src={a.dataUrl} alt={a.label + ' ' + a.name} /><figcaption>{a.label} · {a.name}</figcaption><button type="button" className="btn sm" onClick={() => change({ ...form, attachments: form.attachments.filter((x: any) => x.id !== a.id) })}>移除 {a.label}</button></figure>)}</div>
+                <div className="attachment-grid">{(form.attachments || []).map((a: any) => <figure key={a.id}><AttachmentImage attachment={a} alt={a.label + ' ' + a.name} /><figcaption>{a.label} · {a.name}</figcaption><button type="button" className="btn sm" onClick={() => change({ ...form, attachments: form.attachments.filter((x: any) => x.id !== a.id) })}>移除 {a.label}</button></figure>)}</div>
                 </div>
                 <label className="field">标题（选填）<input value={form.title} onChange={(e) => change({ ...form, title: e.target.value })} /></label>
                 <label className="field">验收条件（选填）· 每行一项
@@ -1898,7 +1902,7 @@ export default function App() {
 
             {modal === 'detail' && editing && (
               <>
-                <p className="detail-body">{editing.body}</p><div className="attachment-grid">{editing.attachments?.map((a) => <figure key={a.id}><img src={a.dataUrl} alt={a.label} /><figcaption>{a.label} · {a.name}</figcaption></figure>)}</div>
+                <p className="detail-body">{editing.body}</p><div className="attachment-grid">{editing.attachments?.map((a) => <figure key={a.id}><AttachmentImage attachment={a} alt={a.label} /><figcaption>{a.label} · {a.name}</figcaption></figure>)}</div>
                 <p className="detail-meta">{labels[editing.type]} · {editing.priority} · 状态：{labels[editing.status]} · 版本 v{editing.version}</p>
                 {editing.archived && <p className="detail-meta">归档时间：{archivedDate(editing)}</p>}
                 {editing.link && <p className="detail-meta">实现关联：<a href={editing.link} target="_blank" rel="noreferrer">{editing.link}</a></p>}

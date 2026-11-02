@@ -3,7 +3,8 @@
 
 import { validateRemote, type RemoteSettings } from './remote';
 import { validateDate } from './dates';
-export type Attachment = { id: string; label: string; name: string; dataUrl: string; path?: string };
+/** 图片附件：上传时为 dataUrl；保存后图片外置到数据目录，只保留 path（界面按需读取）。 */
+export type Attachment = { id: string; label: string; name: string; dataUrl?: string; path?: string };
 export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi' | 'claude-code' | 'dsh' | 'opencode'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
 export const activeAIExecution = (i: Item) => i.aiExecution?.runId && !i.aiExecution.endedAt ? i.aiExecution : undefined;
 function finishAIExecution(i: Item, now: string, outcome: 'completed' | 'released') {
@@ -364,7 +365,7 @@ export async function projectConcurrencyToken(p: Project): Promise<string> {
   // Materialized attachment paths are derived, not user edits. Content tokens also
   // detect older writers which preserve (but do not increment) project.revision.
   return sha256Hex(JSON.stringify({ ...p, revision: undefined }, (key, value) => {
-    if (key === 'path') return undefined;
+    if (key === 'path' || key === 'dataUrl') return undefined;
     // Database reconstruction can reorder object fields without changing content.
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       return Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]]));
@@ -716,7 +717,9 @@ async function applyOperation(s: Workspace, a: any) {
     const attachments: Attachment[] = a.attachments === undefined ? (existing?.attachments || []) : a.attachments;
     if (!Array.isArray(attachments) || attachments.length > 12 || attachments.some((x) =>
       !x || !/^[a-zA-Z0-9-]+$/.test(x.id) || !/^图片[1-9]\d*$/.test(x.label) || typeof x.name !== 'string' ||
-      typeof x.dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(x.dataUrl) || x.dataUrl.length > 14 * 1024 * 1024
+      (x.dataUrl
+        ? typeof x.dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(x.dataUrl) || x.dataUrl.length > 14 * 1024 * 1024
+        : typeof x.path !== 'string' || !/[a-zA-Z0-9-]+-[a-f0-9]{16}\.(png|jpeg|webp|gif)$/.test(x.path))
     ) || new Set(attachments.map((x) => x.label)).size !== attachments.length || new Set(attachments.map((x) => x.id)).size !== attachments.length)
       throw new Error('图片附件无效（最多 12 张，每张最多 10MB，支持 PNG/JPG/WebP/GIF）');
     // 默认不带计划日期；只有调用方显式传入日期（如用户在日期控件点选）才记录

@@ -13,7 +13,7 @@ export class WorkspaceService {
   private async materializeImages(state: Workspace) {
     const dir = path.join(path.dirname(this.store.filePath), 'images');
     for (const p of state.projects) for (const i of [...p.items, ...p.batches.flatMap((b) => b.items)]) for (const a of i.attachments || []) {
-      const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+=*)$/.exec(a.dataUrl);
+      const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+=*)$/.exec(a.dataUrl || '');
       if (!match || !/^[a-zA-Z0-9-]+$/.test(a.id)) throw new Error('图片附件数据无效');
       await fs.mkdir(dir, { recursive: true });
       const bytes = Buffer.from(match[2], 'base64');

@@ -7,3 +7,5 @@ import (
 )
 
 func desktopHideCommand(cmd *exec.Cmd) {}
+
+func desktopGUICommand(cmd *exec.Cmd) {}

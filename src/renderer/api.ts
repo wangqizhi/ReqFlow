@@ -153,10 +153,10 @@ export interface ReqFlowBridge {
   /** 全局记忆手动条目 AI 填写（REQ-295）：先 prepare 取得发送内容（key 为条目，current 为当前草稿，notes 为其他条目草稿），再 fill 发送。 */
   prepareMemoryFill?(key: string, current: string, notes: Record<string, string>): Promise<{ ok: boolean; system?: string; payload?: string; contextNote?: string; error?: string }>;
   fillMemory?(key: string, payload: string): Promise<{ ok: boolean; text?: string; raw?: string; error?: string }>;
-  getWorkspace(): Promise<WorkspaceResult>;
+  getWorkspace(known?: WorkspaceKnown): Promise<WorkspaceResult>;
   /** 只读本地备份，不触发远程刷新；用于独立窗口快速首屏。 */
-  getLocalWorkspace?(): Promise<WorkspaceResult>;
-  apply(action: any): Promise<WorkspaceResult>;
+  getLocalWorkspace?(known?: WorkspaceKnown): Promise<WorkspaceResult>;
+  apply(action: any, known?: WorkspaceKnown): Promise<WorkspaceResult>;
   appInfo(): Promise<{ version: string; dataFile: string; platform: string }>;
   showDataFile?(): Promise<unknown>;
   openConfigDir?(): Promise<{ ok: boolean; error?: string }>;
@@ -170,6 +170,8 @@ export interface ReqFlowBridge {
   prepareDir?(dir: string, remote?: RemoteSettings): Promise<{ ok: boolean; dir?: string; error?: string; warning?: string; summary?: string }>;
   listDir?(root: string, rel: string): Promise<{ ok: true; entries: FileEntry[] } | { ok: false; error: string }>;
   readFile?(root: string, rel: string): Promise<{ ok: true; content: string; size: number } | { ok: false; error: string }>;
+  /** 读取已外置的需求图片附件（数据目录 images/ 下），返回 dataUrl 供界面显示。 */
+  readAttachment?(path: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
   readImage?(root: string, rel: string): Promise<{ ok: true; mime: string; dataUrl: string; size: number } | { ok: false; error: string }>;
   writeFile?(root: string, rel: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
   revealFile?(root: string, rel: string): Promise<{ ok: boolean; error?: string }>;
@@ -208,7 +210,88 @@ declare global {
   }
 }
 
-export const bridge: ReqFlowBridge = window.reqflow ?? createMockBridge();
+/** 界面已持有的项目 revision；后端据此只回传有变化的项目（性能优化）。 */
+export type WorkspaceKnown = { revisions: Record<string, number>; baseHash?: string };
+type WorkspaceDelta = { base?: Omit<Workspace, 'projects'>; baseHash: string; order: string[]; projects: Record<string, Workspace['projects'][number]> };
+
+/**
+ * 工作区增量缓存：读取与保存时带上已持有的项目 revision，后端只回传变化的项目，
+ * 未变化的项目沿用本地副本（对象引用不变，界面派生数据也可复用）。
+ * 无法合并（本地副本与发送时不一致）时退回完整读取。
+ */
+function withWorkspaceCache(raw: ReqFlowBridge): ReqFlowBridge {
+  let cache: { state: Workspace; version: number; baseHash?: string } | null = null;
+  const known = (): WorkspaceKnown | undefined => cache ? {
+    revisions: Object.fromEntries(cache.state.projects.filter(p => Number.isSafeInteger(p.revision)).map(p => [p.id, p.revision!])),
+    baseHash: cache.baseHash
+  } : undefined;
+  const remember = (state: Workspace, version: number, baseHash?: string) => {
+    if (!cache || version >= cache.version) cache = { state, version, baseHash };
+  };
+  const merge = (r: any, sent: WorkspaceKnown | undefined): WorkspaceResult | null => {
+    if (!r?.ok) {
+      if (r?.code === 'VERSION_CONFLICT') cache = null;
+      return r;
+    }
+    if (r.state) { remember(r.state, r.version); return r; }
+    const delta = r.delta as WorkspaceDelta | undefined;
+    if (!delta) return r;
+    let base = delta.base;
+    if (!base) {
+      if (!cache || sent?.baseHash !== delta.baseHash || cache.baseHash !== delta.baseHash) return null;
+      const { projects: _projects, ...heldBase } = cache.state;
+      base = heldBase;
+    }
+    const held = new Map((cache?.state.projects || []).map(p => [p.id, p]));
+    const projects = [];
+    for (const id of delta.order) {
+      const project = delta.projects[id] ?? held.get(id);
+      if (!project || (!delta.projects[id] && project.revision !== sent?.revisions[id])) return null;
+      projects.push(project);
+    }
+    const { delta: _delta, ...rest } = r;
+    const state = { ...base, projects } as Workspace;
+    remember(state, r.version, delta.baseHash);
+    return { ...rest, state };
+  };
+  const full = async () => {
+    const r = await raw.getWorkspace();
+    return merge(r, undefined) as WorkspaceResult;
+  };
+  const overrides: Partial<ReqFlowBridge> = {
+    async getWorkspace() {
+      const sent = known();
+      return merge(await raw.getWorkspace(sent), sent) ?? full();
+    },
+    async getLocalWorkspace() {
+      const sent = known();
+      const r = merge(await raw.getLocalWorkspace!(sent), sent);
+      if (r) return r;
+      return merge(await raw.getLocalWorkspace!(), undefined) as WorkspaceResult;
+    },
+    async apply(action: any) {
+      const sent = known();
+      const result: any = await raw.apply(action, sent);
+      const r = merge(result, sent);
+      if (r) return r;
+      // 保存已完成，仅本地副本无法合并：读取完整工作区，保留保存结果中的提示信息与新建项目 id。
+      const latest = await full();
+      if (!latest.ok) return latest;
+      const { delta: _delta, ...rest } = result;
+      return { ...rest, state: latest.state, version: latest.version };
+    }
+  };
+  // 其余方法实时转发到桥对象（包括运行时被替换的方法）。
+  return new Proxy(raw, {
+    get(target, prop, receiver) {
+      if (prop === 'getLocalWorkspace' && !target.getLocalWorkspace) return undefined;
+      if (typeof prop === 'string' && prop in overrides) return overrides[prop as keyof ReqFlowBridge];
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+}
+
+export const bridge: ReqFlowBridge = window.reqflow ? withWorkspaceCache(window.reqflow) : createMockBridge();
 
 const MOCK_KEY = 'reqflow-mock-workspace';
 

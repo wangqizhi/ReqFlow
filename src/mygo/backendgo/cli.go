@@ -286,6 +286,8 @@ func coreCLIDispatch(s *WorkspaceService, command string, a map[string]any, vers
 		if e != nil {
 			return nil, e
 		}
+		// 导出需自包含：回填外置图片，便于在其他机器导入。
+		s.hydrateImages(r["state"])
 		return map[string]any{"version": r["version"], "workspace": r["state"]}, nil
 	case "workspace import":
 		if !coreTruthy(a["file"]) {

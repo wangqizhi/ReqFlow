@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 const DefaultDelivery = "说明改动、测试命令和结果、未解决的问题。"
@@ -141,8 +142,16 @@ func coreJSON(v any) string {
 	e := json.NewEncoder(&b)
 	e.SetEscapeHTML(false)
 	_ = e.Encode(v)
-	text := strings.TrimSuffix(b.String(), "\n")
+	return coreFixJSON(strings.TrimSuffix(b.String(), "\n"))
+}
+
+// coreFixJSON 与 JSON.stringify 对齐：U+2028/U+2029 保持原字符不转义。
+func coreFixJSON(text string) string {
+	if !strings.Contains(text, `\u202`) {
+		return text
+	}
 	var out strings.Builder
+	out.Grow(len(text))
 	for n := 0; n < len(text); n++ {
 		if text[n] == '\\' && n+1 < len(text) {
 			if text[n+1] == '\\' {
@@ -169,24 +178,86 @@ func coreJSON(v any) string {
 // JSON.stringify enumerates integer keys before other sorted UTF-16 keys.
 // This matches the TypeScript content-token replacer even for unknown fields.
 func coreCanonicalJSON(v any) string {
+	w := &canonicalWriter{}
+	w.enc = json.NewEncoder(&w.buf)
+	w.enc.SetEscapeHTML(false)
+	w.write(v)
+	return w.out.String()
+}
+
+type canonicalWriter struct {
+	out strings.Builder
+	buf bytes.Buffer
+	enc *json.Encoder
+}
+
+func (w *canonicalWriter) leaf(v any) {
+	// 快速路径：无需转义的字符串与 bool/null 直接输出，结果与 coreJSON 一致。
+	switch x := v.(type) {
+	case nil:
+		w.out.WriteString("null")
+		return
+	case bool:
+		if x {
+			w.out.WriteString("true")
+		} else {
+			w.out.WriteString("false")
+		}
+		return
+	case string:
+		plain := utf8.ValidString(x)
+		for n := 0; plain && n < len(x); n++ {
+			if c := x[n]; c < 0x20 || c == '"' || c == '\\' {
+				plain = false
+			}
+		}
+		if plain {
+			w.out.WriteByte('"')
+			w.out.WriteString(x)
+			w.out.WriteByte('"')
+			return
+		}
+	}
+	w.buf.Reset()
+	_ = w.enc.Encode(v)
+	w.out.WriteString(coreFixJSON(strings.TrimSuffix(w.buf.String(), "\n")))
+}
+
+func coreCanonicalIndex(k string) (uint64, bool) {
+	if k == "" || k[0] < '0' || k[0] > '9' {
+		return 0, false
+	}
+	n, e := strconv.ParseUint(k, 10, 32)
+	return n, e == nil && n < 4294967295 && strconv.FormatUint(n, 10) == k
+}
+
+func coreASCII(s string) bool {
+	for n := 0; n < len(s); n++ {
+		if s[n] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *canonicalWriter) write(v any) {
 	switch x := v.(type) {
 	case map[string]any:
 		keys := make([]string, 0, len(x))
 		for k := range x {
 			keys = append(keys, k)
 		}
-		index := func(k string) (uint64, bool) {
-			n, e := strconv.ParseUint(k, 10, 32)
-			return n, e == nil && n < 4294967295 && strconv.FormatUint(n, 10) == k
-		}
 		sort.Slice(keys, func(i, j int) bool {
-			a, ai := index(keys[i])
-			b, bi := index(keys[j])
+			a, ai := coreCanonicalIndex(keys[i])
+			b, bi := coreCanonicalIndex(keys[j])
 			if ai && bi {
 				return a < b
 			}
 			if ai != bi {
 				return ai
+			}
+			if coreASCII(keys[i]) && coreASCII(keys[j]) {
+				return keys[i] < keys[j]
 			}
 			ar, br := utf16.Encode([]rune(keys[i])), utf16.Encode([]rune(keys[j]))
 			for n := 0; n < len(ar) && n < len(br); n++ {
@@ -196,19 +267,27 @@ func coreCanonicalJSON(v any) string {
 			}
 			return len(ar) < len(br)
 		})
-		parts := []string{}
-		for _, k := range keys {
-			parts = append(parts, coreJSON(k)+":"+coreCanonicalJSON(x[k]))
+		w.out.WriteByte('{')
+		for n, k := range keys {
+			if n > 0 {
+				w.out.WriteByte(',')
+			}
+			w.leaf(k)
+			w.out.WriteByte(':')
+			w.write(x[k])
 		}
-		return "{" + strings.Join(parts, ",") + "}"
+		w.out.WriteByte('}')
 	case []any:
-		parts := []string{}
-		for _, v := range x {
-			parts = append(parts, coreCanonicalJSON(v))
+		w.out.WriteByte('[')
+		for n, item := range x {
+			if n > 0 {
+				w.out.WriteByte(',')
+			}
+			w.write(item)
 		}
-		return "[" + strings.Join(parts, ",") + "]"
+		w.out.WriteByte(']')
 	default:
-		return coreJSON(v)
+		w.leaf(v)
 	}
 }
 func coreClone(v any) any { var r any; _ = json.Unmarshal([]byte(coreJSON(v)), &r); return r }
@@ -578,14 +657,23 @@ const ReleaseNotesGuidance = "## 版本交付与发布说明\n" +
 	"- 「## 主要更新」只写实际产品变化，不写交付引导、开发指令、测试命令或安装步骤；不得只有安装说明，不得将未完成事项写成已完成，不得保留待填写占位内容。\n" +
 	"- 交付前核对发布说明中的版本与交付版本一致，并运行仓库已有的发布说明校验或发布预检；ReqFlow 仓库运行 node scripts/release-notes-check.mjs，并调用 releaseNotes 校验当前版本文件。校验失败先修正，再报告结果。"
 
+var coreAttachmentLabelPattern = regexp.MustCompile(`^图片[1-9]\d*$`)
+
+// ProjectConcurrencyToken 是界面提交时的项目内容校验值，基于发送给界面的项目视图
+// （projectView）计算；图片 path/dataUrl 为派生字段，不参与比对。
 func ProjectConcurrencyToken(p map[string]any) string {
+	return projectContentToken(projectView(p))
+}
+
+// projectContentToken 对完整项目内容计算校验值（忽略图片 path/dataUrl 与 revision）。
+func projectContentToken(p map[string]any) string {
 	var clean func(any) any
 	clean = func(v any) any {
 		switch x := v.(type) {
 		case map[string]any:
 			r := map[string]any{}
 			for k, v := range x {
-				if k != "path" {
+				if k != "path" && k != "dataUrl" {
 					r[k] = clean(v)
 				}
 			}
@@ -714,9 +802,14 @@ func Apply(s, a map[string]any) error {
 		events              int
 	}
 	oldItems := map[string]prior{}
+	// 性能优化：有明确作用范围的操作只为目标项目生成变更比对快照。
+	scopes := MutationProjectIDs(a)
 	for _, pv := range coreList(s["projects"]) {
 		p := coreMap(pv)
 		id := coreString(p["id"])
+		if scopes != nil && !coreIn(id, scopes...) {
+			continue
+		}
 		before[id] = coreJSON(p)
 		revisions[id] = coreNum(p["revision"])
 		for _, iv := range coreList(p["items"]) {
@@ -734,6 +827,9 @@ func Apply(s, a map[string]any) error {
 	}
 	for _, pv := range coreList(s["projects"]) {
 		p := coreMap(pv)
+		if scopes != nil && !coreIn(coreString(p["id"]), scopes...) {
+			continue
+		}
 		for _, iv := range coreList(p["items"]) {
 			i := coreMap(iv)
 			old, exists := oldItems[coreString(i["id"])]
@@ -1640,7 +1736,9 @@ func coreApplyItem(p, a map[string]any, now string) error {
 		id, label := coreString(x["id"]), coreString(x["label"])
 		_, nameok := x["name"].(string)
 		url, urlok := x["dataUrl"].(string)
-		if !nameok || !urlok || !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(id) || !regexp.MustCompile(`^图片[1-9]\d*$`).MatchString(label) || !regexp.MustCompile(`^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$`).MatchString(url) || len(url) > 14*1024*1024 || ids[id] || labels[label] {
+		// 已外置的图片只保留 path（数据目录 images/ 下的附件文件），不再携带 dataUrl。
+		stored := (!urlok || url == "") && coreAttachmentFilePattern.MatchString(filepath.Base(coreString(x["path"])))
+		if !nameok || (!stored && (!urlok || !coreImagePattern.MatchString(url) || len(url) > 14*1024*1024)) || !coreAttachmentIDPattern.MatchString(id) || !coreAttachmentLabelPattern.MatchString(label) || ids[id] || labels[label] {
 			return errors.New("图片附件无效（最多 12 张，每张最多 10MB，支持 PNG/JPG/WebP/GIF）")
 		}
 		ids[id] = true

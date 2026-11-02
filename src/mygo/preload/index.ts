@@ -88,6 +88,7 @@ const channels = {
   listDir: 'fs:list',
   readFile: 'fs:read',
   readImage: 'fs:readImage',
+  readAttachment: 'attachment:image',
   writeFile: 'fs:write',
   revealFile: 'fs:reveal',
   openExternal: 'shell:openExternal',

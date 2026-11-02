@@ -1,10 +1,7 @@
 package backendgo
 
 import (
-	"encoding/base64"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"time"
 )
@@ -29,43 +26,6 @@ func (s *WorkspaceService) MigrateToSQLite() error { return s.store.migrate() }
 
 var coreImagePattern = regexp.MustCompile(`^data:image/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+=*)$`)
 
-func (s *WorkspaceService) materializeImages(state map[string]any) error {
-	dir := filepath.Join(s.store.dir, "images")
-	for _, pv := range coreList(state["projects"]) {
-		p := coreMap(pv)
-		items := append([]any{}, coreList(p["items"])...)
-		for _, bv := range coreList(p["batches"]) {
-			items = append(items, coreList(coreMap(bv)["items"])...)
-		}
-		for _, iv := range items {
-			for _, av := range coreList(coreMap(iv)["attachments"]) {
-				a := coreMap(av)
-				match := coreImagePattern.FindStringSubmatch(coreString(a["dataUrl"]))
-				if match == nil || !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(coreString(a["id"])) {
-					return errors.New("图片附件数据无效")
-				}
-				bytes, e := base64.StdEncoding.DecodeString(match[2])
-				if e != nil {
-					bytes, e = base64.RawStdEncoding.DecodeString(match[2])
-				}
-				if e != nil {
-					return errors.New("图片附件数据无效")
-				}
-				if e = os.MkdirAll(dir, 0700); e != nil {
-					return e
-				}
-				a["path"] = filepath.Join(dir, coreString(a["id"])+"-"+coreHash(string(bytes))[:16]+"."+match[1])
-				file := coreString(a["path"])
-				if !coreExists(file) {
-					if e = coreAtomicWrite(file, bytes); e != nil {
-						return e
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
 func (s *WorkspaceService) Get() (map[string]any, error) {
 	record, e := s.store.read()
 	if e != nil {
@@ -168,19 +128,35 @@ func (s *WorkspaceService) Mutate(action map[string]any, expectedVersion *int64)
 		} else if expectedVersion != nil && *expectedVersion != coreNum(record["version"]) {
 			return nil, &VersionConflictError{}
 		}
-		if e = s.materializeImages(state); e != nil {
+		before, e := s.materializeProjects(state)
+		if e != nil {
 			return nil, e
 		}
 		if e = Apply(state, action); e != nil {
 			return nil, e
 		}
-		if e = s.materializeImages(state); e != nil {
+		after, e := s.materializeProjects(state)
+		if e != nil {
 			return nil, e
+		}
+		// 有明确作用范围的操作只重新序列化目标项目（以及图片外置有变化的项目）。
+		var dirty map[string]bool
+		if scopes != nil {
+			dirty = map[string]bool{}
+			for _, id := range scopes {
+				dirty[id] = true
+			}
+			for id := range before {
+				dirty[id] = true
+			}
+			for id := range after {
+				dirty[id] = true
+			}
 		}
 		expected := coreNum(record["version"])
 		record["id"] = "local_electron"
 		record["data"] = state
-		next, e := s.store.write(record, &expected)
+		next, e := s.store.writeScoped(record, &expected, dirty)
 		if e == nil {
 			result := map[string]any{"state": NormalizeWorkspace(coreMap(next["data"])), "version": coreNum(next["version"])}
 			if warning := coreString(next["contextWarning"]); warning != "" {

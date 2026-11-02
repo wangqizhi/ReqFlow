@@ -666,6 +666,7 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 .attachment-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .attachment-grid figure { margin: 0; width: 180px; }
 .attachment-grid img { width: 100%; height: 130px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #f6f8fa; }
+.attachment-grid .attachment-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 130px; border: 1px solid var(--line); border-radius: 8px; background: #f6f8fa; color: var(--muted, #6b7280); font-size: 12px; }
 .attachment-grid figcaption { font-size: 12px; overflow-wrap: anywhere; margin: 5px 0; }
 .fb-git-commit { position: sticky; top: -4px; z-index: 2; padding: 8px 0; background: #f7f5f2; align-items: center; }
 .fb-git-commit textarea { flex: 1; min-width: 0; resize: vertical; border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 12px; }
@@ -1367,6 +1368,12 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 .terminal-collapsed-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-collapsed-status > svg { flex-shrink: 0; }
 .terminal-collapsed-status.failure { color: var(--danger); }
+.terminal-collapsed-output { flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 12px; border: 0; border-bottom: 1px solid var(--line); background: var(--side-bg); color: var(--side-ink); font: 12px/1.45 Consolas, 'Cascadia Mono', monospace; text-align: left; cursor: pointer; }
+.terminal-collapsed-output > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .72; }
+.terminal-collapsed-output > span:last-child { opacity: 1; }
+.terminal-collapsed-output:hover { background: var(--side-hover, var(--side-bg)); }
+.terminal-collapsed-output:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.terminal-collapsed-output.failure > span:last-child { color: var(--danger); }
 @media (max-width: 760px) {
   .token-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .token-rank-row { grid-template-columns: minmax(80px, 1fr) minmax(24px, 1fr) 80px 48px; gap: 8px; }

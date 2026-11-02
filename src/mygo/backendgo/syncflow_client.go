@@ -103,6 +103,13 @@ func (s *WorkspaceService) remoteRequest(serverID, method, endpoint string, body
 	return result, nil
 }
 
+// remotePayload 是发往服务端的项目 flow 内容：先回填外置图片，再去除本机字段。
+func (s *WorkspaceService) remotePayload(project map[string]any) map[string]any {
+	copied := coreMap(coreDeepCopy(project))
+	s.hydrateImages(copied)
+	return syncFlowPayload(copied)
+}
+
 func syncMergeRemote(project, remote map[string]any) {
 	for key := range syncFlowPayload(project) {
 		delete(project, key)
@@ -130,7 +137,7 @@ func (s *WorkspaceService) remoteReplaceFlows(record, state map[string]any) (map
 		if next == nil || aiString(coreMap(next["serverAgent"])["id"]) != serverID {
 			return nil, errors.New("请先中断远程同步，再恢复或移除关联项目")
 		}
-		before, after := syncFlowPayload(old), syncFlowPayload(next)
+		before, after := s.remotePayload(old), s.remotePayload(next)
 		delete(before, "revision")
 		delete(after, "revision")
 		if coreJSON(before) == coreJSON(after) {
@@ -190,12 +197,12 @@ func (s *WorkspaceService) cacheRemote(serverID string, records []any, deleted [
 			if !link && coreNum(association["remoteRevision"]) > coreNum(record["revision"]) {
 				continue
 			}
-			before := ProjectConcurrencyToken(project)
+			before := projectContentToken(project)
 			revision := coreNum(project["revision"])
 			syncMergeRemote(project, coreMap(record["project"]))
 			project["serverAgent"] = map[string]any{"id": serverID, "remoteRevision": record["revision"]}
 			project["revision"] = revision
-			if before != ProjectConcurrencyToken(project) {
+			if before != projectContentToken(project) {
 				project["revision"] = revision + 1
 				changed = true
 			}
@@ -244,7 +251,7 @@ func (s *WorkspaceService) refreshRemote(record map[string]any) (map[string]any,
 		if _, known := coreMap(p["serverAgent"])["remoteRevision"]; !known {
 			// Upgrade an existing association without replacing server-owned flow.
 			var associated map[string]any
-			associated, err = s.remoteRequest(serverID, "POST", "/api/flow/associate", map[string]any{"projectId": p["id"], "project": syncFlowPayload(p)})
+			associated, err = s.remoteRequest(serverID, "POST", "/api/flow/associate", map[string]any{"projectId": p["id"], "project": s.remotePayload(p)})
 			if err == nil {
 				records := coreList(associated["records"])
 				if len(records) != 1 {
@@ -330,7 +337,7 @@ func (s *WorkspaceService) remoteMutate(action map[string]any, expected *int64) 
 		if p == nil {
 			return nil, true, errors.New("项目不存在")
 		}
-		payload := syncFlowPayload(p)
+		payload := s.remotePayload(p)
 		if aiString(payload["baselineTemplate"]) == "" && aiString(state["baselineTemplate"]) != "" {
 			payload["baselineTemplate"] = state["baselineTemplate"]
 		}
@@ -352,7 +359,10 @@ func (s *WorkspaceService) remoteMutate(action map[string]any, expected *int64) 
 		}
 		revisions[id] = coreMap(p["serverAgent"])["remoteRevision"]
 	}
-	result, err := s.remoteRequest(serverID, "POST", "/api/flow/mutate", map[string]any{"action": action, "revisions": revisions})
+	// 本地附件只保留 path，发往服务端前回填图片内容。
+	sent := coreMap(coreDeepCopy(action))
+	s.hydrateImages(sent)
+	result, err := s.remoteRequest(serverID, "POST", "/api/flow/mutate", map[string]any{"action": sent, "revisions": revisions})
 	if err != nil {
 		return nil, true, err
 	}

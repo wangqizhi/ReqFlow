@@ -267,16 +267,26 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		if e != nil {
 			return nil, e
 		}
-		return desktopOK(r), nil
+		return workspaceResponse(desktopOK(r), desktopArg(args, 0)), nil
 	case "workspace:local":
 		// 浏览窗口先读本地备份即可显示，不等待 Server Agent 网络刷新。
 		r, e := b.Workspace.localService().Get()
 		if e != nil {
 			return nil, e
 		}
-		return desktopOK(r), nil
+		return workspaceResponse(desktopOK(r), desktopArg(args, 0)), nil
 	case "workspace:apply":
-		return b.desktopApply(desktopMap(desktopArg(args, 0)))
+		r, e := b.desktopApply(desktopMap(desktopArg(args, 0)))
+		if e != nil {
+			return nil, e
+		}
+		return workspaceResponse(desktopMap(r), desktopArg(args, 1)), nil
+	case "attachment:image":
+		data, e := readAttachmentDataURL(b.Workspace.imagesDir(), desktopText(args, 0))
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(map[string]any{"dataUrl": data}), nil
 	case "storage:status":
 		return desktopOK(map[string]any{"backend": b.Workspace.StorageStatus()}), nil
 	case "storage:migrate":
@@ -526,6 +536,51 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 		return desktopOK(latest), nil
 	}
 	return desktopOK(r), nil
+}
+
+// workspaceResponse 把工作区结果转换为界面视图。界面传入已持有的项目 revision
+// （known.revisions）与工作区级字段摘要（known.baseHash）时，只回传有变化的部分，
+// 其余由界面沿用本地副本。
+func workspaceResponse(result map[string]any, known any) map[string]any {
+	state, ok := result["state"].(map[string]any)
+	if !ok {
+		return result
+	}
+	out := map[string]any{}
+	for k, v := range result {
+		if k != "state" {
+			out[k] = v
+		}
+	}
+	revisions, hinted := desktopMap(known)["revisions"].(map[string]any)
+	if !hinted {
+		out["state"] = workspaceView(state)
+		return out
+	}
+	base := map[string]any{}
+	for k, v := range state {
+		if k != "projects" {
+			base[k] = v
+		}
+	}
+	order, changed := []any{}, map[string]any{}
+	for _, pv := range coreList(state["projects"]) {
+		p := coreMap(pv)
+		id := coreString(p["id"])
+		order = append(order, id)
+		held, has := revisions[id]
+		if !has || p["revision"] == nil || !coreSafeInt(held) || coreNum(held) != coreNum(p["revision"]) {
+			changed[id] = projectView(p)
+		}
+	}
+	delta := map[string]any{"order": order, "projects": changed}
+	// 工作区级字段（上下文提示词、模板等）未变化时也不重复回传。
+	delta["baseHash"] = coreHash(coreJSON(base))
+	if desktopString(desktopMap(known)["baseHash"]) != delta["baseHash"] {
+		delta["base"] = base
+	}
+	out["delta"] = delta
+	return out
 }
 
 func desktopNow() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }

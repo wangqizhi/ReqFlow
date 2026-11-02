@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,59 @@ func (*VersionConflictError) Code() string { return "VERSION_CONFLICT" }
 type workspaceStore struct {
 	dir         string
 	lockTimeout time.Duration
+	// 性能优化：缓存最近一次读取/写入的 SQLite 内容与各行 JSON，按文件修改时间与大小校验；
+	// 其他进程（CLI）写入后文件戳变化即重新读取，写入时只更新内容有变化的行。
+	mu    sync.Mutex
+	cache *storeCache
+}
+
+type fileStamp struct{ mod, size int64 }
+type sqlRow struct {
+	position int
+	data     string
+}
+type retainedKey struct{ project, scope, id string }
+type sqlRows struct {
+	projects map[string]sqlRow
+	reqs     map[retainedKey]sqlRow
+	record   string
+}
+type storeCache struct {
+	stamp  fileStamp
+	record map[string]any
+	rows   *sqlRows
+}
+
+func coreFileStamp(p string) (fileStamp, bool) {
+	info, e := os.Stat(p)
+	if e != nil {
+		return fileStamp{}, false
+	}
+	return fileStamp{info.ModTime().UnixNano(), info.Size()}, true
+}
+
+// loadSQLLocked 返回当前 SQLite 内容（缓存对象，调用方不得修改）；需持有 s.mu。
+func (s *workspaceStore) loadSQLLocked() (*storeCache, error) {
+	stamp, ok := coreFileStamp(s.sqlitePath())
+	if ok && s.cache != nil && s.cache.stamp == stamp {
+		return s.cache, nil
+	}
+	record, rows, e := coreReadSQLRows(s.sqlitePath())
+	if e != nil {
+		s.cache = nil
+		return nil, e
+	}
+	if record == nil {
+		s.cache = nil
+		return &storeCache{}, nil
+	}
+	s.cache = &storeCache{stamp: stamp, record: record, rows: rows}
+	return s.cache, nil
+}
+func (s *workspaceStore) invalidate() {
+	s.mu.Lock()
+	s.cache = nil
+	s.mu.Unlock()
 }
 
 func newWorkspaceStore(dir string) *workspaceStore {
@@ -41,14 +95,16 @@ func (s *workspaceStore) backend() string {
 }
 func (s *workspaceStore) read() (map[string]any, error) {
 	if coreExists(s.sqlitePath()) {
-		r, e := coreReadSQL(s.sqlitePath())
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		c, e := s.loadSQLLocked()
 		if e != nil {
 			return nil, e
 		}
-		if r == nil {
+		if c.record == nil {
 			return nil, errors.New("SQLite 工作区数据缺失")
 		}
-		return r, nil
+		return coreMap(coreDeepCopy(c.record)), nil
 	}
 	b, e := os.ReadFile(s.jsonPath())
 	if errors.Is(e, os.ErrNotExist) {
@@ -142,26 +198,74 @@ func coreRename(from, to string) error {
 }
 func (s *workspaceStore) replace(record map[string]any) error {
 	if s.backend() == "sqlite" {
+		defer s.invalidate()
 		return coreWriteSQL(s.sqlitePath(), record)
 	}
 	return coreAtomicWrite(s.jsonPath(), []byte(coreJSON(record)))
 }
+
+// writeSQL 在写入锁内以缓存为基准做版本校验与增量写入（只写变化的行）。
+func (s *workspaceStore) writeSQL(record map[string]any, expected *int64, dirty map[string]bool) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, e := s.loadSQLLocked()
+	if e != nil {
+		return nil, e
+	}
+	current := c.record
+	if expected != nil && (current == nil || coreNum(current["version"]) != *expected) {
+		return nil, &VersionConflictError{}
+	}
+	next := int64(0)
+	if current != nil {
+		next = coreNum(current["version"]) + 1
+	}
+	record["version"] = next
+	if c.rows == nil {
+		dirty = nil
+	}
+	rows, e := coreWriteSQLRowsScoped(s.sqlitePath(), record, c.rows, dirty)
+	if e != nil {
+		s.cache = nil
+		return nil, e
+	}
+	if stamp, ok := coreFileStamp(s.sqlitePath()); ok {
+		s.cache = &storeCache{stamp: stamp, record: coreMap(coreDeepCopy(record)), rows: rows}
+	} else {
+		s.cache = nil
+	}
+	return current, nil
+}
 func (s *workspaceStore) write(record map[string]any, expected *int64) (map[string]any, error) {
+	return s.writeScoped(record, expected, nil)
+}
+
+// writeScoped 写入工作区；dirty 非空时只有其中的项目可能有变化，其余项目沿用已存储的行，
+// 不再重新序列化（dirty 为 nil 表示全部比对）。
+func (s *workspaceStore) writeScoped(record map[string]any, expected *int64, dirty map[string]bool) (map[string]any, error) {
 	return s.commit(func() (map[string]any, error) {
-		current, e := s.read()
-		if e != nil {
-			return nil, e
-		}
-		if expected != nil && (current == nil || coreNum(current["version"]) != *expected) {
-			return nil, &VersionConflictError{}
-		}
-		next := int64(0)
-		if current != nil {
-			next = coreNum(current["version"]) + 1
-		}
-		record["version"] = next
-		if e = s.replace(record); e != nil {
-			return nil, e
+		var current map[string]any
+		var e error
+		if s.backend() == "sqlite" {
+			if current, e = s.writeSQL(record, expected, dirty); e != nil {
+				return nil, e
+			}
+		} else {
+			current, e = s.read()
+			if e != nil {
+				return nil, e
+			}
+			if expected != nil && (current == nil || coreNum(current["version"]) != *expected) {
+				return nil, &VersionConflictError{}
+			}
+			next := int64(0)
+			if current != nil {
+				next = coreNum(current["version"]) + 1
+			}
+			record["version"] = next
+			if e = s.replace(record); e != nil {
+				return nil, e
+			}
 		}
 		oldContexts, newContexts := coreMap(coreMap(current)["data"])["contextPrompts"], coreMap(record["data"])["contextPrompts"]
 		if coreJSON(oldContexts) != coreJSON(newContexts) {
@@ -194,6 +298,7 @@ func (s *workspaceStore) initialize(data map[string]any) (map[string]any, error)
 func (s *workspaceStore) createDatabase(record map[string]any) error {
 	temp := s.sqlitePath() + "." + coreUUID() + ".tmp"
 	defer os.Remove(temp)
+	defer s.invalidate()
 	if e := coreWriteSQL(temp, record); e != nil {
 		return e
 	}
@@ -227,6 +332,7 @@ func (s *workspaceStore) overwrite(data map[string]any) (map[string]any, error) 
 	})
 }
 func (s *workspaceStore) migrate() error {
+	defer s.invalidate()
 	_, e := s.commit(func() (map[string]any, error) {
 		if s.backend() == "sqlite" && coreExists(s.sqlitePath()) {
 			return nil, nil
@@ -281,80 +387,100 @@ func coreOpenSQL(file string) (*sql.DB, error) {
 	return db, nil
 }
 func coreReadSQL(file string) (map[string]any, error) {
+	record, _, e := coreReadSQLRows(file)
+	return record, e
+}
+
+// coreReadSQLRows 读取完整工作区，同时返回各行原始 JSON 供增量写入比对。
+func coreReadSQLRows(file string) (map[string]any, *sqlRows, error) {
 	db, e := coreOpenSQL(file)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	defer db.Close()
 	tx, e := db.Begin()
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	defer tx.Rollback()
 	var text string
 	e = tx.QueryRow("SELECT value FROM workspace WHERE key=?", "record").Scan(&text)
 	if errors.Is(e, sql.ErrNoRows) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
+	rows := &sqlRows{projects: map[string]sqlRow{}, reqs: map[retainedKey]sqlRow{}, record: text}
 	var record map[string]any
 	if e = json.Unmarshal([]byte(text), &record); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	data := coreMap(record["data"])
 	projects := []any{}
-	rows, e := tx.Query("SELECT data FROM projects ORDER BY position")
+	byID := map[string]map[string]any{}
+	result, e := tx.Query("SELECT id,position,data FROM projects ORDER BY position")
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	for rows.Next() {
-		if e = rows.Scan(&text); e != nil {
-			rows.Close()
-			return nil, e
+	for result.Next() {
+		var id string
+		var position int
+		if e = result.Scan(&id, &position, &text); e != nil {
+			result.Close()
+			return nil, nil, e
 		}
 		var p map[string]any
 		if e = json.Unmarshal([]byte(text), &p); e != nil {
-			rows.Close()
-			return nil, e
+			result.Close()
+			return nil, nil, e
 		}
+		rows.projects[id] = sqlRow{position, text}
+		p["items"] = []any{}
+		byID[id] = p
 		projects = append(projects, p)
 	}
-	e = rows.Err()
-	rows.Close()
+	e = result.Err()
+	result.Close()
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	for _, v := range projects {
-		p := coreMap(v)
-		scopes := map[string][]any{"": {}}
-		rows, e = tx.Query("SELECT scope,data FROM requirements WHERE project_id=? ORDER BY position", p["id"])
-		if e != nil {
-			return nil, e
+	scopes := map[string]map[string][]any{}
+	result, e = tx.Query("SELECT project_id,scope,id,position,data FROM requirements ORDER BY project_id,scope,position")
+	if e != nil {
+		return nil, nil, e
+	}
+	for result.Next() {
+		var k retainedKey
+		var position int
+		if e = result.Scan(&k.project, &k.scope, &k.id, &position, &text); e != nil {
+			result.Close()
+			return nil, nil, e
 		}
-		for rows.Next() {
-			var scope string
-			if e = rows.Scan(&scope, &text); e != nil {
-				rows.Close()
-				return nil, e
-			}
-			var item map[string]any
-			if e = json.Unmarshal([]byte(text), &item); e != nil {
-				rows.Close()
-				return nil, e
-			}
-			scopes[scope] = append(scopes[scope], item)
+		rows.reqs[k] = sqlRow{position, text}
+		var item map[string]any
+		if e = json.Unmarshal([]byte(text), &item); e != nil {
+			result.Close()
+			return nil, nil, e
 		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return nil, e
+		if scopes[k.project] == nil {
+			scopes[k.project] = map[string][]any{}
 		}
-		p["items"] = scopes[""]
+		scopes[k.project][k.scope] = append(scopes[k.project][k.scope], item)
+	}
+	e = result.Err()
+	result.Close()
+	if e != nil {
+		return nil, nil, e
+	}
+	for id, p := range byID {
+		own := scopes[id]
+		if items := own[""]; items != nil {
+			p["items"] = items
+		}
 		for _, bv := range coreList(p["batches"]) {
 			b := coreMap(bv)
-			values := scopes[coreString(b["id"])]
+			values := own[coreString(b["id"])]
 			if values == nil {
 				values = []any{}
 			}
@@ -364,39 +490,84 @@ func coreReadSQL(file string) (map[string]any, error) {
 	data["projects"] = projects
 	record["data"] = data
 	if e = tx.Commit(); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	return record, nil
+	return record, rows, nil
 }
 func coreWriteSQL(file string, record map[string]any) error {
+	_, e := coreWriteSQLRows(file, record, nil)
+	return e
+}
+
+// coreWriteSQLRows 只写入与 prev（数据库当前各行 JSON）不同的行；prev 为空时先从数据库读取。
+func coreWriteSQLRows(file string, record map[string]any, prev *sqlRows) (*sqlRows, error) {
+	return coreWriteSQLRowsScoped(file, record, prev, nil)
+}
+func coreWriteSQLRowsScoped(file string, record map[string]any, prev *sqlRows, dirty map[string]bool) (*sqlRows, error) {
 	db, e := coreOpenSQL(file)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	defer db.Close()
 	tx, e := db.Begin()
 	if e != nil {
-		return e
+		return nil, e
 	}
 	defer tx.Rollback()
-	type retainedKey struct{ project, scope, id string }
-	retained := map[retainedKey]bool{}
-	retainedProjects := map[string]bool{}
+	if prev == nil {
+		if prev, e = coreLoadSQLRows(tx); e != nil {
+			return nil, e
+		}
+	}
+	next := &sqlRows{projects: map[string]sqlRow{}, reqs: map[retainedKey]sqlRow{}}
 	data := coreMap(record["data"])
+	var prevByProject map[string][]retainedKey
+	if dirty != nil {
+		prevByProject = map[string][]retainedKey{}
+		for k := range prev.reqs {
+			prevByProject[k.project] = append(prevByProject[k.project], k)
+		}
+	}
 	for position, v := range coreList(data["projects"]) {
 		p := coreMap(v)
-		retainedProjects[coreString(p["id"])] = true
-		config := coreMap(coreClone(p))
-		delete(config, "items")
+		id := coreString(p["id"])
+		if old, ok := prev.projects[id]; ok && dirty != nil && !dirty[id] {
+			// 未改动的项目：沿用已存储的行（位置变化时只更新位置）。
+			next.projects[id] = sqlRow{position, old.data}
+			if old.position != position {
+				if _, e = tx.Exec("UPDATE projects SET position=? WHERE id=?", position, id); e != nil {
+					return nil, e
+				}
+			}
+			for _, k := range prevByProject[id] {
+				next.reqs[k] = prev.reqs[k]
+			}
+			continue
+		}
+		config := make(map[string]any, len(p))
+		for k, value := range p {
+			if k != "items" {
+				config[k] = value
+			}
+		}
 		batches := []any{}
 		for _, bv := range coreList(p["batches"]) {
-			b := coreMap(coreClone(bv))
-			delete(b, "items")
-			batches = append(batches, b)
+			b := coreMap(bv)
+			copied := make(map[string]any, len(b))
+			for k, value := range b {
+				if k != "items" {
+					copied[k] = value
+				}
+			}
+			batches = append(batches, copied)
 		}
 		config["batches"] = batches
-		if _, e = tx.Exec("INSERT INTO projects(id,position,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET position=excluded.position,data=excluded.data WHERE position<>excluded.position OR data<>excluded.data", p["id"], position, coreJSON(config)); e != nil {
-			return e
+		row := sqlRow{position, coreJSON(config)}
+		next.projects[id] = row
+		if old, ok := prev.projects[id]; !ok || old != row {
+			if _, e = tx.Exec("INSERT INTO projects(id,position,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET position=excluded.position,data=excluded.data", p["id"], position, row.data); e != nil {
+				return nil, e
+			}
 		}
 		scopes := []struct {
 			id    string
@@ -412,68 +583,91 @@ func coreWriteSQL(file string, record map[string]any) error {
 		for _, scope := range scopes {
 			for n, iv := range scope.items {
 				i := coreMap(iv)
-				retained[retainedKey{coreString(p["id"]), scope.id, coreString(i["id"])}] = true
-				if _, e = tx.Exec("INSERT INTO requirements(project_id,scope,id,position,data) VALUES(?,?,?,?,?) ON CONFLICT(project_id,scope,id) DO UPDATE SET position=excluded.position,data=excluded.data WHERE position<>excluded.position OR data<>excluded.data", p["id"], scope.id, i["id"], n, coreJSON(i)); e != nil {
-					return e
+				k := retainedKey{id, scope.id, coreString(i["id"])}
+				row := sqlRow{n, coreJSON(i)}
+				next.reqs[k] = row
+				if old, ok := prev.reqs[k]; !ok || old != row {
+					if _, e = tx.Exec("INSERT INTO requirements(project_id,scope,id,position,data) VALUES(?,?,?,?,?) ON CONFLICT(project_id,scope,id) DO UPDATE SET position=excluded.position,data=excluded.data", p["id"], scope.id, i["id"], n, row.data); e != nil {
+						return nil, e
+					}
 				}
 			}
 		}
 	}
-	rows, e := tx.Query("SELECT project_id,scope,id FROM requirements")
-	if e != nil {
-		return e
-	}
-	removed := []retainedKey{}
-	for rows.Next() {
-		var k retainedKey
-		if e = rows.Scan(&k.project, &k.scope, &k.id); e != nil {
-			rows.Close()
-			return e
-		}
-		if !retained[k] {
-			removed = append(removed, k)
+	for k := range prev.reqs {
+		if _, ok := next.reqs[k]; !ok {
+			if _, e = tx.Exec("DELETE FROM requirements WHERE project_id=? AND scope=? AND id=?", k.project, k.scope, k.id); e != nil {
+				return nil, e
+			}
 		}
 	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return e
-	}
-	for _, k := range removed {
-		if _, e = tx.Exec("DELETE FROM requirements WHERE project_id=? AND scope=? AND id=?", k.project, k.scope, k.id); e != nil {
-			return e
+	for id := range prev.projects {
+		if _, ok := next.projects[id]; !ok {
+			if _, e = tx.Exec("DELETE FROM projects WHERE id=?", id); e != nil {
+				return nil, e
+			}
 		}
 	}
-	rows, e = tx.Query("SELECT id FROM projects")
-	if e != nil {
-		return e
+	saved := make(map[string]any, len(record))
+	for k, value := range record {
+		saved[k] = value
 	}
-	removedProjects := []string{}
-	for rows.Next() {
+	savedData := make(map[string]any, len(data))
+	for k, value := range data {
+		if k != "projects" {
+			savedData[k] = value
+		}
+	}
+	saved["data"] = savedData
+	next.record = coreJSON(saved)
+	if next.record != prev.record {
+		if _, e = tx.Exec("INSERT INTO workspace(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "record", next.record); e != nil {
+			return nil, e
+		}
+	}
+	if e = tx.Commit(); e != nil {
+		return nil, e
+	}
+	return next, nil
+}
+
+// coreLoadSQLRows 读取各行原始 JSON（不解析），用于无缓存时的增量比对。
+func coreLoadSQLRows(tx *sql.Tx) (*sqlRows, error) {
+	rows := &sqlRows{projects: map[string]sqlRow{}, reqs: map[retainedKey]sqlRow{}}
+	e := tx.QueryRow("SELECT value FROM workspace WHERE key=?", "record").Scan(&rows.record)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return nil, e
+	}
+	result, e := tx.Query("SELECT id,position,data FROM projects")
+	if e != nil {
+		return nil, e
+	}
+	for result.Next() {
 		var id string
-		if e = rows.Scan(&id); e != nil {
-			rows.Close()
-			return e
+		var row sqlRow
+		if e = result.Scan(&id, &row.position, &row.data); e != nil {
+			result.Close()
+			return nil, e
 		}
-		if !retainedProjects[id] {
-			removedProjects = append(removedProjects, id)
-		}
+		rows.projects[id] = row
 	}
-	e = rows.Err()
-	rows.Close()
+	if e = result.Err(); e != nil {
+		result.Close()
+		return nil, e
+	}
+	result.Close()
+	result, e = tx.Query("SELECT project_id,scope,id,position,data FROM requirements")
 	if e != nil {
-		return e
+		return nil, e
 	}
-	for _, id := range removedProjects {
-		if _, e = tx.Exec("DELETE FROM projects WHERE id=?", id); e != nil {
-			return e
+	defer result.Close()
+	for result.Next() {
+		var k retainedKey
+		var row sqlRow
+		if e = result.Scan(&k.project, &k.scope, &k.id, &row.position, &row.data); e != nil {
+			return nil, e
 		}
+		rows.reqs[k] = row
 	}
-	saved := coreMap(coreClone(record))
-	savedData := coreMap(saved["data"])
-	delete(savedData, "projects")
-	if _, e = tx.Exec("INSERT INTO workspace(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "record", coreJSON(saved)); e != nil {
-		return e
-	}
-	return tx.Commit()
+	return rows, result.Err()
 }

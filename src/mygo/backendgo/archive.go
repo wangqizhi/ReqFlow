@@ -129,7 +129,9 @@ func (b *Backend) desktopArchive(channel string, args []any) (any, error) {
 		if !filepath.IsAbs(file) {
 			return nil, errors.New("归档文件路径必须为绝对路径")
 		}
-		payload := map[string]any{"format": "reqflow-archive-v1", "createdAt": desktopNow(), "before": cutoff.UTC().Format(time.RFC3339Nano), "projects": projects, "batches": batches}
+		payload := map[string]any{"format": "reqflow-archive-v1", "createdAt": desktopNow(), "before": cutoff.UTC().Format(time.RFC3339Nano), "projects": coreDeepCopy(projects), "batches": coreDeepCopy(batches)}
+		// 归档文件需自包含：回填外置图片。
+		b.Workspace.hydrateImages(payload)
 		if e = desktopAtomicJSON(file, payload); e != nil {
 			return nil, e
 		}
