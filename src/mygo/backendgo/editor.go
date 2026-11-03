@@ -57,18 +57,22 @@ func openProjectEditor(dir string) error {
 		if launcher == "" {
 			continue
 		}
+		program = filepath.Clean(program)
+		before := editorWindowSnapshot(program)
+		allowEditorForeground()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		cmd := exec.CommandContext(ctx, program, launcher, "--new-window", dir)
 		cmd.Dir = dir
-		cmd.Env = append(editorEnvironment(os.Environ()), "ELECTRON_RUN_AS_NODE=1")
+		// 使用当前用户的全新环境，不把 ReqFlow 启动来源的 NO_COLOR 等变量带进 VS Code 及其终端。
+		cmd.Env = append(editorEnvironment(desktopUserEnvironment()), "ELECTRON_RUN_AS_NODE=1")
 		desktopHideCommand(cmd)
 		output, err := cmd.CombinedOutput()
 		cancel()
 		if err != nil {
 			return fmt.Errorf("VS Code 打开失败：%w %s", err, strings.TrimSpace(string(output)))
 		}
-
-		return nil
+		// CLI 返回成功不代表窗口已显示：等待窗口出现并切到前台，未出现则报告原因。
+		return awaitEditorWindow(program, dir, before)
 	}
 	return errors.New("未找到 VS Code，请先安装 VS Code，或将其安装目录加入 PATH")
 }
