@@ -23,7 +23,8 @@ func runInteractiveAgentTerminal(t *testing.T, agent string, wantArgs []string, 
 	if agent == "claude-code" {
 		command = "claude"
 	}
-	script := `[Console]::WriteLine('cwd:'+(Get-Location).Path)
+	script := `if ($args[0] -eq '--help') { if ($env:REQFLOW_FIXTURE_HELP) { Write-Output $env:REQFLOW_FIXTURE_HELP }; exit 0 }
+[Console]::WriteLine('cwd:'+(Get-Location).Path)
 [Console]::WriteLine('args:'+($args -join '|'))
 $file=$args[-1].Substring($args[-1].IndexOf([char]0xff1a)+1)
 [Console]::WriteLine('task:'+ [IO.File]::ReadAllText($file,[Text.Encoding]::UTF8))
@@ -151,7 +152,15 @@ func TestInteractiveCodexTerminal(t *testing.T) {
 func TestInteractivePiTerminal(t *testing.T) {
 	// REQ-206：pi 与 Codex 使用同样的交互终端指派；--approve 自动信任项目目录，
 	// 启动不再停在文件夹信任确认上。
-	runInteractiveAgentTerminal(t, "pi", []string{"--approve"}, false)
+	// REQ-300：支持 --tui-mode 的 Pi 以 regular 模式启动，输出进入正常回滚区。
+	t.Setenv("REQFLOW_FIXTURE_HELP", "  --tui-mode <mode>  TUI mode: fullscreen (default) or regular")
+	runInteractiveAgentTerminal(t, "pi", []string{"args:--tui-mode|regular|--approve|请读取"}, false)
+}
+
+func TestInteractiveLegacyPiTerminal(t *testing.T) {
+	// REQ-300：旧版 Pi 不认识 --tui-mode，帮助中没有该参数时保持原启动参数。
+	t.Setenv("REQFLOW_FIXTURE_HELP", "  --approve  Trust project-local files")
+	runInteractiveAgentTerminal(t, "pi", []string{"args:--approve|请读取"}, false)
 }
 
 func TestInteractiveClaudeCodeTerminal(t *testing.T) {

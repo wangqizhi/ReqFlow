@@ -60,12 +60,15 @@ func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 	// machine control instead of hitting sandbox permission denials.
 	// pi starts with --approve so the project directory is trusted for the run
 	// and startup never blocks on the interactive folder-trust prompt.
+	// REQ-300：Pi 1.4 起默认 fullscreen 备用屏幕，ConPTY 不转发其鼠标模式，滚轮与
+	// 滚动条都无法翻看 Pi 自己维护的历史；支持 --tui-mode 时改用 regular 模式，
+	// 输出进入终端正常回滚区。旧版不认识该参数会报错退出，因此先探测 --help。
 	// Claude Code starts with --dangerously-skip-permissions for the same reason.
 	// DeepSeek Harness has no terminal TUI of its own: startDshChatPTY drives the
 	// headless profile through the embedded chat client instead.
 	invocations := map[string]string{
 		"codex":       "& codex --no-alt-screen --sandbox danger-full-access $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
-		"pi":          "& pi --approve -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"pi":          "$a=@('--approve'); try { if ((& pi --help 2>&1 | Out-String) -match '--tui-mode') { $a=@('--tui-mode','regular')+$a } } catch {}; & pi @a -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 		"claude-code": "& claude --dangerously-skip-permissions $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 	}
 	invocation, ok := invocations[agent]
