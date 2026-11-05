@@ -329,7 +329,7 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		return desktopOK(nil), nil
 	case "window:control":
 		action := desktopText(args, 0)
-		if action != "minimize" && action != "close" {
+		if action != "minimize" && action != "close" && action != "confirmClose" {
 			return nil, errors.New("窗口操作无效")
 		}
 		return desktopNative(b, "window."+action)

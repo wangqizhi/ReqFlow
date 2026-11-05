@@ -176,7 +176,8 @@ export default function App() {
   const [contextFeature, setContextFeature] = useState('');
   const [rulesOpen, setRulesOpen] = useState(false);
   const [terminalSettingEnabled] = useTerminalSetting();
-  const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string }>>({});
+  const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string; canStop?: boolean; stopping?: boolean }>>({});
+  const publishControllers = useRef(new Map<string, AbortController>());
   const [terminalTabs, setTerminalTabs] = useState<Record<string, string>>({});
   const [shellSessions, setShellSessions] = useState<Record<string, { runId: string; open: boolean; done: boolean }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});
@@ -590,14 +591,22 @@ export default function App() {
     if (!bridge.runPublish) { notify('发布仅桌面版支持（浏览器预览无本地脚本访问）', 'err'); return; }
     setPublishConfirm(false);
     const project = p, script = publishScript;
+    const controller = new AbortController();
+    publishControllers.current.set(project.id, controller);
     publishingIds.current.add(project.id);
     const update = (patch: Partial<typeof publishStates[string]>) => setPublishStates(states => ({ ...states, [project.id]: { ...(states[project.id] || { running: false, step: '', result: null, startedAt: 0 }), ...patch, revision: (states[project.id]?.revision || 0) + 1 } }));
-    const terminalRunId = terminalEnabled && bridge.getPublishOutput ? crypto.randomUUID() : undefined;
+    const terminalRunId = crypto.randomUUID();
     const wasOpen = !!terminalRunId && (!!shellSessions[project.id]?.open || (!!agentSessions[project.id]?.open && !agentTerminalDetached) || (!!terminalSession?.terminalOpen && !terminalDetached) || aiConsoleState.open);
     if (terminalRunId && wasOpen) setTerminalTabs(tabs => ({ ...tabs, [project.id]: 'publish' }));
-    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: wasOpen, terminalProject: project.name });
+    update({ running: true, idle: false, step: '', result: null, resultDismissed: false, startedAt: Date.now(), endedAt: undefined, terminalRunId, terminalOpen: wasOpen, terminalProject: project.name, canStop: false, stopping: false });
     try {
-      const r = await publishProject(project, script, bridge, step => update({ step }), terminalRunId);
+      const prepared = await bridge.preparePublish?.(project.dir!, script, terminalRunId);
+      if (prepared && !prepared.ok) throw Error(prepared.error || '无法准备发布任务');
+      update({ canStop: !!prepared && !!bridge.stopPublish });
+      const r = await publishProject(project, script, bridge, step => {
+        if (controller.signal.aborted) throw Error('发布已中断');
+        update({ step });
+      }, terminalRunId);
       update({ result: { ok: !!r.ok, output: r.output || '', error: r.error } });
       // REQ-110：整个发布流程结束时上报，窗口不在最前端时由主进程弹系统通知
       void bridge.publishNotice?.({ ok: !!r.ok, project: project.name, detail: r.ok ? '发布脚本已执行完毕，产物位置见应用内发布输出。' : r.error || '发布脚本执行失败' });
@@ -605,9 +614,25 @@ export default function App() {
       update({ result: { ok: false, output: '', error: e?.message || '执行发布脚本失败' } });
       void bridge.publishNotice?.({ ok: false, project: project.name, detail: e?.message || '发布流程执行失败' });
     } finally {
+      await bridge.stopPublish?.(terminalRunId).catch(() => {});
+      publishControllers.current.delete(project.id);
       publishingIds.current.delete(project.id);
-      update({ running: false, step: '', endedAt: Date.now() });
+      update({ running: false, step: '', endedAt: Date.now(), canStop: false, stopping: false });
       void load({ quiet: true });
+    }
+  }
+
+  async function stopPublish() {
+    const id = p?.id, session = id ? publishStates[id] : undefined;
+    if (!id || !session?.running || !session.canStop || session.stopping || !session.terminalRunId) return;
+    publishControllers.current.get(id)?.abort();
+    setPublishStates(states => ({ ...states, [id]: { ...states[id], stopping: true, step: '正在中断…' } }));
+    try {
+      const r = await bridge.stopPublish?.(session.terminalRunId);
+      if (!r?.ok) throw Error(r?.error || '中断失败');
+    } catch (e: any) {
+      setPublishStates(states => ({ ...states, [id]: { ...states[id], stopping: false } }));
+      notify(e.message, 'err');
     }
   }
 
@@ -1191,10 +1216,10 @@ export default function App() {
               <FolderOpen size={16} />{p?.dir ? '浏览项目' : '关联目录'}
             </button>
             {!!publishScript && p?.dir && (
-              <button className="btn accent" disabled={publishing}
-                onClick={() => { if (pendingVerifyItems.length) setPublishConfirm(true); else void runPublish(); }}
-                title={pendingVerifyItems.length ? `有 ${pendingVerifyItems.length} 条需求待验证，点击发布时先确认` : '运行发布脚本：' + publishScript}>
-                <Rocket size={16} />{publishing ? publishStep || '发布中…' : '发布'}
+              <button className="btn accent" disabled={publishing && (!terminalSession?.canStop || terminalSession.stopping)}
+                onClick={() => { if (publishing) void stopPublish(); else if (pendingVerifyItems.length) setPublishConfirm(true); else void runPublish(); }}
+                title={publishing ? '中断本次发布及发布脚本的子进程' : pendingVerifyItems.length ? `有 ${pendingVerifyItems.length} 条需求待验证，点击发布时先确认` : '运行发布脚本：' + publishScript}>
+                <Rocket size={16} />{publishing ? terminalSession?.stopping ? '正在中断…' : '中断发布' : '发布'}
               </button>
             )}
             {terminalDetached && <button className="btn" onClick={() => void detachTerminal().catch(e => notify(e.message, 'err'))}>终端</button>}

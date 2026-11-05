@@ -11,8 +11,12 @@ import (
 	"github.com/egoist/mygo"
 )
 
+// Inject before application scripts in every desktop window, including inputs
+// and detached terminals. Custom application menus may still handle the event.
+const desktopPreload = `window.addEventListener('contextmenu', event => event.preventDefault(), true);`
+
 type nativeHost struct {
-	prepareClose  func() bool
+	confirmClose  func()
 	window        atomic.Pointer[mygo.Window]
 	notifications desktopNotifications
 	terminals     map[string]*mygo.Window // Access only on the MyGO main thread.
@@ -82,8 +86,11 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		return nil, fmt.Errorf("native window is unavailable")
 	}
 	switch method {
-	case "window.prepareClose":
-		return n.prepareClose == nil || n.prepareClose(), nil
+	case "window.confirmClose":
+		if n.confirmClose != nil {
+			n.confirmClose()
+		}
+		return nil, nil
 	case "terminal.open", "terminal.close", "terminal.status":
 		id := firstString(args)
 		var detached bool
@@ -114,7 +121,7 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 					area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
 					target = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal · " + project, Width: 1000, Height: 500, MinWidth: 480, MinHeight: 240,
 						X: area.X + (area.Width-1000)/2, Y: area.Y + (area.Height-500)/2,
-						URL: "/?terminal=" + url.QueryEscape(id) + extra, BackgroundColor: "#1c1917", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+						URL: "/?terminal=" + url.QueryEscape(id) + extra, BackgroundColor: "#1c1917", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled, PreloadScript: desktopPreload}})
 					n.terminals[id] = target
 					ready := make(chan struct{})
 					n.terminalReady[id] = ready
@@ -154,7 +161,7 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 			target := n.browsers[id]
 			if method == "browser.open" && (target == nil || target.IsDestroyed()) {
 				area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
-				target = mygo.NewWindow(mygo.WindowOptions{Title: "浏览项目", Width: 1200, Height: 800, MinWidth: 600, MinHeight: 400, X: area.X + (area.Width-1200)/2, Y: area.Y + (area.Height-800)/2, URL: "/?browser=" + url.QueryEscape(id), Frameless: true, BackgroundColor: "#fbfaf9", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+				target = mygo.NewWindow(mygo.WindowOptions{Title: "浏览项目", Width: 1200, Height: 800, MinWidth: 600, MinHeight: 400, X: area.X + (area.Width-1200)/2, Y: area.Y + (area.Height-800)/2, URL: "/?browser=" + url.QueryEscape(id), Frameless: true, BackgroundColor: "#fbfaf9", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled, PreloadScript: desktopPreload}})
 				n.browsers[id] = target
 				ready := make(chan struct{})
 				n.browserReady[id] = ready

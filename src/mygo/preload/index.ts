@@ -50,6 +50,8 @@ const channels = {
   closeAgentTerminal: 'agent:terminal:close',
   agentTerminalStatus: 'agent:terminal:status',
   runPublish: 'publish:run',
+  preparePublish: 'publish:prepare',
+  stopPublish: 'publish:stop',
   getPublishOutput: 'publish:output',
   syncPublishTerminal: 'publish:terminal:sync',
   getPublishTerminal: 'publish:terminal:get',

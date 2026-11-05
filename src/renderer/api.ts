@@ -109,7 +109,7 @@ export interface ReqFlowBridge {
   openProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   closeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   maximizeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
-  windowControl?(action: 'minimize' | 'close'): Promise<void>;
+  windowControl?(action: 'minimize' | 'close' | 'confirmClose'): Promise<void>;
   aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[]): Promise<{ ok: boolean; reply?: string; items?: AIDraft[]; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
   gitPush?(root: string): Promise<GitOpResult>;
   gitPull?(root: string): Promise<GitOpResult>;
@@ -126,6 +126,8 @@ export interface ReqFlowBridge {
   /** 发布脚本（REQ-070）：检测项目目录内的 publish 脚本（返回相对路径，空串表示没有）；执行发布并返回输出。仅桌面版提供。 */
   detectPublish?(root: string): Promise<{ ok: boolean; script?: string; error?: string }>;
   runPublish?(root: string, rel: string, terminalRunId?: string): Promise<{ ok: boolean; output?: string; error?: string }>;
+  preparePublish?(root: string, rel: string, runId: string): Promise<{ ok: boolean; error?: string }>;
+  stopPublish?(runId: string): Promise<{ ok: boolean; error?: string }>;
   getPublishOutput?(runId: string, offset: number): Promise<{ ok: boolean; data: string; offset: number; done: boolean; started: boolean; truncated?: boolean; error?: string }>;
   syncPublishTerminal?(runId: string, session: TerminalSession): Promise<{ ok: boolean; error?: string }>;
   getPublishTerminal?(runId: string): Promise<{ ok: boolean; session: TerminalSession | null; detached: boolean; peers?: TerminalPeer[]; error?: string }>;

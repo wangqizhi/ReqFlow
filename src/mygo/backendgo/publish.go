@@ -94,8 +94,11 @@ type desktopPublishRun struct {
 	mu                                        sync.Mutex
 	start                                     time.Time
 	requestID, project, script, stage, output string
+	root                                      string
 	outputBytes                               int64
 	done                                      bool
+	started, cancelled                        bool
+	cancel                                    context.CancelFunc
 }
 
 func (r *desktopPublishRun) entry(phase, text string, duration any) {
@@ -198,6 +201,25 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		return b.desktopPublishTerminal(channel, args)
 	}
 	switch channel {
+	case "publish:stop":
+		b.desktopPublishMu.Lock()
+		r := b.desktopPublishRuns[desktopText(args, 0)]
+		b.desktopPublishMu.Unlock()
+		if r == nil {
+			return nil, errors.New("发布任务不存在")
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if !r.done {
+			r.cancelled = true
+			if !r.started {
+				r.done = true
+			}
+			if r.cancel != nil {
+				r.cancel()
+			}
+		}
+		return desktopOK(nil), nil
 	case "publish:output":
 		b.desktopPublishMu.Lock()
 		r := b.desktopPublishRuns[desktopText(args, 0)]
@@ -264,9 +286,12 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 			}
 		}
 		return desktopOK(map[string]any{"script": ""}), nil
-	case "publish:run":
+	case "publish:prepare", "publish:run":
 		root, rel := desktopText(args, 0), desktopText(args, 1)
-		r := &desktopPublishRun{b: b, start: time.Now(), requestID: desktopRequestID(), project: filepath.Base(root), script: rel, stage: "执行发布脚本"}
+		if channel == "publish:prepare" && desktopText(args, 2) == "" {
+			return nil, errors.New("发布终端标识无效")
+		}
+		r := &desktopPublishRun{b: b, start: time.Now(), requestID: desktopRequestID(), root: root, project: filepath.Base(root), script: rel, stage: "执行发布脚本"}
 		if id := desktopText(args, 2); id != "" {
 			if !desktopTerminalID.MatchString(id) {
 				return nil, errors.New("发布终端标识无效")
@@ -275,9 +300,15 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 			if b.desktopPublishRuns == nil {
 				b.desktopPublishRuns = make(map[string]*desktopPublishRun)
 			}
-			if b.desktopPublishRuns[id] != nil {
-				b.desktopPublishMu.Unlock()
-				return nil, errors.New("发布终端标识已使用")
+			if previous := b.desktopPublishRuns[id]; previous != nil {
+				previous.mu.Lock()
+				available := channel == "publish:run" && !previous.started && previous.root == root && previous.script == rel
+				previous.mu.Unlock()
+				if !available {
+					b.desktopPublishMu.Unlock()
+					return nil, errors.New("发布终端标识已使用")
+				}
+				r = previous
 			}
 			// Keep recent completed sessions for switching projects and reopening the dock.
 			for key, previous := range b.desktopPublishRuns {
@@ -288,12 +319,22 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 					delete(b.desktopPublishRuns, key)
 				}
 			}
-			if len(b.desktopPublishRuns) >= 20 {
+			if b.desktopPublishRuns[id] == nil && len(b.desktopPublishRuns) >= 20 {
 				b.desktopPublishMu.Unlock()
 				return nil, errors.New("同时执行的发布任务过多")
 			}
 			b.desktopPublishRuns[id] = r
 			b.desktopPublishMu.Unlock()
+			if channel == "publish:prepare" {
+				return desktopOK(nil), nil
+			}
+			r.mu.Lock()
+			if r.started {
+				r.mu.Unlock()
+				return nil, errors.New("发布任务已启动")
+			}
+			r.started = true
+			r.mu.Unlock()
 			defer func() { r.mu.Lock(); r.done = true; r.mu.Unlock() }()
 		}
 		r.entry("request", "开始发布", nil)
@@ -328,6 +369,15 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 		defer cancel()
+		r.mu.Lock()
+		r.cancel = cancel
+		if r.cancelled {
+			cancel()
+		}
+		r.mu.Unlock()
+		if runCtx.Err() != nil {
+			return result(errors.New("发布已中断"))
+		}
 		cmd, e := desktopPublishCommand(runCtx, file)
 		if e != nil {
 			return result(e)
@@ -348,14 +398,19 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 				}
 			}
 		}()
-		e = cmd.Run()
+		// Reuse the provider runner so cancellation kills script child processes too.
+		e = runProviderCommand(cmd)
 		close(done)
 		stdout.r.line(stdout.pending)
 		stderr.r.line(stderr.pending)
-		if runCtx.Err() != nil {
+		r.mu.Lock()
+		cancelled := r.cancelled
+		r.mu.Unlock()
+		if cancelled {
+			e = errors.New("发布已中断")
+		} else if runCtx.Err() != nil {
 			e = errors.New("发布脚本超时或窗口已关闭，已终止")
-		}
-		if e != nil {
+		} else if e != nil {
 			r.mu.Lock()
 			lines := strings.Split(strings.TrimSpace(r.output), "\n")
 			r.mu.Unlock()

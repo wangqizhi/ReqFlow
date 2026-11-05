@@ -39,11 +39,47 @@
   const controlsDragRegion = getComputedStyle(document.querySelector('.window-controls')).getPropertyValue('--app-region').trim();
   const rightGap = innerWidth - document.querySelector('.window-close').getBoundingClientRect().right;
   checks.windowSpacing = { ok: Math.abs(rightGap - 8) < 1, rightGap };
+  const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+  document.body.dispatchEvent(contextEvent);
+  const contextInput = document.createElement('input');
+  document.body.appendChild(contextInput);
+  const inputContextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+  contextInput.dispatchEvent(inputContextEvent);
+  contextInput.remove();
+  checks.nativeContextMenuDisabled = { ok: contextEvent.defaultPrevented && inputContextEvent.defaultPrevented };
   // REQ-138：顶部窗口栏横贯主区整条且为拖动区
   const topBar = document.querySelector('.desktop-app .top');
   checks.topDragStrip = { ok: getComputedStyle(topBar).getPropertyValue('--app-region').trim() === 'drag' && Math.abs(topBar.getBoundingClientRect().width - document.querySelector('.main').getBoundingClientRect().width) < 1 };
 
   if (__REQFLOW_INTERACTIONS__) {
+    const showClose = () => window.dispatchEvent(new CustomEvent('reqflow-close-request', { detail: { tasks: 3 } }));
+    showClose();
+    await waitFor(() => !!document.querySelector('#shutdown-title'));
+    let closeDialog = document.querySelector('#shutdown-title').closest('[role="dialog"]');
+    checks.shutdownDialog = { ok: closeDialog.classList.contains('update-confirm-overlay') && closeDialog.textContent.includes('运行记录会保留') && document.activeElement.textContent === '取消' };
+    await click([...closeDialog.querySelectorAll('button')].find(el => el.textContent === '取消'));
+    checks.shutdownDialog.ok &&= !document.querySelector('#shutdown-title');
+    showClose();
+    await waitFor(() => !!document.querySelector('#shutdown-title'));
+    closeDialog = document.querySelector('#shutdown-title').closest('[role="dialog"]');
+    closeDialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !document.querySelector('#shutdown-title'));
+    const control = window.reqflow.windowControl;
+    let confirmations = 0, finishClose;
+    window.reqflow.windowControl = async action => {
+      if (action === 'confirmClose') { confirmations++; await new Promise(resolve => { finishClose = resolve; }); }
+    };
+    showClose();
+    await waitFor(() => !!document.querySelector('#shutdown-title'));
+    closeDialog = document.querySelector('#shutdown-title').closest('[role="dialog"]');
+    await click([...closeDialog.querySelectorAll('button')].find(el => el.textContent === '仍然关闭'));
+    checks.shutdownDialog.ok &&= confirmations === 1 && [...closeDialog.querySelectorAll('button')].every(el => el.disabled);
+    finishClose();
+    window.reqflow.windowControl = control;
+    window.dispatchEvent(new CustomEvent('reqflow-close-request', { detail: { error: '关闭检查失败，请重试' } }));
+    await waitFor(() => !!button('知道了'));
+    checks.shutdownDialog.ok &&= !button('仍然关闭');
+    await click(button('知道了'));
     const footer = document.querySelector('.side-foot');
     const originalProject = document.querySelector('.main h1').textContent;
     const initialProject = document.querySelector('.side-project[role="button"].active') || document.querySelector('.side-project[role="button"]');
@@ -414,6 +450,16 @@
     const publishTabButton = () => [...document.querySelectorAll('.terminal-tab')].find(el => el.textContent.startsWith('发布'));
     checks.terminalImmediate = { ok: !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     checks.terminalPublishTabOnDemand = { ok: !publishTabPanel() && !publishTabButton() };
+    // Cancel a real script from the product button, then retry successfully below.
+    await waitFor(() => button('发布') && !button('发布').disabled);
+    await click(button('发布'));
+    await waitFor(() => publishTabPanel()?.querySelector('.xterm')?.textContent.includes('stream-first'));
+    const cancelledRunId = publishTabPanel().querySelector('.publish-terminal').dataset.runId;
+    await click(button('中断发布'));
+    await waitFor(() => !!button('发布'));
+    await waitFor(() => publishTabPanel()?.querySelector('.xterm')?.textContent.includes('发布已中断'));
+    const cancelledOutput = await window.reqflow.getPublishOutput(cancelledRunId, 0);
+    checks.publishCancellation = { ok: cancelledOutput.done && !publishTabPanel().querySelector('.xterm').textContent.includes('stream-last') && !document.querySelector('.publish-dialog') };
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
     await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
@@ -430,6 +476,10 @@
     checks.terminalCollapseFallback = { ok: !document.querySelector('.terminal-tab-panel') && !!document.querySelector('.terminal-collapsed-bar') };
     await click(document.querySelector('.publish-terminal-reopen'));
     await waitFor(() => !!publishTabButton());
+    // Reopening while publishing selects the publish tab. Open PowerShell too
+    // before checking that detaching publish falls back to another open tab.
+    await click([...document.querySelectorAll('.terminal-tab')].find(el => el.textContent === 'PowerShell'));
+    await waitFor(() => !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm'));
     await click(publishTabButton());
     await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     const dockHeight = document.querySelector('.main').getBoundingClientRect().height;
@@ -441,12 +491,15 @@
     await waitFor(() => !!publishTabPanel()?.querySelector('.publish-terminal'));
     checks.terminalReattached = { ok: !button('终端') && !!document.querySelector('.terminal-elapsed') };
     await click(publishTabPanel().querySelector('[aria-label="收起终端"]'));
-    checks.terminalCollapse = { ok: !publishTabPanel() && document.querySelectorAll('.publish-terminal-reopen').length === 1 };
+    checks.terminalCollapse = { ok: !publishTabPanel() && [...document.querySelectorAll('.publish-terminal-reopen')].map(el => el.textContent).join('|') === '终端|发布输出' };
     await terminalSetting(false);
     await terminalSetting(true);
     await waitFor(() => !!document.querySelector('.publish-terminal-reopen'));
     checks.terminalReenable = { ok: !document.querySelector('.publish-terminal') };
     // REQ-258：重新展开默认回到 PowerShell，再切「发布」页签查看输出
+    // While a script is running the product intentionally opens its publish tab.
+    // Wait for completion rather than relying on the duration of the toggle steps.
+    await waitFor(() => !!button('发布'));
     await click(document.querySelector('.publish-terminal-reopen'));
     await waitFor(() => !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm'));
     await waitFor(() => !!publishTabButton());

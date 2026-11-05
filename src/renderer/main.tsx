@@ -5,6 +5,7 @@ import { BrowserWindow } from './browser-window';
 import { TerminalWindow } from './publish-terminal';
 import './styles.css';
 import { installDraggableOverlays } from './draggable-overlays';
+import { ShutdownDialog } from './shutdown';
 installDraggableOverlays();
 
 const params = new URLSearchParams(location.search);
@@ -17,6 +18,6 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {browserProjectId ? <BrowserWindow id={browserProjectId} /> : terminalRunId
       ? <TerminalWindow runId={terminalRunId} project={terminalProject} agent={terminalAgent} />
-      : <App />}
+      : <><App /><ShutdownDialog /></>}
   </StrictMode>
 );

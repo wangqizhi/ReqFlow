@@ -14,6 +14,7 @@ import (
 	"reqflow/mygo/backendgo"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -182,28 +183,44 @@ func run() (int, error) {
 	backend.StartServerAgents()
 	defer backend.StopServerAgents()
 	shutdownApproved := reportPath != ""
-	native.prepareClose = func() bool {
-		var approved bool
-		if backend.UpdateInstallConfirmed() {
-			mygo.RunOnMain(func() {
-				shutdownApproved = true
-				backend.BeginShutdown()
-			})
-			return true
+	var checkingClose atomic.Bool
+	requestClose := func(confirmed bool) {
+		if !checkingClose.CompareAndSwap(false, true) {
+			return
 		}
-		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {
-			showStartupError("此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。")
-			return false
-		}
-		mygo.RunOnMain(func() {
-			approved = prepareShutdown(backend.Workspace)
-			if approved {
-				backend.BeginShutdown()
+		go func() {
+			defer checkingClose.Store(false)
+			detail := map[string]any{}
+			other := otherDesktopInstance(backend.Workspace.DataFile())
+			if other && backend.HasRunningAgentTasks() {
+				detail["error"] = "此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。"
+			} else if !confirmed && !other {
+				actions, err := backend.Workspace.ActiveExecutionActions()
+				if err != nil {
+					detail["error"] = "无法检查执行中任务，已取消关闭：" + err.Error()
+				} else if len(actions) > 0 {
+					detail["tasks"] = len(actions)
+				}
 			}
-			shutdownApproved = approved
-		})
-		return approved
+			if len(detail) == 0 {
+				mygo.RunOnMain(func() {
+					shutdownApproved = true
+					backend.BeginShutdown()
+				})
+				mygo.App.Quit()
+				return
+			}
+			if w := native.window.Load(); w != nil {
+				raw, _ := json.Marshal(detail)
+				w.Show()
+				w.Focus()
+				if _, err := w.Page().Eval("window.dispatchEvent(new CustomEvent('reqflow-close-request', {detail:" + string(raw) + "}))"); err != nil {
+					log.Printf("显示关闭确认失败：%v", err)
+				}
+			}
+		}()
 	}
+	native.confirmClose = func() { requestClose(true) }
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
 		// The smoke runner uses an isolated workspace and must report failures without
 		// waiting for an interactive shutdown confirmation over its fixture claims.
@@ -220,18 +237,8 @@ func run() (int, error) {
 			backend.BeginShutdown()
 			return
 		}
-		if otherDesktopInstance(backend.Workspace.DataFile()) && backend.HasRunningAgentTasks() {
-			e.PreventDefault()
-			showStartupError("此窗口承载正在执行的 Agent 终端，请关闭另一个空闲窗口，或等待任务完成后关闭。")
-			return
-		}
-		shutdownApproved = prepareShutdown(backend.Workspace)
-		if shutdownApproved {
-			backend.BeginShutdown()
-		}
-		if !shutdownApproved {
-			e.PreventDefault()
-		}
+		e.PreventDefault()
+		requestClose(false)
 	})
 	mygo.App.WhenReady(func() {
 		// REQ-144：多屏环境下按鼠标所在屏幕居中启动（省略 X/Y 时 mygo 固定在主屏居中）
@@ -239,7 +246,7 @@ func run() (int, error) {
 		area := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint()).WorkArea
 		w := mygo.NewWindow(mygo.WindowOptions{Title: "ReqFlow · 需求流", Width: windowWidth, Height: windowHeight,
 			X: area.X + (area.Width-windowWidth)/2, Y: area.Y + (area.Height-windowHeight)/2,
-			Frameless: true, DisableResize: true, DisableMaximize: true, URL: "/", BackgroundColor: "#f5f4f1", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+			Frameless: true, DisableResize: true, DisableMaximize: true, URL: "/", BackgroundColor: "#f5f4f1", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled, PreloadScript: desktopPreload}})
 		if icon, e := fs.ReadFile(assets, "app-icon.png"); e == nil {
 			_ = w.SetIcon(icon)
 		}
