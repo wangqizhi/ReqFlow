@@ -198,7 +198,7 @@ func TestAIRequirementsChannelUsesGoWorkspace(t *testing.T) {
 
 func TestAIRequirementChatReplyFormats(t *testing.T) {
 	const markdown = "### 讨论要点\n\n- **保留**候选需求"
-	const candidate = `{"reply":"## 已整理","items":[{"id":"candidate-1","title":"标题","body":"内容含有 { 和 }","type":"feature","priority":"P1","criteria":[]}]}`
+	const candidate = `{"reply":"## 已整理","items":[{"title":"标题","body":"内容含有 { 和 }","type":"feature","priority":"P1","criteria":[]}]}`
 	for _, tc := range []struct {
 		name, input, reply string
 		items              int // -1 means retain existing drafts.
@@ -220,8 +220,6 @@ func TestAIRequirementChatReplyFormats(t *testing.T) {
 				}
 			} else if items, ok := result["items"].([]any); !ok || len(items) != tc.items {
 				t.Fatalf("unexpected candidates: %v", result)
-			} else if len(items) > 0 && aiMap(items[0])["id"] != "candidate-1" {
-				t.Fatalf("candidate ID was lost: %v", items[0])
 			}
 		})
 	}
@@ -232,6 +230,11 @@ func TestAIRequirementChatReplyFormats(t *testing.T) {
 		if _, err := parseRequirementReply(input, true); err == nil {
 			t.Fatal("invalid candidate response accepted")
 		}
+	}
+	drafts := []any{map[string]any{"id": "existing"}}
+	result, err := parseRequirementResponse(`{"reply":"继续讨论","items":[]}`, true, drafts)
+	if err != nil || len(aiArray(result["items"])) != 1 || aiMap(aiArray(result["items"])[0])["id"] != "existing" {
+		t.Fatalf("empty legacy response discarded an existing draft: %v, %v", result, err)
 	}
 }
 
@@ -292,6 +295,83 @@ func TestAIRequirementChatSendsImagesAndRetainsDrafts(t *testing.T) {
 			args[4] = []any{"data:image/png;base64,SGVsbG8="}
 			if _, _, err := b.InvokeAI("ai:requirements", args); err == nil {
 				t.Fatal("accepted non-image attachment")
+			}
+		})
+	}
+}
+
+func TestAIRequirementChatToolPatchesDrafts(t *testing.T) {
+	const argsJSON = `{"reply":"已补充验收条件","changes":[{"action":"update","id":"draft-1","criteria":["可重试"]},{"action":"list"},{"action":"create","title":"新增","body":"新的正文","type":"feature","priority":"P1","criteria":[]}]}`
+	const reasoning = "先检查候选需求的验收条件"
+	for _, format := range []string{"openai", "anthropic", "fallback"} {
+		t.Run(format, func(t *testing.T) {
+			b := aiTestBackend(t)
+			workspace, err := b.Workspace.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			project := aiMap(aiArray(aiMap(workspace["state"])["projects"])[0])
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var payload map[string]any
+				_ = json.NewDecoder(req.Body).Decode(&payload)
+				tools := aiArray(payload["tools"])
+				if format == "anthropic" {
+					if len(tools) != 1 || aiMap(tools[0])["name"] != aiRequirementToolName {
+						t.Error("expected Anthropic tool")
+					}
+					var input any
+					_ = json.Unmarshal([]byte(argsJSON), &input)
+					_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{
+						map[string]any{"type": "thinking", "thinking": reasoning},
+						map[string]any{"type": "tool_use", "name": aiRequirementToolName, "input": input},
+					}})
+					return
+				}
+				if format == "fallback" && len(tools) > 0 {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				message := map[string]any{"reasoning_content": reasoning}
+				if format == "fallback" {
+					messages := aiArray(payload["messages"])
+					if !strings.Contains(aiString(aiMap(messages[0])["content"]), "当前连接通过 JSON 调用工具") {
+						t.Error("missing JSON fallback instructions")
+					}
+					message["content"] = `{"tool":"edit_requirement_drafts","arguments":` + argsJSON + `}`
+				} else {
+					if len(tools) != 1 || aiMap(aiMap(tools[0])["function"])["name"] != aiRequirementToolName {
+						t.Error("expected OpenAI tool")
+					}
+					message["tool_calls"] = []any{map[string]any{"function": map[string]any{"name": aiRequirementToolName, "arguments": argsJSON}}}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}})
+			}))
+			defer server.Close()
+			settings := aiTestSettings(server.URL)
+			if format == "anthropic" {
+				settings["format"] = format
+			}
+			if _, err = b.saveAISettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			old := map[string]any{"id": "draft-1", "title": "原题", "body": "原文", "type": "bug", "priority": "P0", "criteria": []any{}}
+			drafts := []any{old, map[string]any{"id": "draft-2"}, map[string]any{"id": "untouched"}}
+			value, handled, err := b.InvokeAI("ai:requirements", []any{project["id"], "chat", "更新候选", []any{}, nil, "", drafts})
+			result := aiMap(value)
+			items := aiArray(result["items"])
+			if err != nil || !handled || result["reply"] != "已补充验收条件" || result["reasoning"] != reasoning || len(items) != 4 {
+				t.Fatalf("tool response: %v, %v", result, err)
+			}
+			updated := aiMap(items[0])
+			if updated["id"] != "draft-1" || updated["body"] != "原文" || aiArray(updated["criteria"])[0] != "可重试" ||
+				aiMap(items[1])["id"] != "draft-2" || aiMap(items[2])["id"] != "untouched" || aiMap(items[3])["title"] != "新增" || len(aiArray(old["criteria"])) != 0 {
+				t.Fatal(items)
+			}
+			if traces, ok := result["toolCalls"].([]map[string]any); !ok || len(traces) != 1 || traces[0]["name"] != aiRequirementToolName {
+				t.Fatalf("missing tool call trace: %v", result["toolCalls"])
+			}
+			if _, err := applyAIRequirementChanges(drafts, []any{map[string]any{"action": "remove", "id": "draft-1"}}); err == nil {
+				t.Fatal("accepted a candidate removal")
 			}
 		})
 	}

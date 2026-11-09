@@ -178,6 +178,11 @@ export default function App() {
   const [terminalSettingEnabled] = useTerminalSetting();
   const [publishStates, setPublishStates] = useState<Record<string, PublishSession & { idle?: boolean; resultDismissed?: boolean; terminalRunId?: string; terminalOpen?: boolean; terminalProject?: string; canStop?: boolean; stopping?: boolean }>>({});
   const publishControllers = useRef(new Map<string, AbortController>());
+  useEffect(() => {
+    const stop = () => { for (const controller of publishControllers.current.values()) controller.abort(); };
+    window.addEventListener('reqflow-stop-publish-for-close', stop);
+    return () => window.removeEventListener('reqflow-stop-publish-for-close', stop);
+  }, []);
   const [terminalTabs, setTerminalTabs] = useState<Record<string, string>>({});
   const [shellSessions, setShellSessions] = useState<Record<string, { runId: string; open: boolean; done: boolean }>>({});
   const [detachedTerminals, setDetachedTerminals] = useState<Record<string, boolean>>({});

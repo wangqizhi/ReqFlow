@@ -29,11 +29,12 @@ type Backend struct {
 	desktopLogMu                                           sync.Mutex
 	desktopLogPending                                      []any
 	desktopPublishMu                                       sync.Mutex
+	desktopPublishClosing                                  bool
 	desktopPublishRuns                                     map[string]*desktopPublishRun
 	desktopTerminalSessions                                map[string]publishTerminalSession
 	desktopUpdateMu                                        sync.Mutex
 	desktopUpdate                                          map[string]any
-	desktopUpdateConfirmed                                 bool // REQ-285：本次更新流程已确认忽略执行中任务
+	desktopUpdateConfirmed                                 bool // 应用内更新已开始关闭窗口
 	desktopAsset                                           map[string]any
 	desktopChecksum, desktopInstaller, desktopExpectedHash string
 	desktopUpdateBusy                                      bool
@@ -330,9 +331,12 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 	case "terminal:clipboard:read":
 		text, err := desktopNative(b, "terminal.clipboard.read")
 		return desktopOK(map[string]any{"text": text}), err
+	case "terminal:clipboard:write":
+		_, err := desktopNative(b, "terminal.clipboard.write", desktopText(args, 0))
+		return desktopOK(nil), err
 	case "window:control":
 		action := desktopText(args, 0)
-		if action != "minimize" && action != "close" && action != "confirmClose" {
+		if action != "minimize" && action != "close" && action != "confirmClose" && action != "confirmStopPublish" {
 			return nil, errors.New("窗口操作无效")
 		}
 		return desktopNative(b, "window."+action)

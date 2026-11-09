@@ -3,6 +3,9 @@ import type { Terminal } from '@xterm/xterm';
 import { bridge } from './api';
 
 async function copyText(text: string) {
+  try {
+    if ((await bridge.writeTerminalClipboard?.(text))?.ok) return true;
+  } catch { /* Use the WebView fallback below. */ }
   try { await navigator.clipboard.writeText(text); return true; } catch { /* Use the WebView fallback below. */ }
   const focus = document.activeElement;
   const helper = document.createElement('textarea');
@@ -22,6 +25,18 @@ async function copyText(text: string) {
   }
 }
 
+function visibleTerminalText(terminal: Terminal) {
+  const buffer = terminal.buffer.active;
+  let text = '';
+  const end = Math.min(buffer.viewportY + terminal.rows, buffer.length);
+  for (let row = buffer.viewportY; row < end; row++) {
+    const line = buffer.getLine(row);
+    if (row > buffer.viewportY && !line?.isWrapped) text += '\n';
+    text += line?.translateToString(row + 1 >= end || !buffer.getLine(row + 1)?.isWrapped) || '';
+  }
+  return text.trimEnd();
+}
+
 export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
   const [message, setMessage] = useState('');
   const messageTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -33,8 +48,8 @@ export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
   }
   useEffect(() => () => clearTimeout(messageTimer.current), []);
 
-  async function copy(text: string) {
-    if (text) notify(await copyText(text) ? '已复制选中内容' : '复制失败，请重试');
+  async function copy(text: string, success = '已复制选中内容') {
+    if (text) notify(await copyText(text) ? success : '复制失败，请重试');
   }
 
   async function paste(terminal: Terminal) {
@@ -53,17 +68,15 @@ export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
   function onContextMenu(event: MouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
+    const region = event.currentTarget;
     const terminal = xterm?.current;
-    if (terminal && terminal.element?.contains(event.target as Node)) {
-      const text = terminal.getSelection();
-      if (text) void copy(text);
-      else void paste(terminal);
-      return;
-    }
     const selection = window.getSelection();
-    if (selection && event.currentTarget.contains(selection.anchorNode) && event.currentTarget.contains(selection.focusNode)) {
-      void copy(selection.toString());
-    }
+    const domSelection = selection && region.contains(selection.anchorNode) && region.contains(selection.focusNode) ? selection.toString() : '';
+    const history = region.querySelector<HTMLElement>('.agent-history-view:not([hidden])');
+    const selected = domSelection || (!history ? terminal?.getSelection() : '') || '';
+    const text = selected || (history ? history.innerText : terminal ? visibleTerminalText(terminal) : region.innerText);
+    if (text) void copy(text, selected ? '已复制选中内容' : '已复制终端输出');
+    else notify('暂无可复制的终端输出');
   }
 
   function bind(terminal: Terminal) {

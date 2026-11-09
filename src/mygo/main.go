@@ -64,16 +64,6 @@ func run() (int, error) {
 		return 1, err
 	}
 	args := os.Args[1:]
-	if len(args) >= 2 && args[0] == "--prepare-install" {
-		// REQ-285：应用内更新已确认忽略执行中任务，安装器传入 --confirmed 时不再重复提示。
-		if len(args) > 2 && args[2] == "--confirmed" {
-			return 0, nil
-		}
-		if prepareShutdown(backendgo.NewWorkspaceService(args[1])) {
-			return 0, nil
-		}
-		return 2, nil
-	}
 	if len(args) > 0 && args[0] == "--cli" {
 		return backendgo.RunCLI(args[1:], appVersion, dataDir, os.Stdout), nil
 	}
@@ -184,7 +174,7 @@ func run() (int, error) {
 	defer backend.StopServerAgents()
 	shutdownApproved := reportPath != ""
 	var checkingClose atomic.Bool
-	requestClose := func(confirmed bool) {
+	requestClose := func(confirmed, stopPublish bool) {
 		if !checkingClose.CompareAndSwap(false, true) {
 			return
 		}
@@ -203,12 +193,24 @@ func run() (int, error) {
 				}
 			}
 			if len(detail) == 0 {
-				mygo.RunOnMain(func() {
-					shutdownApproved = true
-					backend.BeginShutdown()
-				})
-				mygo.App.Quit()
-				return
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				publishes, err := backend.PreparePublishShutdown(ctx, stopPublish)
+				cancel()
+				switch {
+				case err != nil:
+					detail["error"] = err.Error()
+				case publishes > 0:
+					detail["publishes"] = publishes
+				default:
+					mygo.RunOnMain(func() {
+						shutdownApproved = true
+						backend.BeginShutdown()
+					})
+					mygo.App.Quit()
+					return
+				}
+			} else if detail["tasks"] != nil {
+				detail["publishes"] = backend.ActivePublishes()
 			}
 			if w := native.window.Load(); w != nil {
 				raw, _ := json.Marshal(detail)
@@ -220,7 +222,7 @@ func run() (int, error) {
 			}
 		}()
 	}
-	native.confirmClose = func() { requestClose(true) }
+	native.confirmClose = func(stopPublish bool) { requestClose(true, stopPublish) }
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
 		// The smoke runner uses an isolated workspace and must report failures without
 		// waiting for an interactive shutdown confirmation over its fixture claims.
@@ -238,7 +240,7 @@ func run() (int, error) {
 			return
 		}
 		e.PreventDefault()
-		requestClose(false)
+		requestClose(false, false)
 	})
 	mygo.App.WhenReady(func() {
 		// REQ-144：多屏环境下按鼠标所在屏幕居中启动（省略 X/Y 时 mygo 固定在主屏居中）

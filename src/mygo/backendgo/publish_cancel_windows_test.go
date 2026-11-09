@@ -52,7 +52,18 @@ func TestPublishCancellationKillsScriptTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(handle)
-	desktopTestCall(t, b, "publish:stop", id)
+	if count, err := b.PreparePublishShutdown(ctx, false); count != 1 || err != nil {
+		t.Fatalf("closing should ask about one publish: %d, %v", count, err)
+	}
+	if state, err := windows.WaitForSingleObject(handle, 0); err != nil || state != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatalf("the close check stopped the child before confirmation: %d, %v", state, err)
+	}
+	if count, err := b.PreparePublishShutdown(ctx, true); count != 0 || err != nil {
+		t.Fatalf("confirmed shutdown failed to stop publishes: %d, %v", count, err)
+	}
+	if _, err := b.desktopPublish(ctx, "publish:prepare", []any{root, "publish.ps1", coreUUID()}); err == nil {
+		t.Fatal("new publish was accepted while closing")
+	}
 	select {
 	case result := <-done:
 		if result["ok"] != false || result["error"] != "发布已中断" {

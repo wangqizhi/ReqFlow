@@ -6,7 +6,7 @@
 
 Var AppKillCount
 Var AppWritable
-; REQ-284/285：应用内更新已确认忽略执行中任务时由安装器静默关闭实例，不再询问。
+; 应用内更新由当前窗口发起，安装器可直接关闭仍占用安装目录的旧实例。
 Var UpdateConfirmed
 
 ; 终止所有可执行文件完整路径等于 $0 的进程，命中数写入 $AppKillCount。

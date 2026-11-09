@@ -11,6 +11,8 @@ import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remot
 import type { UpdateState } from '../core/update';
 import type { PublishLogSettings, PublishRequestLog } from '../core/publish-log';
 
+export type AIRequirementToolCall = { name: string; operations: ('create' | 'update' | 'list')[] };
+
 export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
   | { ok: false; error: string; code?: string };
@@ -105,13 +107,14 @@ export interface ReqFlowBridge {
   /** 安装界面强制重新检测最新版本（REQ-257）：已下载的安装包不短路，可直接发现更新的版本。 */
   recheckUpdate?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;
-  installUpdate?(confirmed?: boolean): Promise<UpdateState>;
+  installUpdate?(): Promise<UpdateState>;
   openProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   closeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   maximizeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
-  windowControl?(action: 'minimize' | 'close' | 'confirmClose'): Promise<void>;
+  windowControl?(action: 'minimize' | 'close' | 'confirmClose' | 'confirmStopPublish'): Promise<void>;
   readTerminalClipboard?(): Promise<{ ok: boolean; text?: string; error?: string }>;
-  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[]): Promise<{ ok: boolean; reply?: string; items?: (AIDraft & { id?: string })[] | null; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
+  writeTerminalClipboard?(text: string): Promise<{ ok: boolean; error?: string }>;
+  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[]): Promise<{ ok: boolean; reply?: string; reasoning?: string; toolCalls?: AIRequirementToolCall[]; items?: (AIDraft & { id?: string })[] | null; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
   gitPush?(root: string): Promise<GitOpResult>;
   gitPull?(root: string): Promise<GitOpResult>;
   getBackupSettings?(): Promise<{ ok: boolean; settings: BackupSettings; status: BackupStatus }>;

@@ -99,6 +99,80 @@ type desktopPublishRun struct {
 	done                                      bool
 	started, cancelled                        bool
 	cancel                                    context.CancelFunc
+	finished                                  chan struct{}
+}
+
+func (r *desktopPublishRun) stop() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.done {
+		return nil
+	}
+	r.cancelled = true
+	if !r.started {
+		r.done = true
+	}
+	if r.cancel != nil {
+		r.cancel()
+	}
+	return r.finished
+}
+
+func (b *Backend) activePublishesLocked() int {
+	active := 0
+	for _, run := range b.desktopPublishRuns {
+		run.mu.Lock()
+		if !run.done {
+			active++
+		}
+		run.mu.Unlock()
+	}
+	for id, session := range b.desktopTerminalSessions {
+		if b.desktopPublishRuns[id] == nil && session.Running {
+			active++
+		}
+	}
+	return active
+}
+
+func (b *Backend) ActivePublishes() int {
+	b.desktopPublishMu.Lock()
+	defer b.desktopPublishMu.Unlock()
+	return b.activePublishesLocked()
+}
+
+// PreparePublishShutdown checks and fences publish starts in the same critical
+// section, then waits for cancelled scripts and their log writes to finish.
+func (b *Backend) PreparePublishShutdown(ctx context.Context, stop bool) (int, error) {
+	b.desktopPublishMu.Lock()
+	count := b.activePublishesLocked()
+	if count > 0 && !stop {
+		b.desktopPublishMu.Unlock()
+		return count, nil
+	}
+	b.desktopPublishClosing = true
+	var pending []<-chan struct{}
+	for _, run := range b.desktopPublishRuns {
+		if done := run.stop(); done != nil {
+			pending = append(pending, done)
+		}
+	}
+	b.desktopPublishMu.Unlock()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			b.resumePublishStarts()
+			return 0, errors.New("等待发布脚本退出超时，请稍后重试")
+		}
+	}
+	return 0, nil
+}
+
+func (b *Backend) resumePublishStarts() {
+	b.desktopPublishMu.Lock()
+	b.desktopPublishClosing = false
+	b.desktopPublishMu.Unlock()
 }
 
 func (r *desktopPublishRun) entry(phase, text string, duration any) {
@@ -208,17 +282,7 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		if r == nil {
 			return nil, errors.New("发布任务不存在")
 		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if !r.done {
-			r.cancelled = true
-			if !r.started {
-				r.done = true
-			}
-			if r.cancel != nil {
-				r.cancel()
-			}
-		}
+		r.stop()
 		return desktopOK(nil), nil
 	case "publish:output":
 		b.desktopPublishMu.Lock()
@@ -288,55 +352,61 @@ func (b *Backend) desktopPublish(ctx context.Context, channel string, args []any
 		return desktopOK(map[string]any{"script": ""}), nil
 	case "publish:prepare", "publish:run":
 		root, rel := desktopText(args, 0), desktopText(args, 1)
-		if channel == "publish:prepare" && desktopText(args, 2) == "" {
+		id := desktopText(args, 2)
+		if id == "" && channel == "publish:run" {
+			id = coreUUID()
+		}
+		if !desktopTerminalID.MatchString(id) {
 			return nil, errors.New("发布终端标识无效")
 		}
 		r := &desktopPublishRun{b: b, start: time.Now(), requestID: desktopRequestID(), root: root, project: filepath.Base(root), script: rel, stage: "执行发布脚本"}
-		if id := desktopText(args, 2); id != "" {
-			if !desktopTerminalID.MatchString(id) {
-				return nil, errors.New("发布终端标识无效")
-			}
-			b.desktopPublishMu.Lock()
-			if b.desktopPublishRuns == nil {
-				b.desktopPublishRuns = make(map[string]*desktopPublishRun)
-			}
-			if previous := b.desktopPublishRuns[id]; previous != nil {
-				previous.mu.Lock()
-				available := channel == "publish:run" && !previous.started && previous.root == root && previous.script == rel
-				previous.mu.Unlock()
-				if !available {
-					b.desktopPublishMu.Unlock()
-					return nil, errors.New("发布终端标识已使用")
-				}
-				r = previous
-			}
-			// Keep recent completed sessions for switching projects and reopening the dock.
-			for key, previous := range b.desktopPublishRuns {
-				previous.mu.Lock()
-				remove := previous.done && (time.Since(previous.start) > 30*time.Minute || len(b.desktopPublishRuns) >= 20)
-				previous.mu.Unlock()
-				if remove {
-					delete(b.desktopPublishRuns, key)
-				}
-			}
-			if b.desktopPublishRuns[id] == nil && len(b.desktopPublishRuns) >= 20 {
-				b.desktopPublishMu.Unlock()
-				return nil, errors.New("同时执行的发布任务过多")
-			}
-			b.desktopPublishRuns[id] = r
+		b.desktopPublishMu.Lock()
+		if b.desktopPublishClosing {
 			b.desktopPublishMu.Unlock()
-			if channel == "publish:prepare" {
-				return desktopOK(nil), nil
-			}
-			r.mu.Lock()
-			if r.started {
-				r.mu.Unlock()
-				return nil, errors.New("发布任务已启动")
-			}
-			r.started = true
-			r.mu.Unlock()
-			defer func() { r.mu.Lock(); r.done = true; r.mu.Unlock() }()
+			return nil, errors.New("ReqFlow 正在关闭，发布已中断")
 		}
+		if b.desktopPublishRuns == nil {
+			b.desktopPublishRuns = make(map[string]*desktopPublishRun)
+		}
+		if previous := b.desktopPublishRuns[id]; previous != nil {
+			previous.mu.Lock()
+			available := channel == "publish:run" && !previous.started && previous.root == root && previous.script == rel
+			previous.mu.Unlock()
+			if !available {
+				b.desktopPublishMu.Unlock()
+				return nil, errors.New("发布终端标识已使用")
+			}
+			r = previous
+		}
+		// Keep recent completed sessions for switching projects and reopening the dock.
+		for key, previous := range b.desktopPublishRuns {
+			previous.mu.Lock()
+			remove := previous.done && (time.Since(previous.start) > 30*time.Minute || len(b.desktopPublishRuns) >= 20)
+			previous.mu.Unlock()
+			if remove {
+				delete(b.desktopPublishRuns, key)
+			}
+		}
+		if b.desktopPublishRuns[id] == nil && len(b.desktopPublishRuns) >= 20 {
+			b.desktopPublishMu.Unlock()
+			return nil, errors.New("同时执行的发布任务过多")
+		}
+		b.desktopPublishRuns[id] = r
+		if channel == "publish:prepare" {
+			b.desktopPublishMu.Unlock()
+			return desktopOK(nil), nil
+		}
+		r.mu.Lock()
+		r.started = true
+		r.finished = make(chan struct{})
+		r.mu.Unlock()
+		b.desktopPublishMu.Unlock()
+		defer func() {
+			r.mu.Lock()
+			r.done = true
+			close(r.finished)
+			r.mu.Unlock()
+		}()
 		r.entry("request", "开始发布", nil)
 		defer func() { _, _ = b.desktopFlushLogs() }()
 		result := func(e error) (any, error) {

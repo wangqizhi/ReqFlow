@@ -61,7 +61,7 @@ func claimUpdateTask(t *testing.T, b *Backend) {
 	}
 }
 
-func TestUpdateInstallConfirmsRunningTasksOnce(t *testing.T) {
+func TestUpdateInstallSkipsRunningTaskCheck(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBackend(dir, dir, "9.9.8")
 	calls := prepareUpdateFixture(t, b)
@@ -72,25 +72,8 @@ func TestUpdateInstallConfirmsRunningTasksOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := desktopMap(result)
-	if desktopString(state["phase"]) != "ready" || coreNum(state["confirmTasks"]) != 1 {
-		t.Fatalf("install must ask for confirmation first: %v", state)
-	}
-	if b.UpdateInstallConfirmed() {
-		t.Fatal("asking for confirmation must not mark the flow confirmed")
-	}
-	select {
-	case call := <-calls:
-		t.Fatalf("installer must not start before confirmation: %v", call)
-	default:
-	}
-
-	result, err = b.desktopUpdater(context.Background(), "update:install", []any{true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	state = desktopMap(result)
 	if desktopString(state["phase"]) != "installing" || desktopString(state["step"]) == "" {
-		t.Fatalf("confirmed install must enter installing state: %v", state)
+		t.Fatalf("install must proceed with a running task: %v", state)
 	}
 	if !b.UpdateInstallConfirmed() {
 		t.Fatal("confirmation must be remembered for this update flow")
@@ -116,15 +99,8 @@ func TestUpdateInstallConfirmsRunningTasksOnce(t *testing.T) {
 		}
 	}
 
-	// REQ-285：同一更新流程内再次进入安装不再检测任务或弹窗。
-	b.desktopUpdateSet(map[string]any{"phase": "ready", "version": "9.9.9", "progress": 100})
-	result, err = b.desktopUpdater(context.Background(), "update:install", []any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	state = desktopMap(result)
-	if desktopString(state["phase"]) != "installing" || state["confirmTasks"] != nil {
-		t.Fatalf("confirmed update flow must not prompt again: %v", state)
+	if actions, err := b.Workspace.ActiveExecutionActions(); err != nil || len(actions) != 1 {
+		t.Fatalf("install must preserve the task claim: %v, %v", actions, err)
 	}
 }
 

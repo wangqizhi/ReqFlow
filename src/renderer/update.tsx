@@ -8,8 +8,6 @@ export function UpdateButton() {
   const locked = useRef(false);
   const [pending, setPending] = useState(false);
   const [rechecking, setRechecking] = useState(false);
-  // REQ-283：安装前检测到执行中任务时，先显示一次确认，不直接进入安装流程。
-  const [confirmTasks, setConfirmTasks] = useState<number | null>(null);
   useEffect(() => {
     if (!bridge.checkUpdate || !bridge.updateState) return;
     let alive = true;
@@ -18,22 +16,13 @@ export function UpdateButton() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   const working = pending || rechecking || ['checking', 'downloading', 'installing'].includes(state.phase);
-  // REQ-284/287：确认继续后由安装流程自行启动安装器并关闭应用，界面持续显示当前阶段。
-  const install = async (confirmed: boolean) => {
+  const install = async () => {
     if (locked.current || !bridge.installUpdate) return;
     locked.current = true;
     setPending(true);
     try {
-      const next = await bridge.installUpdate(confirmed);
-      if (typeof next.confirmTasks === 'number' && next.confirmTasks > 0) {
-        setConfirmTasks(next.confirmTasks);
-        setState(previous => ({ ...previous, phase: 'ready', confirmTasks: undefined, step: undefined }));
-      } else {
-        setConfirmTasks(null);
-        setState(next);
-      }
+      setState(await bridge.installUpdate());
     } catch (error: any) {
-      setConfirmTasks(null);
       setState({ phase: 'error', error: error.message || '安装失败，请重试', retry: 'install' });
     } finally {
       locked.current = false;
@@ -43,7 +32,7 @@ export function UpdateButton() {
   const action = async () => {
     if (locked.current || working) return;
     if (state.phase === 'ready' || (state.phase === 'error' && state.retry === 'install')) {
-      await install(false);
+      await install();
       return;
     }
     const method = state.phase === 'available' || (state.phase === 'error' && state.retry === 'download') ? bridge.downloadUpdate : bridge.checkUpdate;
@@ -75,8 +64,7 @@ export function UpdateButton() {
       {state.phase === 'latest' ? <span className="update-dot" /> : <RefreshCw size={15} className={state.phase === 'checking' ? 'update-spinning' : ''} />}
     </button>
   </div>;
-  return <>
-    <div className="update-control expanded">
+  return <div className="update-control expanded">
       {state.phase === 'ready'
         // REQ-257：安装按钮宽度减半，同行提供重新检测，可直接下载更新的版本
         ? <div className="update-ready-row">
@@ -96,22 +84,5 @@ export function UpdateButton() {
       {state.phase === 'ready' && <small>下载完成，点击安装</small>}
       {state.phase === 'installing' && <small role="status">{state.step || '正在启动安装程序…'}</small>}
       {state.error && <small className="update-error" role="alert">{state.error}</small>}
-    </div>
-    {confirmTasks !== null && <div className="overlay update-confirm-overlay" role="dialog" aria-modal="true" aria-label="确认继续更新"
-      onKeyDown={event => { if (event.key === 'Escape') setConfirmTasks(null); }}>
-      <div className="dialog update-confirm-dialog">
-        <div className="dialog-head">
-          <div>
-            <h3>有 {confirmTasks} 条任务正在执行</h3>
-            <p>继续更新会中断 ReqFlow 并关闭当前窗口。</p>
-          </div>
-        </div>
-        <p className="update-confirm-text">执行中的任务与运行记录会保留，重新打开 ReqFlow 后可以继续操作。本次更新过程中不会再重复提示。</p>
-        <div className="settings-actions update-confirm-actions">
-          <button type="button" className="btn" autoFocus disabled={pending} onClick={() => setConfirmTasks(null)}>取消</button>
-          <button type="button" className="btn primary" disabled={pending} onClick={() => void install(true)}>继续更新</button>
-        </div>
-      </div>
-    </div>}
-  </>;
+  </div>;
 }

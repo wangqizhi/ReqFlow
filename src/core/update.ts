@@ -7,7 +7,6 @@ export type UpdateState = {
   error?: string;
   retry?: 'check' | 'download' | 'install';
   /** REQ-283：安装前检测到执行中任务时返回的数量，前端据此弹出一次确认。 */
-  confirmTasks?: number;
   /** REQ-287：安装流程当前阶段的可见状态说明。 */
   step?: string;
 };

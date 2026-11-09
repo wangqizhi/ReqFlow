@@ -45,8 +45,11 @@
   document.body.appendChild(contextInput);
   const inputContextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
   contextInput.dispatchEvent(inputContextEvent);
+  const zoomBlocked = ['=', '+', '-', '_', '0'].every(key => !contextInput.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })));
+  const typingAllowed = contextInput.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true, cancelable: true }));
   contextInput.remove();
   checks.nativeContextMenuDisabled = { ok: contextEvent.defaultPrevented && inputContextEvent.defaultPrevented };
+  checks.zoomShortcutsDisabled = { ok: zoomBlocked && typingAllowed };
   // REQ-138：顶部窗口栏横贯主区整条且为拖动区
   const topBar = document.querySelector('.desktop-app .top');
   checks.topDragStrip = { ok: getComputedStyle(topBar).getPropertyValue('--app-region').trim() === 'drag' && Math.abs(topBar.getBoundingClientRect().width - document.querySelector('.main').getBoundingClientRect().width) < 1 };
@@ -80,6 +83,26 @@
     await waitFor(() => !!button('知道了'));
     checks.shutdownDialog.ok &&= !button('仍然关闭');
     await click(button('知道了'));
+    const showPublishClose = () => window.dispatchEvent(new CustomEvent('reqflow-close-request', { detail: { publishes: 2 } }));
+    const closeActions = [];
+    window.reqflow.windowControl = async action => { closeActions.push(action); };
+    try {
+      showPublishClose();
+      await waitFor(() => !!button('取消关闭'));
+      const defaultCancel = document.activeElement === button('取消关闭');
+      await click(button('取消关闭'));
+      checks.publishShutdownDialog = { ok: defaultCancel && !document.querySelector('#shutdown-title') && !closeActions.length };
+      showPublishClose();
+      await waitFor(() => !!button('终止发布并关闭'));
+      checks.publishShutdownDialog.ok &&= document.querySelector('#shutdown-title').textContent.includes('2 个项目');
+      await click(button('终止发布并关闭'));
+      checks.publishShutdownDialog.ok &&= closeActions.join() === 'confirmStopPublish';
+      window.dispatchEvent(new CustomEvent('reqflow-close-request', { detail: { error: '关闭检查失败，请重试' } }));
+      await waitFor(() => !!button('知道了'));
+      await click(button('知道了'));
+    } finally {
+      window.reqflow.windowControl = control;
+    }
     const footer = document.querySelector('.side-foot');
     const originalProject = document.querySelector('.main h1').textContent;
     const initialProject = document.querySelector('.side-project[role="button"].active') || document.querySelector('.side-project[role="button"]');
@@ -452,25 +475,31 @@
     checks.terminalImmediate = { ok: !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     checks.terminalPublishTabOnDemand = { ok: !publishTabPanel() && !publishTabButton() };
     const originalReadClipboard = window.reqflow.readTerminalClipboard;
+    const originalWriteClipboard = window.reqflow.writeTerminalClipboard;
     const originalWriteAgent = window.reqflow.writeAgent;
     const pasted = [];
     window.reqflow.readTerminalClipboard = async () => ({ ok: true, text: '粘贴测试\n下一行' });
+    window.reqflow.writeTerminalClipboard = async () => ({ ok: true });
     window.reqflow.writeAgent = async (_run, text) => { pasted.push(text); return { ok: true }; };
     try {
       const shell = document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm');
       const textarea = shell.querySelector('textarea');
       const noMenu = !shell.dispatchEvent(rightClick());
-      await waitFor(() => pasted.some(text => text.includes('粘贴测试\r下一行')));
+      await new Promise(resolve => setTimeout(resolve, 80));
+      const noRightClickPaste = pasted.length === 0;
       const key = (letter, shiftKey = false) => new KeyboardEvent('keydown', {
         key: letter, code: 'Key' + letter.toUpperCase(), keyCode: letter.toUpperCase().charCodeAt(0), ctrlKey: true, shiftKey, bubbles: true, cancelable: true,
       });
       textarea.dispatchEvent(key('v'));
+      await waitFor(() => pasted.some(text => text.includes('粘贴测试\r下一行')));
+      textarea.dispatchEvent(key('v', true));
       await waitFor(() => pasted.filter(text => text.includes('粘贴测试\r下一行')).length === 2);
       textarea.dispatchEvent(key('c'));
       await waitFor(() => pasted.includes('\x03'));
-      checks.terminalPaste = { ok: noMenu && !document.querySelector('.terminal-copy-menu') };
+      checks.terminalPaste = { ok: noMenu && noRightClickPaste && !document.querySelector('.terminal-copy-menu') };
     } finally {
       window.reqflow.readTerminalClipboard = originalReadClipboard;
+      window.reqflow.writeTerminalClipboard = originalWriteClipboard;
       window.reqflow.writeAgent = originalWriteAgent;
     }
     // Cancel a real script from the product button, then retry successfully below.
@@ -552,12 +581,12 @@
     await waitFor(() => !veilVisible());
     const terminalScreen = terminalBody.querySelector('.xterm-screen');
     const clipboardWrites = [];
-    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator.clipboard, 'writeText');
-    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => clipboardWrites.push(text) });
+    window.reqflow.writeTerminalClipboard = async text => { clipboardWrites.push(text); return { ok: true }; };
     let reads = 0;
     window.reqflow.readTerminalClipboard = async () => { reads++; return { ok: true, text: '只读终端不会接收此内容' }; };
     try {
-      terminalScreen.dispatchEvent(rightClick());
+      const noSelectionCopy = !terminalScreen.dispatchEvent(rightClick());
+      await waitFor(() => clipboardWrites.some(text => text.includes('stream-first') && text.includes('stream-last')));
       const rows = [...terminalBody.querySelectorAll('.xterm-accessibility-tree > div')];
       const row = rows.find(el => el.textContent.trim() === 'stream-last').getBoundingClientRect();
       const point = { bubbles: true, button: 0, clientX: row.left + 10, clientY: row.top + row.height / 2 };
@@ -567,11 +596,10 @@
       clipboardWrites.length = 0;
       const copyWithoutMenu = !terminalScreen.dispatchEvent(rightClick());
       await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
-      checks.terminalRightClickCopy = { ok: copyWithoutMenu && reads === 0 && !document.querySelector('.terminal-copy-menu') };
+      checks.terminalRightClickCopy = { ok: noSelectionCopy && copyWithoutMenu && reads === 0 && !document.querySelector('.terminal-copy-menu') };
     } finally {
       window.reqflow.readTerminalClipboard = originalReadClipboard;
-      if (clipboardDescriptor) Object.defineProperty(navigator.clipboard, 'writeText', clipboardDescriptor);
-      else delete navigator.clipboard.writeText;
+      window.reqflow.writeTerminalClipboard = originalWriteClipboard;
     }
     await switchProject(originalProject);
     // REQ-258：未启动发布的项目没有发布页签，发布输出不跨项目泄漏
@@ -971,8 +999,11 @@
     const chatDrafts = ['AI 对话检查·已勾选', 'AI 对话检查·已取消'].map(title => ({ title, body: title + '的正文', type: 'feature', priority: 'P1', criteria: [] }));
     window.reqflow.aiRequirements = async (...args) => {
       requests.push(args);
-      const items = requests.length === 1 ? chatDrafts : requests.length === 2 ? null : args[6].slice().reverse();
-      return { ok: true, reply: requests.length === 2 ? markdownReply : '对话检查回复 ' + requests.length, items, contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
+      const items = requests.length === 1 ? chatDrafts : requests.length === 2 ? null : args[6].slice().reverse()
+        .map((item, index) => index === 0 ? { ...item, body: '按对话修改的说明' } : item);
+      return { ok: true, reply: requests.length === 2 ? markdownReply : '对话检查回复 ' + requests.length, items,
+        reasoning: '模型返回的思考摘要', toolCalls: [{ name: 'edit_requirement_drafts', operations: ['update'] }],
+        contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
     };
     try {
       await click(document.querySelector('[aria-label="选择记录需求方式"]'));
@@ -992,7 +1023,8 @@
       await click(button('发送'));
       await waitFor(() => chat.querySelectorAll('.ai-draft').length === 2);
       await click(chat.querySelectorAll('.ai-draft input[type="checkbox"]')[1]);
-      await setMessage('先讨论图中细节');
+      const plainMessage = '**先讨论图中细节**';
+      await setMessage(plainMessage);
       await click(button('发送'));
       await waitFor(() => chat.textContent.includes('对话检查回复 2'));
       const message = [...chat.querySelectorAll('.ai-discussion.assistant')].at(-1);
@@ -1001,7 +1033,11 @@
       await click(message.querySelector('button'));
       const rawOK = message.querySelector('.ai-discussion-source')?.textContent === markdownReply;
       await click(message.querySelector('button'));
-      checks.aiChatMarkdown = { ok: initiallyRendered && rawOK && previewOK() };
+      const userMessage = [...chat.querySelectorAll('.ai-discussion.user')].at(-1);
+      const plainOK = userMessage?.textContent === plainMessage && !userMessage.querySelector('button, strong');
+      checks.aiChatMarkdown = { ok: initiallyRendered && rawOK && previewOK() && plainOK };
+      checks.aiChatProcess = { ok: message.querySelector('.ai-chat-trace')?.textContent.includes('模型返回的思考摘要') &&
+        [...message.querySelectorAll('.ai-chat-trace')].some(trace => trace.textContent.includes('edit_requirement_drafts') && trace.textContent.includes('修改候选')) };
       const afterDiscussion = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
       const preserved = afterDiscussion[0].checked && !afterDiscussion[1].checked;
       await setMessage('调整候选需求顺序');
@@ -1012,11 +1048,15 @@
       const draftRect = chat.querySelector('.ai-drafts').getBoundingClientRect();
       const layoutOK = chatRect.right < draftRect.left && chat.querySelector('.dialog-foot').getBoundingClientRect().bottom < innerHeight;
       const selectionOK = !afterRevision[0].checked && afterRevision[1].checked;
+      const change = chat.querySelector('.ai-discussion.assistant:last-child .ai-chat-changes');
+      const synchronized = change?.querySelector('summary')?.textContent.includes('修改') &&
+        change.textContent.includes('按对话修改的说明') &&
+        chat.querySelector('.ai-draft textarea').value === '按对话修改的说明';
       await click(button('提交到需求池 · 1 条'));
       await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
       const saved = await window.reqflow.getWorkspace();
       const project = saved.state.projects.find(project => project.id === requests[0][0]);
-      checks.aiRequirementChat = { ok: layoutOK && preserved && selectionOK &&
+      checks.aiRequirementChat = { ok: layoutOK && preserved && selectionOK && synchronized &&
         requests[0][1] === 'chat' && requests[0][4][0].startsWith('data:image/png;base64,') && requests[0][5] === 'current' &&
         requests[1][4][0] === requests[0][4][0] && requests[1][5] === 'previous' &&
         project.items.some(item => item.title === chatDrafts[0].title && item.status === 'ready') &&
@@ -1140,12 +1180,15 @@
     checks.projectSettingsAsyncSave = { ok: firstProjectWrites === 1 && projectInputsEnabled && retainedNewInput && firstPersisted && noopWrites === 0 && failureRetained, firstProjectWrites, projectInputsEnabled, retainedNewInput, firstPersisted, noopWrites, failureRetained };
     guideDialog.closest('.overlay').click();
     await waitFor(() => !document.querySelector('.project-guide-dialog'));
-    // Render the actual update confirmation without ever starting an installer.
+    // Use a mock installer to check the update transition without running the installer.
     const updateState = window.reqflow.updateState, installUpdate = window.reqflow.installUpdate;
     window.reqflow.updateState = async () => ({ phase: 'ready', version: __REQFLOW_VERSION__ });
-    window.reqflow.installUpdate = async () => ({ phase: 'ready', confirmTasks: 3 });
+    window.reqflow.installUpdate = async () => ({ phase: 'installing' });
     await waitFor(() => !!button('安装'));
     await click(button('安装'));
+    checks.installWithoutTaskCheck = { ok: !!button('启动安装…') && !document.querySelector('.update-confirm-dialog') };
+    window.reqflow.updateState = updateState; window.reqflow.installUpdate = installUpdate;
+    window.dispatchEvent(new CustomEvent('reqflow-close-request', { detail: { tasks: 3 } }));
     await waitFor(() => !!document.querySelector('.update-confirm-dialog'));
     const confirmation = document.querySelector('.update-confirm-dialog');
     const darkRules = [...document.styleSheets].flatMap(sheet => [...sheet.cssRules]).filter(rule => rule.media?.mediaText.includes('prefers-color-scheme: dark'));
@@ -1163,9 +1206,8 @@
       confirmationThemes[theme] = { ok: contrast >= 4.5 && parseFloat(title.fontSize) >= 17, contrast, color: title.color, background: getComputedStyle(confirmation).backgroundColor };
     }
     darkRules.forEach((rule, index) => { rule.media.mediaText = mediaBefore[index]; });
-    checks.updateConfirmationContrast = { ok: Object.values(confirmationThemes).every(value => value.ok), ...confirmationThemes };
+    checks.shutdownConfirmationContrast = { ok: Object.values(confirmationThemes).every(value => value.ok), ...confirmationThemes };
     await click([...confirmation.querySelectorAll('button')].find(el => el.textContent === '取消'));
-    window.reqflow.updateState = updateState; window.reqflow.installUpdate = installUpdate;
     await click(button('记录新需求'));
     checks.reopenDraft = { ok: reset() && !document.querySelector('.requirement-advanced') };
     const buttons = [...document.querySelectorAll('.editor-footer button')];

@@ -39,13 +39,6 @@ func showStartupError(message string) {
 	_, _, _ = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x10)
 }
 
-func confirmForceShutdown(message string) bool {
-	text := syscall.StringToUTF16Ptr(message)
-	title := syscall.StringToUTF16Ptr("ReqFlow · 确认强制关闭")
-	r, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x134)
-	return r == 6
-}
-
 // An exclusive handle is the liveness signal, released by Windows even on crash.
 func registerDesktopInstance(dataFile string) (func(), error) {
 	dir := filepath.Join(filepath.Dir(dataFile), "desktop-instances")
@@ -61,8 +54,7 @@ func registerDesktopInstance(dataFile string) (func(), error) {
 }
 func otherDesktopInstance(dataFile string) bool {
 	dir := filepath.Join(filepath.Dir(dataFile), "desktop-instances")
-	// CLI and installer helper processes are not desktop instances. They must
-	// retain their existing final-shutdown checks rather than bypassing them.
+	// Only registered desktops participate in desktop shutdown coordination.
 	if _, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%d.lock", os.Getpid()))); err != nil {
 		return false
 	}

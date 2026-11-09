@@ -260,40 +260,6 @@ Section "ReqFlow" SEC_APP
     SetErrorLevel 2
     Abort
   root_ok:
-  ; Use the bundled new binary so even upgrades from older apps release claims.
-  ; Silent installs never terminate a running app or release its tasks.
-  IfSilent shutdown_check_done
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=ReqFlow-shutdown.exe "${APP_SOURCE}"
-  Push $DataDir
-  Call ReadDataDirectory
-  ${If} $UpdateConfirmed == "1"
-    ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\" --confirmed' $0
-  ${Else}
-    ExecWait '$\"$PLUGINSDIR\ReqFlow-shutdown.exe$\" --prepare-install $\"$DataDir$\"' $0
-  ${EndIf}
-  Pop $DataDir
-  ${If} $0 != 0
-    ; Older launchers may have closed the app before this task check. Restore
-    ; the installed app on cancellation; never launch the temporary helper UI.
-    FindWindow $1 "" "ReqFlow · 需求流"
-    ${If} $1 != 0
-      System::Call 'user32::ShowWindow(p r1, i 9)'
-      System::Call 'user32::SetForegroundWindow(p r1)'
-      Goto restore_app_done
-    ${EndIf}
-    IfFileExists "$INSTDIR\ReqFlow.exe" 0 restore_legacy_app
-    ExecShell "open" "$INSTDIR\ReqFlow.exe"
-    Goto restore_app_done
-    restore_legacy_app:
-    IfFileExists "$INSTDIR\ReqFlow-MyGO.exe" 0 restore_app_done
-    ExecShell "open" "$INSTDIR\ReqFlow-MyGO.exe"
-    restore_app_done:
-    SetErrorLevel 2
-    Abort
-  ${EndIf}
-  shutdown_check_done:
   ; Request write access; the wizard asks to close a still-running app first (REQ-129).
   Push "$INSTDIR\ReqFlow.exe"
   Call EnsureRuntimeClosed

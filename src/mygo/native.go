@@ -9,14 +9,21 @@ import (
 	"sync/atomic"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 )
 
 // Inject before application scripts in every desktop window, including inputs
 // and detached terminals. Custom application menus may still handle the event.
-const desktopPreload = `window.addEventListener('contextmenu', event => event.preventDefault(), true);`
+const desktopPreload = `
+window.addEventListener('contextmenu', event => event.preventDefault(), true);
+window.addEventListener('keydown', event => {
+  if (event.ctrlKey && !event.altKey && !event.metaKey &&
+      ['+', '=', '-', '_', '0'].includes(event.key)) event.preventDefault();
+}, true);
+`
 
 type nativeHost struct {
-	confirmClose  func()
+	confirmClose  func(stopPublish bool)
 	window        atomic.Pointer[mygo.Window]
 	notifications desktopNotifications
 	terminals     map[string]*mygo.Window // Access only on the MyGO main thread.
@@ -88,9 +95,11 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 	switch method {
 	case "terminal.clipboard.read":
 		return mygo.Clipboard.ReadText(), nil
-	case "window.confirmClose":
+	case "terminal.clipboard.write":
+		return nil, mygo.Clipboard.Write(transfer.TextData(firstString(args)))
+	case "window.confirmClose", "window.confirmStopPublish":
 		if n.confirmClose != nil {
-			n.confirmClose()
+			n.confirmClose(method == "window.confirmStopPublish")
 		}
 		return nil, nil
 	case "terminal.open", "terminal.close", "terminal.status":
@@ -226,8 +235,7 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		}
 		return "", nil
 	case "installer.launch":
-		// REQ-284：更新流程直接启动安装包并附带“已确认忽略执行中任务”参数；
-		// 安装器据此不再重复提示，并自行结束仍在运行的实例。
+		// 应用内更新传入兼容参数，允许安装器关闭旧实例。
 		file := firstString(args)
 		extra := ""
 		if len(args) > 1 {

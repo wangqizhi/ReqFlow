@@ -93,9 +93,7 @@ func (b *Backend) desktopUpdateSet(value map[string]any) {
 	b.desktopUpdateMu.Unlock()
 }
 
-// UpdateInstallConfirmed reports whether the current update flow already
-// confirmed ignoring running tasks (REQ-285). The flag lives in memory only:
-// it is cleared when a new check/download starts, and disappears on restart.
+// UpdateInstallConfirmed lets the installer close the desktop without a quit prompt.
 func (b *Backend) UpdateInstallConfirmed() bool {
 	b.desktopUpdateMu.Lock()
 	defer b.desktopUpdateMu.Unlock()
@@ -253,7 +251,7 @@ func (b *Backend) desktopSavedInstaller(directory, metadata string) (string, map
 	return "", nil, "", "", false
 }
 
-func (b *Backend) desktopUpdater(ctx context.Context, channel string, args []any) (any, error) {
+func (b *Backend) desktopUpdater(ctx context.Context, channel string, _ []any) (any, error) {
 	if channel == "update:state" {
 		return b.desktopUpdateState(), nil
 	}
@@ -421,7 +419,8 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string, args []any
 		b.desktopUpdateSet(map[string]any{"phase": "ready", "version": version, "progress": 100})
 		return b.desktopUpdateState(), nil
 	case "update:install":
-		if desktopString(state["phase"]) != "ready" || b.desktopInstaller == "" {
+		phase := desktopString(state["phase"])
+		if (phase != "ready" && !(phase == "error" && state["retry"] == "install")) || b.desktopInstaller == "" {
 			return state, nil
 		}
 		if !desktopVerifyInstaller(b.desktopInstaller, b.desktopAsset, b.desktopExpectedHash) {
@@ -429,34 +428,24 @@ func (b *Backend) desktopUpdater(ctx context.Context, channel string, args []any
 			b.desktopInstaller = ""
 			return fail(errors.New("本地安装包已丢失或校验失败，请重新下载"), "download"), nil
 		}
-		// REQ-283：点击安装后先检测执行中任务，由前端弹出一次确认；确认结果只在本轮更新内有效。
-		if !b.UpdateInstallConfirmed() {
-			if !desktopBool(desktopArg(args, 0)) {
-				actions, e := b.Workspace.ActiveExecutionActions()
-				if e != nil {
-					return fail(errors.New("无法检查执行中任务："+e.Error()), "install"), nil
-				}
-				if len(actions) > 0 {
-					pending := desktopCloneMap(state)
-					pending["confirmTasks"] = len(actions)
-					return pending, nil
-				}
-			}
-			b.setUpdateInstallConfirmed(true)
+		if publishes, _ := b.PreparePublishShutdown(context.Background(), false); publishes > 0 {
+			return fail(errors.New("请等待项目发布完成，或先中断发布，再安装更新"), "install"), nil
 		}
+		b.setUpdateInstallConfirmed(true)
 		state = b.desktopUpdateState()
 		state["phase"] = "installing"
 		state["step"] = "正在启动安装程序…"
 		delete(state, "error")
-		delete(state, "confirmTasks")
+		delete(state, "retry")
 		b.desktopUpdateSet(state)
-		// REQ-284：确认后由安装流程负责中断应用；安装器收到确认参数后不再重复询问任务状态，
-		// 并在需要时静默结束仍在运行的实例，然后替换程序文件。
+		// 应用内更新负责关闭当前窗口，兼容参数允许安装器关闭仍在运行的旧实例。
 		value, e := desktopNative(b, "installer.launch", b.desktopInstaller, "/REQFLOW_UPDATE_CONFIRMED=1")
 		if e == nil && desktopString(value) != "" {
 			e = errors.New(desktopString(value))
 		}
 		if e != nil {
+			b.setUpdateInstallConfirmed(false)
+			b.resumePublishStarts()
 			state["phase"], state["error"], state["retry"] = "error", e.Error(), "install"
 			delete(state, "step")
 			b.desktopUpdateSet(state)
