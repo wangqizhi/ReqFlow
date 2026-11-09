@@ -1,21 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AIDraft } from '../core/ai';
+import { chatSources, type ChatCandidate as Draft, type ChatDraft, type ChatHistoryEntry, type ChatImage as Image, type ChatMessage as Message, type ChatSource, type ChatSourceCounts } from '../core/ai-chat';
 import type { Project } from '../core/domain';
-import { bridge, type AIRequirementToolCall } from './api';
-import { ChevronDown, FileText, ImageIcon, RefreshCw, Terminal, Wand, X } from './icons';
+import { bridge } from './api';
+import { useAIChatSession } from './ai-chat-session';
+import { ChevronDown, FileText, History, ImageIcon, RefreshCw, Terminal, Trash, Wand, X } from './icons';
 import { renderMarkdown } from './markdown';
 
-type Image = { name: string; size: number; url: string };
-type DraftChange = { action: '新增' | '修改'; item: AIDraft };
-type Message = { role: 'user' | 'assistant'; content: string; images?: Image[]; reasoning?: string; toolCalls?: AIRequirementToolCall[]; changes?: DraftChange[] };
-type Draft = { item: AIDraft & { id: string }; selected: boolean };
 const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const kinds = [['feature', '新需求'], ['improvement', '优化'], ['bug', '修复']];
 const toolActions = { create: '新增候选', update: '修改候选', list: '查看候选' };
 
 function reconcileDrafts(previous: Draft[], items: (AIDraft & { id?: string })[]) {
   const existing = new Map(previous.map(draft => [draft.item.id, draft]));
-  const changes: DraftChange[] = [];
+  const changes: NonNullable<Message['changes']> = [];
   const drafts = items.map(item => {
     const draft = existing.get(item.id || '');
     if (draft) {
@@ -44,6 +42,8 @@ function ChatMessage({ message }: { message: Message }) {
       <strong><Wand size={16} />需求助手</strong>
       {message.content && <button type="button" className="btn sm" onClick={() => setSource(!source)}>{source ? '显示预览' : '查看原文'}</button>}
     </div>
+    {message.sourceCounts && <p className="ai-chat-sources-used">来源 · {chatSources.filter(([key]) => (message.sourceCounts?.[key] || 0) > 0)
+      .map(([key, label]) => `${label} ${message.sourceCounts?.[key]}`).join(' · ') || '无额外项目上下文'}</p>}
     {message.reasoning && <details className="ai-chat-trace">
       <summary><ChevronDown /><span>思考过程</span></summary>
       <div className="ai-discussion-plain">{message.reasoning}</div>
@@ -73,15 +73,72 @@ function ChatMessage({ message }: { message: Message }) {
   </article>;
 }
 
-export function AIRequirements({ project, onClose, insert }: { project: Project; onClose(): void; insert(items: AIDraft[]): Promise<boolean> }) {
-  const [input, setInput] = useState('');
-  const [images, setImages] = useState<Image[]>([]);
+function ChatHistory({ project }: { project: string }) {
+  const [entries, setEntries] = useState<ChatHistoryEntry[]>([]);
+  const [active, setActive] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [action, setAction] = useState<'images' | 'send' | 'save'>();
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const result = await bridge.listAIChatHistory?.(project);
+        if (!result?.ok) throw Error(result?.error || '本地历史记录不可用');
+        if (alive) setEntries(result.entries || []);
+      } catch (e) { if (alive) setError(`无法读取聊天历史：${(e as Error).message}`); }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [project]);
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    setLoading(true);
+    setMessages([]);
+    setError('');
+    void (async () => {
+      try {
+        const result = await bridge.readAIChatHistory?.(project, active);
+        if (!result?.ok) throw Error(result?.error || '本地历史记录不可用');
+        if (alive) setMessages(result.messages || []);
+      } catch (e) { if (alive) setError(`无法读取这段对话：${(e as Error).message}`); }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [project, active]);
+  return <div className="ai-requirements-body ai-chat-history-mode">
+    <section className="ai-drafts" aria-label="历史会话">
+      <div className="ai-drafts-head"><h4><History />历史会话</h4></div>
+      <div className="ai-draft-list">
+        {!loading && !entries.length && <p className="settings-hint">此项目暂无聊天历史。</p>}
+        {entries.map(entry => <button type="button" key={entry.id} className="btn ai-chat-history-entry" aria-pressed={active === entry.id} onClick={() => setActive(entry.id)}>
+          <strong>{entry.title || '图片讨论'}</strong><small>{new Date(entry.time).toLocaleString()}</small>
+        </button>)}
+      </div>
+    </section>
+    <section className="ai-chat" aria-label="历史消息">
+      <div className="ai-chat-head"><h4><FileText />历史消息</h4><span className="muted">只读</span></div>
+      <div className="ai-chat-history" role="log" tabIndex={0}>
+        {error ? <p className="error" role="alert">{error}</p> : loading ? <p role="status">正在读取聊天历史…</p> : !active && <p className="settings-hint">选择一段会话查看消息。</p>}
+        {messages.map((message, index) => <div key={index}>{message.time && <p className="ai-chat-time"><time dateTime={message.time}>{new Date(message.time).toLocaleString()}</time></p>}<ChatMessage message={message} /></div>)}
+      </div>
+    </section>
+  </div>;
+}
+
+export function AIRequirements({ project, onClose, insert }: { project: Project; onClose(): void; insert(items: AIDraft[]): Promise<boolean> }) {
+  const { draft, sources, setSources, ready, warning, edit, persist, flush } = useAIChatSession(project.id);
+  const { input, images, messages, drafts } = draft;
+  const [action, setAction] = useState<'images' | 'send' | 'save' | 'delete' | 'discard' | 'sources'>();
   const [error, setError] = useState('');
   const [away, setAway] = useState(false);
-  const [context, setContext] = useState('对话使用项目背景与守则、最近需求、近 7 天 Git 记录和项目说明文件。');
+  const [context, setContext] = useState<{ token: string; counts: ChatSourceCounts }>();
+  const [contextError, setContextError] = useState('');
+  const [refreshContext, setRefreshContext] = useState(0);
+  const [showHistory, setShowHistory] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
+  const [submitted, setSubmitted] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const history = useRef<HTMLDivElement>(null);
@@ -90,6 +147,25 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   const selected = drafts.filter(draft => draft.selected).map(draft => draft.item);
   const sending = action === 'send';
   const conversation: Message[] = sending ? [...messages, { role: 'user', content: input.trim(), images }] : messages;
+  const recent = messages.slice(-16);
+  const previousImages = recent.findLast(message => message.images?.length)?.images;
+  const attached = sources.images === false ? [] : images.length ? images : previousImages || [];
+  const sendable = !!context && (input.trim() || (sources.images !== false && images.length));
+
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    setContext(undefined);
+    setContextError('');
+    void (async () => {
+      try {
+        const result = await bridge.prepareAIRequirementContext?.(project.id, sources);
+        if (!result?.ok || !result.token) throw Error(result?.error || '上下文预览不可用');
+        if (alive) setContext({ token: result.token, counts: result.counts || {} });
+      } catch (e) { if (alive) setContextError((e as Error).message); }
+    })();
+    return () => { alive = false; };
+  }, [ready, sources, project.id, refreshContext]);
 
   function scrollToLatest() {
     followHistory.current = true;
@@ -98,13 +174,18 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   }
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !locked.current) onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || locked.current) return;
+      if (confirmation) setConfirmation('');
+      else if (showHistory) setShowHistory(false);
+      else void close();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, confirmation, showHistory, draft]);
   useLayoutEffect(() => {
     if (history.current && followHistory.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [messages, sending]);
+  }, [messages, sending, showHistory]);
 
   async function run(next: NonNullable<typeof action>, work: () => Promise<void>) {
     if (locked.current) return;
@@ -119,6 +200,24 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
     }
   }
 
+  async function close() {
+    await run('save', async () => {
+      if (submitted) await persist(null);
+      else await flush();
+      onClose();
+    });
+  }
+
+  function changeSource(key: ChatSource, enabled: boolean) {
+    void run('sources', async () => {
+      const next = { ...sources, [key]: enabled };
+      setContext(undefined);
+      setSources(next);
+      const result = await bridge.saveAIChatSources?.(project.id, next);
+      if (!result?.ok) throw Error(`来源开关未能保存：${result?.error || '本地设置不可用'}`);
+    });
+  }
+
   function addImages(files: File[]) {
     if (!files.length) return;
     void run('images', async () => {
@@ -131,80 +230,101 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
         reader.onerror = () => reject(Error('读取图片失败，请重新选择'));
         reader.readAsDataURL(file);
       })));
-      setImages([...images, ...added]);
+      edit({ images: [...images, ...added] });
     });
   }
 
   async function send() {
-    if (!bridge.aiRequirements || (!input.trim() && !images.length)) return;
+    if (!bridge.aiRequirements || !context || !sendable) return;
     await run('send', async () => {
       scrollToLatest();
-      const recent = messages.slice(-16);
-      const previousImages = recent.findLast(message => message.images?.length)?.images;
-      const attached = images.length ? images : previousImages;
+      const time = new Date().toISOString();
       const discussion = recent.map(({ role, content, images: pictures }) => ({
-        role, content: pictures?.length ? `${content}\n（此消息附有 ${pictures.length} 张图片）` : content,
+        role, content: sources.images !== false && pictures?.length ? `${content}\n（此消息附有 ${pictures.length} 张图片）` : content,
       }));
       const result = await bridge.aiRequirements!(project.id, 'chat', input.trim(), discussion,
-        attached?.map(image => image.url) || [], images.length ? 'current' : 'previous', drafts.map(draft => draft.item));
+        attached.map(image => image.url), images.length ? 'current' : 'previous', drafts.map(draft => draft.item), context.token);
       if (!result?.ok) throw Error(result?.error || 'AI 需求仅桌面版可用');
       const revision = result.items ? reconcileDrafts(drafts, result.items) : undefined;
-      if (revision) setDrafts(revision.drafts);
-      setMessages([...messages, { role: 'user', content: input.trim(), images },
-        { role: 'assistant', content: result.reply || '', reasoning: result.reasoning, toolCalls: result.toolCalls, changes: revision?.changes }]);
-      setInput('');
-      setImages([]);
-      setContext(`${result.contextNote} · 最近需求 ${result.requirementCount} 条 · 项目文件 ${result.contextFiles?.join('、') || '无'}`);
+      const replyTime = new Date().toISOString();
+      const turn: Message[] = [{ role: 'user', content: input.trim(), images: sources.images === false ? [] : images, time },
+        { role: 'assistant', content: result.reply || '', reasoning: result.reasoning, toolCalls: result.toolCalls,
+          changes: revision?.changes, sourceCounts: result.sourceCounts, time: replyTime }];
+      const next: ChatDraft = { ...draft, input: '', images: sources.images === false ? images : [], messages: [...messages, ...turn], drafts: revision?.drafts || drafts };
+      try { await persist(next, { session: draft.id, time: replyTime, title: input.trim(), messages: turn }); }
+      catch (error) {
+        edit(next);
+        throw Error(`已收到回复，但历史记录写入失败：${(error as Error).message}`);
+      }
     });
     composer.current?.focus();
   }
 
   function update(id: string, patch: Partial<AIDraft>) {
-    setDrafts(previous => previous.map(draft => draft.item.id === id ? { ...draft, item: { ...draft.item, ...patch } } : draft));
+    edit({ drafts: drafts.map(draft => draft.item.id === id ? { ...draft, item: { ...draft.item, ...patch } } : draft) });
   }
+
+  const disabled = !ready || !!action || submitted;
+  const hasDraft = !!(input || images.length || messages.length || drafts.length);
 
   return <div className="overlay"><div className="dialog ai-requirements-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-requirements-title">
     <div className="dialog-head">
       <div><h3 id="ai-requirements-title">AI 需求 · {project.name}</h3><p>和 AI 讨论需求，生成或修改候选后勾选提交。</p></div>
-      <button className="icon-btn" aria-label="关闭 AI 需求" disabled={!!action} onClick={onClose}><X /></button>
+      <div className="ai-chat-actions">
+        <button type="button" className="btn sm" disabled={!!action} onClick={() => { setConfirmation(''); setShowHistory(!showHistory); }}><History />{showHistory ? '返回当前会话' : '聊天历史'}</button>
+        <button className="icon-btn" aria-label="关闭 AI 需求" disabled={!!action} onClick={() => void close()}><X /></button>
+      </div>
     </div>
-    <div className="ai-requirements-body">
+    {showHistory ? <ChatHistory project={project.id} /> : <div className="ai-requirements-body">
       <section className="ai-chat" aria-label="需求对话">
-        <div className="ai-chat-head"><h4><Wand />需求讨论</h4><details className="ai-chat-context"><summary>项目上下文</summary><p>{context}</p></details></div>
+        <div className="ai-chat-head"><h4><Wand />当前会话</h4><details className="ai-chat-context">
+          <summary>本轮来源 · {context ? chatSources.filter(([key]) => (key === 'images' ? attached.length : context.counts[key] || 0) > 0).length + ' 类' : contextError ? '读取失败' : '读取中'}</summary>
+          <div className="ai-chat-source-panel" aria-label="本轮上下文来源">
+            {chatSources.map(([key, label]) => <div className="ai-chat-source-row" key={key}>
+              <label className="switch"><input type="checkbox" role="switch" checked={sources[key] !== false}
+                disabled={disabled} onChange={event => changeSource(key, event.target.checked)} /><span className="slider" aria-hidden="true" />{label}</label>
+              <span className="muted">{sources[key] === false ? '已关闭' : key === 'images' ? attached.length : context ? context.counts[key] || 0 : '…'}</span>
+            </div>)}
+            {contextError && <p className="error" role="alert">{contextError}</p>}
+            <button type="button" className="btn sm" disabled={disabled} onClick={() => { setContext(undefined); setRefreshContext(value => value + 1); }}><RefreshCw />刷新来源</button>
+          </div>
+        </details></div>
         <div className="ai-chat-history" ref={history} role="log" aria-label="对话记录" tabIndex={0}
           onScroll={e => {
             const list = e.currentTarget;
             followHistory.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
             setAway(!followHistory.current);
           }}>
-          {!conversation.length && <div className="ai-chat-intro"><span><Wand size={20} /></span><strong>从一个想法开始</strong><p>描述问题或请 AI 根据项目现状提出建议。讨论形成的需求会出现在右侧。</p></div>}
+          {!conversation.length && <div className="ai-chat-intro"><span><Wand size={20} /></span><strong>{ready ? '从一个想法开始' : '正在恢复会话…'}</strong><p>描述问题或请 AI 根据项目现状提出建议。讨论形成的需求会出现在右侧。</p></div>}
           {conversation.map((message, index) => <ChatMessage key={index} message={message} />)}
           {sending && <p className="ai-chat-waiting" role="status"><RefreshCw size={16} />正在处理这轮讨论…</p>}
         </div>
         {away && <button type="button" className="btn sm ai-chat-latest" onClick={scrollToLatest}><ChevronDown />回到最新</button>}
         <form className="ai-chat-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
           <label className="field"><span className="visually-hidden">消息</span>
-            <textarea ref={composer} autoFocus rows={2} maxLength={20000} readOnly={!!action} value={input} placeholder="输入想法、问题或修改意见"
-              onChange={e => setInput(e.target.value)}
+            <textarea ref={composer} autoFocus rows={2} maxLength={20000} readOnly={disabled} value={input} placeholder="输入想法、问题或修改意见"
+              onChange={e => edit({ input: e.target.value })}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                   e.preventDefault(); void send();
                 }
               }}
               onPaste={e => {
+                if (disabled) return;
                 const files = Array.from(e.clipboardData.files).filter(file => file.type.startsWith('image/'));
                 if (files.length) { e.preventDefault(); addImages(files); }
               }} />
           </label>
           {!!images.length && <div className="ai-chat-images">{images.map((image, index) => <div key={index}>
             <img src={image.url} alt={image.name} title={image.name} />
-            <button type="button" className="icon-btn" aria-label={`移除图片 ${index + 1}`} disabled={!!action} onClick={() => setImages(images.filter((_, n) => n !== index))}><X size={14} /></button>
+            <button type="button" className="icon-btn" aria-label={`移除图片 ${index + 1}`} disabled={disabled} onClick={() => edit({ images: images.filter((_, n) => n !== index) })}><X size={14} /></button>
           </div>)}</div>}
           <div className="ai-chat-actions">
-            <input className="visually-hidden" ref={fileInput} tabIndex={-1} type="file" accept={imageTypes.join(',')} multiple disabled={!!action} onChange={e => { addImages(Array.from(e.target.files || [])); e.target.value = ''; }} />
-            <button type="button" className="btn" disabled={!!action} onClick={() => fileInput.current?.click()}><ImageIcon />{action === 'images' ? '读取中…' : '插入图片'}</button>
-            <button className="btn primary" disabled={!!action || (!input.trim() && !images.length) || !bridge.aiRequirements}>{action === 'send' ? '发送中…' : '发送'}</button>
+            <input className="visually-hidden" ref={fileInput} tabIndex={-1} type="file" accept={imageTypes.join(',')} multiple disabled={disabled} onChange={e => { addImages(Array.from(e.target.files || [])); e.target.value = ''; }} />
+            <button type="button" className="btn" disabled={disabled} onClick={() => fileInput.current?.click()}><ImageIcon />{action === 'images' ? '读取中…' : '插入图片'}</button>
+            <button className="btn primary" disabled={disabled || !sendable || !bridge.aiRequirements}>{action === 'send' ? '发送中…' : '发送'}</button>
           </div>
+          {contextError && <p className="error" role="alert">上下文预览失败，可从「本轮来源」刷新。</p>}
           <p className="settings-hint">Enter 发送 · Shift+Enter 换行 · 可粘贴图片，每条最多 4 张、合计 5 MB</p>
         </form>
       </section>
@@ -213,34 +333,53 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
         <div className="ai-draft-list" tabIndex={0}>
           {!drafts.length && <div className="ai-chat-intro"><span><FileText size={20} /></span><strong>暂无候选需求</strong><p>候选会随对话更新。你可以在这里查看、编辑和勾选。</p></div>}
           {drafts.map(({ item, selected }, index) => <article className="ai-draft" key={item.id}>
-            <label className="ai-draft-select">
-              <input type="checkbox" checked={selected} disabled={!!action} onChange={e => {
+            <div className="ai-draft-heading"><label className="ai-draft-select">
+              <input type="checkbox" checked={selected} disabled={disabled} onChange={e => {
                 const checked = e.target.checked;
-                setDrafts(previous => previous.map(draft => draft.item.id === item.id ? { ...draft, selected: checked } : draft));
+                edit({ drafts: drafts.map(draft => draft.item.id === item.id ? { ...draft, selected: checked } : draft) });
               }} />
               <strong>{item.title || `候选需求 ${index + 1}`}</strong>
-            </label>
+            </label><button type="button" className="btn sm" disabled={disabled} aria-label={`删除候选 ${item.title || index + 1}`} onClick={() => setConfirmation(item.id)}><Trash />删除</button></div>
+            {confirmation === item.id && <div className="ai-chat-confirm" role="group" aria-label="确认删除候选">
+              <p>删除后这条候选不会提交到需求池，聊天记录仍可查看。</p>
+              <div className="settings-actions">
+                <button type="button" className="btn sm" disabled={disabled} onClick={() => setConfirmation('')}>取消</button>
+                <button type="button" className="btn sm danger" disabled={disabled} onClick={() => void run('delete', async () => {
+                  await persist({ ...draft, drafts: drafts.filter(candidate => candidate.item.id !== item.id) });
+                  setConfirmation('');
+                })}>确认删除</button>
+              </div>
+            </div>}
             <p>{kinds.find(([kind]) => kind === item.type)?.[1]} · {item.priority}</p>
             <details><summary>查看和编辑</summary>
-              <label className="field">标题<input value={item.title} readOnly={!!action} onChange={e => update(item.id, { title: e.target.value })} /></label>
-              <label className="field">说明<textarea rows={3} value={item.body} readOnly={!!action} onChange={e => update(item.id, { body: e.target.value })} /></label>
+              <label className="field">标题<input value={item.title} readOnly={disabled} onChange={e => update(item.id, { title: e.target.value })} /></label>
+              <label className="field">说明<textarea rows={3} value={item.body} readOnly={disabled} onChange={e => update(item.id, { body: e.target.value })} /></label>
               <div className="ai-draft-options">
-                <div className="segmented" role="group" aria-label="需求类型">{kinds.map(([value, label]) => <button className={item.type === value ? 'on' : ''} aria-pressed={item.type === value} disabled={!!action} key={value} onClick={() => update(item.id, { type: value })}>{label}</button>)}</div>
-                <div className="segmented" role="group" aria-label="优先级">{['P0', 'P1', 'P2'].map(value => <button className={item.priority === value ? 'on' : ''} aria-pressed={item.priority === value} disabled={!!action} key={value} onClick={() => update(item.id, { priority: value })}>{value}</button>)}</div>
+                <div className="segmented" role="group" aria-label="需求类型">{kinds.map(([value, label]) => <button className={item.type === value ? 'on' : ''} aria-pressed={item.type === value} disabled={disabled} key={value} onClick={() => update(item.id, { type: value })}>{label}</button>)}</div>
+                <div className="segmented" role="group" aria-label="优先级">{['P0', 'P1', 'P2'].map(value => <button className={item.priority === value ? 'on' : ''} aria-pressed={item.priority === value} disabled={disabled} key={value} onClick={() => update(item.id, { priority: value })}>{value}</button>)}</div>
               </div>
-              <label className="field">验收条件<textarea rows={2} value={item.criteria.join('\n')} readOnly={!!action} onChange={e => update(item.id, { criteria: e.target.value.split('\n') })} /></label>
+              <label className="field">验收条件<textarea rows={2} value={item.criteria.join('\n')} readOnly={disabled} onChange={e => update(item.id, { criteria: e.target.value.split('\n') })} /></label>
             </details>
           </article>)}
         </div>
       </section>
-    </div>
+    </div>}
+    {warning && <p className="error ai-chat-error" role="alert">{warning}</p>}
     {error && <p className="error ai-chat-error" role="alert">{error}</p>}
+    {!showHistory && confirmation === 'discard' && <p className="ai-chat-error" role="status">放弃会清空当前输入、对话草稿和候选，已保存的聊天历史仍可查看。</p>}
     <div className="dialog-foot">
-      <button className="btn" disabled={!!action} onClick={onClose}>关闭</button>
-      <button className="btn primary" disabled={!!action || !selected.length || selected.some(item => !item.body.trim())} onClick={() => void run('save', async () => {
+      {!showHistory && (confirmation === 'discard' ? <>
+        <button className="btn" disabled={disabled} onClick={() => setConfirmation('')}>取消放弃</button>
+        <button className="btn danger" disabled={disabled} onClick={() => void run('discard', async () => { await persist(null); setConfirmation(''); })}>确认放弃草稿</button>
+      </> : <button className="btn ai-chat-discard" disabled={disabled || !hasDraft} onClick={() => setConfirmation('discard')}>放弃草稿…</button>)}
+      <button className="btn" disabled={!!action} onClick={() => void close()}>{submitted ? '重试清理并关闭' : '关闭'}</button>
+      {!showHistory && <button className="btn primary" disabled={disabled || !selected.length || selected.some(item => !item.body.trim())} onClick={() => void run('save', async () => {
         if (!await insert(selected)) throw Error('提交失败，候选需求已保留，请重试。');
+        setSubmitted(true);
+        try { await persist(null); }
+        catch (error) { throw Error(`已提交到需求池，清理会话草稿失败：${(error as Error).message}`); }
         onClose();
-      })}>{action === 'save' ? '提交中…' : `提交到需求池 · ${selected.length} 条`}</button>
+      })}>{action === 'save' ? '处理中…' : `提交到需求池 · ${selected.length} 条`}</button>}
     </div>
   </div></div>;
 }

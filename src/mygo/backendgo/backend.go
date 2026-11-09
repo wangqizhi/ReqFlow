@@ -26,6 +26,7 @@ type Backend struct {
 	Native                                                 func(string, []any) (any, error)
 	mu                                                     sync.Mutex
 	aiSessions                                             map[string]string
+	aiRequirementContexts                                  map[string]preparedRequirementContext
 	desktopLogMu                                           sync.Mutex
 	desktopLogPending                                      []any
 	desktopPublishMu                                       sync.Mutex

@@ -5,9 +5,80 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 	"unsafe"
+
+	"github.com/egoist/mygo"
 )
+
+var (
+	clipboardUser32     = syscall.NewLazyDLL("user32.dll")
+	clipboardKernel32   = syscall.NewLazyDLL("kernel32.dll")
+	openClipboard       = clipboardUser32.NewProc("OpenClipboard")
+	closeClipboard      = clipboardUser32.NewProc("CloseClipboard")
+	emptyClipboard      = clipboardUser32.NewProc("EmptyClipboard")
+	setClipboardData    = clipboardUser32.NewProc("SetClipboardData")
+	globalAlloc         = clipboardKernel32.NewProc("GlobalAlloc")
+	globalLock          = clipboardKernel32.NewProc("GlobalLock")
+	globalUnlock        = clipboardKernel32.NewProc("GlobalUnlock")
+	globalFree          = clipboardKernel32.NewProc("GlobalFree")
+	moveClipboardMemory = clipboardKernel32.NewProc("RtlMoveMemory")
+)
+
+func writeTerminalClipboard(window *mygo.Window, text string) error {
+	const movable = 0x0002
+	const unicodeText = 13
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\n", "\r\n")
+	units, err := syscall.UTF16FromString(text)
+	if err != nil {
+		return err
+	}
+	// Publish materialized CF_UNICODETEXT, so another process can read it
+	// without waiting for ReqFlow to serve a delayed OLE clipboard provider.
+	size := uintptr(len(units)) * unsafe.Sizeof(units[0])
+	memory, _, err := globalAlloc.Call(movable, size)
+	if memory == 0 {
+		return fmt.Errorf("分配剪贴板内存：%w", err)
+	}
+	defer func() {
+		if memory != 0 {
+			globalFree.Call(memory)
+		}
+	}()
+	address, _, err := globalLock.Call(memory)
+	if address == 0 {
+		return fmt.Errorf("锁定剪贴板内存：%w", err)
+	}
+	moveClipboardMemory.Call(address, uintptr(unsafe.Pointer(&units[0])), size)
+	globalUnlock.Call(memory)
+	var writeErr error
+	mygo.RunOnMain(func() {
+		for attempt := 0; ; attempt++ {
+			opened, _, err := openClipboard.Call(window.NativeHandle())
+			if opened != 0 {
+				break
+			}
+			if attempt == 5 {
+				writeErr = fmt.Errorf("打开剪贴板：%w", err)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		defer closeClipboard.Call()
+		if result, _, err := emptyClipboard.Call(); result == 0 {
+			writeErr = fmt.Errorf("清空剪贴板：%w", err)
+			return
+		}
+		if result, _, err := setClipboardData.Call(unicodeText, memory); result == 0 {
+			writeErr = fmt.Errorf("写入剪贴板：%w", err)
+			return
+		}
+		memory = 0 // The system owns the allocation after SetClipboardData succeeds.
+	})
+	return writeErr
+}
 
 func hideChildWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}

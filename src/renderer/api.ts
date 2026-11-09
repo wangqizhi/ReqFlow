@@ -11,7 +11,7 @@ import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remot
 import type { UpdateState } from '../core/update';
 import type { PublishLogSettings, PublishRequestLog } from '../core/publish-log';
 
-export type AIRequirementToolCall = { name: string; operations: ('create' | 'update' | 'list')[] };
+import type { AIRequirementToolCall, ChatDraft, ChatHistoryEntry, ChatMessage, ChatSourceCounts, ChatSources, ChatTurn } from '../core/ai-chat';
 
 export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
@@ -114,7 +114,14 @@ export interface ReqFlowBridge {
   windowControl?(action: 'minimize' | 'close' | 'confirmClose' | 'confirmStopPublish'): Promise<void>;
   readTerminalClipboard?(): Promise<{ ok: boolean; text?: string; error?: string }>;
   writeTerminalClipboard?(text: string): Promise<{ ok: boolean; error?: string }>;
-  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[]): Promise<{ ok: boolean; reply?: string; reasoning?: string; toolCalls?: AIRequirementToolCall[]; items?: (AIDraft & { id?: string })[] | null; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
+  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[], contextToken?: string): Promise<{ ok: boolean; reply?: string; reasoning?: string; toolCalls?: AIRequirementToolCall[]; items?: (AIDraft & { id?: string })[] | null; error?: string; sourceCounts?: ChatSourceCounts }>;
+  prepareAIRequirementContext?(project: string, sources: ChatSources): Promise<{ ok: boolean; token?: string; counts?: ChatSourceCounts; error?: string }>;
+  getAIChatState?(project: string): Promise<{ ok: boolean; draft?: ChatDraft; sources?: ChatSources; error?: string }>;
+  saveAIChatDraft?(project: string, draft: ChatDraft | null, turn?: ChatTurn): Promise<{ ok: boolean; error?: string }>;
+  saveAIChatSources?(project: string, sources: ChatSources): Promise<{ ok: boolean; error?: string }>;
+  listAIChatHistory?(project: string): Promise<{ ok: boolean; entries?: ChatHistoryEntry[]; error?: string }>;
+  readAIChatHistory?(project: string, session: string): Promise<{ ok: boolean; messages?: ChatMessage[]; error?: string }>;
+  clearAIChatHistory?(project: string | null): Promise<{ ok: boolean; error?: string }>;
   gitPush?(root: string): Promise<GitOpResult>;
   gitPull?(root: string): Promise<GitOpResult>;
   getBackupSettings?(): Promise<{ ok: boolean; settings: BackupSettings; status: BackupStatus }>;

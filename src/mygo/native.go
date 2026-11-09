@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -20,6 +21,9 @@ window.addEventListener('keydown', event => {
   if (event.ctrlKey && !event.altKey && !event.metaKey &&
       ['+', '=', '-', '_', '0'].includes(event.key)) event.preventDefault();
 }, true);
+window.addEventListener('wheel', event => {
+  if (event.ctrlKey) event.preventDefault();
+}, { capture: true, passive: false });
 `
 
 type nativeHost struct {
@@ -94,9 +98,13 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 	}
 	switch method {
 	case "terminal.clipboard.read":
-		return mygo.Clipboard.ReadText(), nil
+		data, err := mygo.Clipboard.ReadFormat(transfer.Text)
+		if errors.Is(err, transfer.ErrFormat) {
+			return "", nil
+		}
+		return string(data), err
 	case "terminal.clipboard.write":
-		return nil, mygo.Clipboard.Write(transfer.TextData(firstString(args)))
+		return nil, writeTerminalClipboard(w, firstString(args))
 	case "window.confirmClose", "window.confirmStopPublish":
 		if n.confirmClose != nil {
 			n.confirmClose(method == "window.confirmStopPublish")

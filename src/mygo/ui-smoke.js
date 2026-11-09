@@ -50,6 +50,8 @@
   contextInput.remove();
   checks.nativeContextMenuDisabled = { ok: contextEvent.defaultPrevented && inputContextEvent.defaultPrevented };
   checks.zoomShortcutsDisabled = { ok: zoomBlocked && typingAllowed };
+  const wheel = ctrlKey => new WheelEvent('wheel', { ctrlKey, deltaY: 120, bubbles: true, cancelable: true });
+  checks.wheelZoomDisabled = { ok: !document.body.dispatchEvent(wheel(true)) && document.body.dispatchEvent(wheel(false)) };
   // REQ-138：顶部窗口栏横贯主区整条且为拖动区
   const topBar = document.querySelector('.desktop-app .top');
   checks.topDragStrip = { ok: getComputedStyle(topBar).getPropertyValue('--app-region').trim() === 'drag' && Math.abs(topBar.getBoundingClientRect().width - document.querySelector('.main').getBoundingClientRect().width) < 1 };
@@ -485,18 +487,17 @@
       const shell = document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm');
       const textarea = shell.querySelector('textarea');
       const noMenu = !shell.dispatchEvent(rightClick());
-      await new Promise(resolve => setTimeout(resolve, 80));
-      const noRightClickPaste = pasted.length === 0;
+      await waitFor(() => pasted.some(text => text.includes('粘贴测试\r下一行')));
       const key = (letter, shiftKey = false) => new KeyboardEvent('keydown', {
         key: letter, code: 'Key' + letter.toUpperCase(), keyCode: letter.toUpperCase().charCodeAt(0), ctrlKey: true, shiftKey, bubbles: true, cancelable: true,
       });
       textarea.dispatchEvent(key('v'));
-      await waitFor(() => pasted.some(text => text.includes('粘贴测试\r下一行')));
-      textarea.dispatchEvent(key('v', true));
       await waitFor(() => pasted.filter(text => text.includes('粘贴测试\r下一行')).length === 2);
+      textarea.dispatchEvent(key('v', true));
+      await waitFor(() => pasted.filter(text => text.includes('粘贴测试\r下一行')).length === 3);
       textarea.dispatchEvent(key('c'));
       await waitFor(() => pasted.includes('\x03'));
-      checks.terminalPaste = { ok: noMenu && noRightClickPaste && !document.querySelector('.terminal-copy-menu') };
+      checks.terminalPaste = { ok: noMenu && !document.querySelector('.terminal-copy-menu') };
     } finally {
       window.reqflow.readTerminalClipboard = originalReadClipboard;
       window.reqflow.writeTerminalClipboard = originalWriteClipboard;
@@ -594,6 +595,7 @@
       document.dispatchEvent(new MouseEvent('mouseup', point));
       await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
       clipboardWrites.length = 0;
+      terminalScreen.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 2 }));
       const copyWithoutMenu = !terminalScreen.dispatchEvent(rightClick());
       await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
       checks.terminalRightClickCopy = { ok: noSelectionCopy && copyWithoutMenu && reads === 0 && !document.querySelector('.terminal-copy-menu') };
@@ -1003,13 +1005,14 @@
         .map((item, index) => index === 0 ? { ...item, body: '按对话修改的说明' } : item);
       return { ok: true, reply: requests.length === 2 ? markdownReply : '对话检查回复 ' + requests.length, items,
         reasoning: '模型返回的思考摘要', toolCalls: [{ name: 'edit_requirement_drafts', operations: ['update'] }],
-        contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
+        sourceCounts: { overview: 2, images: args[4].length } };
     };
     try {
       await click(document.querySelector('[aria-label="选择记录需求方式"]'));
       await click(button('AI 需求'));
-      const chat = document.querySelector('.ai-requirements-dialog');
-      const input = chat.querySelector('.ai-chat-compose textarea');
+      let chat = document.querySelector('.ai-requirements-dialog');
+      let input = chat.querySelector('.ai-chat-compose textarea');
+      await waitFor(() => !input.readOnly && chat.querySelector('.ai-chat-context summary').textContent.includes('类'));
       const setMessage = async text => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, text);
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1052,8 +1055,35 @@
       const synchronized = change?.querySelector('summary')?.textContent.includes('修改') &&
         change.textContent.includes('按对话修改的说明') &&
         chat.querySelector('.ai-draft textarea').value === '按对话修改的说明';
+      await setMessage('关闭后恢复的输入');
+      await click(button('关闭'));
+      await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
+      await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+      await click(button('AI 需求'));
+      chat = document.querySelector('.ai-requirements-dialog');
+      input = chat.querySelector('.ai-chat-compose textarea');
+      await waitFor(() => !input.readOnly);
+      checks.aiChatDraftRecovery = { ok: input.value === '关闭后恢复的输入' && chat.querySelectorAll('.ai-draft').length === 2 && chat.textContent.includes('对话检查回复 3') };
+      await click(button('聊天历史'));
+      await waitFor(() => !!chat.querySelector('.ai-chat-history-entry'));
+      await click(chat.querySelector('.ai-chat-history-entry'));
+      await waitFor(() => chat.querySelector('[aria-label="历史消息"]').textContent.includes('对话检查回复 3'));
+      checks.aiChatLocalHistory = { ok: chat.querySelectorAll('[aria-label="历史消息"] time').length === 6 && !chat.querySelector('.ai-chat-compose') };
+      await click(button('返回当前会话'));
+      await click(chat.querySelector('.ai-chat-context summary'));
+      const imageToggle = () => [...chat.querySelectorAll('.ai-chat-source-row input')].at(-1);
+      await click(imageToggle());
+      await waitFor(() => !imageToggle().checked && !imageToggle().disabled && !button('发送').disabled);
+      const preferences = await window.reqflow.getAIChatState(requests[0][0]);
+      checks.aiChatSourceSettings = { ok: preferences.sources.images === false && !!requests[0][7] && chat.textContent.includes('来源 · 项目说明') };
+      await click(chat.querySelector('.ai-chat-context summary'));
+      await click(chat.querySelector('.ai-draft [aria-label^="删除候选"]'));
+      await click(button('确认删除'));
+      await waitFor(() => chat.querySelectorAll('.ai-draft').length === 1);
+      checks.aiChatCandidateDeletion = { ok: chat.textContent.includes('对话检查回复 3') && chat.querySelector('.ai-draft input[type="checkbox"]').checked };
       await click(button('提交到需求池 · 1 条'));
       await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
+      checks.aiChatSubmitClearsDraft = { ok: !(await window.reqflow.getAIChatState(requests[0][0])).draft };
       const saved = await window.reqflow.getWorkspace();
       const project = saved.state.projects.find(project => project.id === requests[0][0]);
       checks.aiRequirementChat = { ok: layoutOK && preserved && selectionOK && synchronized &&

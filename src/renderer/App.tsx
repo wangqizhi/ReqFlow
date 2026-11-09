@@ -1185,7 +1185,7 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} notify={notify} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} notify={notify} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} project={p} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
           const result = await bridge.getWorkspace();
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');

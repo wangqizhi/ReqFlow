@@ -21,7 +21,45 @@ function formatSize(bytes: number | undefined): string {
 }
 
 /** 数据用量与归档（REQ-112）：大小每 2 秒刷新，归档后立即能看到清理效果。 */
-function DataSettings({ notify, onArchived, onExport }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void> }) {
+type ChatProject = { id: string; name: string };
+
+function ChatHistoryCleanup({ project }: { project?: ChatProject }) {
+  const [target, setTarget] = useState<ChatProject | 'all'>();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean }>();
+  const scope = target === 'all' ? '全部项目' : target?.name;
+
+  async function clear() {
+    if (!target || busy) return;
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const result = await bridge.clearAIChatHistory?.(target === 'all' ? null : target.id);
+      if (!result?.ok) throw Error(result?.error || '本地历史记录不可用');
+      setTarget(undefined);
+      setMessage({ text: `已清理「${scope}」的聊天历史。` });
+    } catch (e) { setMessage({ text: `清理聊天历史失败：${(e as Error).message}`, error: true }); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="data-archive-section">
+    <h3>AI 需求聊天历史</h3>
+    <p className="settings-hint">历史记录保存在本机。清理范围仅包括历史消息，当前会话草稿和需求池继续保留。</p>
+    {target && <p className="settings-message" role="status">将永久清理「{scope}」的 AI 需求聊天历史。请确认范围。</p>}
+    <div className="settings-actions">
+      {target ? <>
+        <button className="btn" disabled={busy} onClick={() => setTarget(undefined)}>取消</button>
+        <button className="btn danger" disabled={busy} onClick={() => void clear()}>{busy ? '清理中…' : '确认清理聊天历史'}</button>
+      </> : <>
+        <button className="btn" disabled={!project || !bridge.clearAIChatHistory} onClick={() => { setMessage(undefined); setTarget(project); }}>清理当前项目历史…</button>
+        <button className="btn" disabled={!bridge.clearAIChatHistory} onClick={() => { setMessage(undefined); setTarget('all'); }}>清理全部聊天历史…</button>
+      </>}
+    </div>
+    {message && <p className={message.error ? 'error' : 'settings-message'} role={message.error ? 'alert' : 'status'}>{message.text}</p>}
+  </div>;
+}
+
+function DataSettings({ notify, onArchived, onExport, project }: { notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; project?: ChatProject }) {
   const [contextDir, setContextDir] = useState('');
   const [contextMoving, setContextMoving] = useState(false);
   useEffect(() => { void bridge.getContextSettings?.().then(r => { if (r.ok) setContextDir(r.dir || ''); }); }, []);
@@ -77,6 +115,7 @@ function DataSettings({ notify, onArchived, onExport }: { notify(text: string, k
   return <>
     <div className="data-archive-section"><h3>上下文数据目录</h3><label className="field">目录<input value={contextDir} disabled={contextMoving} onChange={e => setContextDir(e.target.value)} /></label><p className="settings-hint">每条上下文保存在此目录下的独立文件夹中，总结使用 Markdown，相关代码保留原始文件；系统存在 Git 时每次更新自动提交。迁移到空目录，原目录保留为恢复副本，工作区保留关联索引。</p><div className="settings-actions"><button className="btn" disabled={contextMoving || !bridge.pickDir} onClick={async () => { const dir = await bridge.pickDir?.(); if (dir?.ok && dir.dir) setContextDir(dir.dir); }}><FolderOpen size={16} />选择目录</button><button className="btn primary" disabled={contextMoving || !contextDir.trim() || !bridge.saveContextSettings} onClick={async () => { setContextMoving(true); try { const r = await bridge.saveContextSettings!(contextDir); if (!r.ok) throw Error(r.error || '迁移失败'); setContextDir(r.dir || contextDir); notify('上下文目录已迁移，原目录保留为恢复副本'); } catch (e: any) { notify(e.message, 'err'); } finally { setContextMoving(false); } }}>{contextMoving ? '迁移中…' : '保存并迁移上下文'}</button></div></div>
     <div className="data-export-section"><div><h3>完整数据备份</h3><p className="settings-hint">导出全部项目、需求、上下文与历史记录为 JSON 文件，便于备份或迁移。</p></div><button className="btn primary" disabled={exporting} onClick={async () => { setExporting(true); try { await onExport(); } catch (e: any) { notify(e.message, 'err'); } finally { setExporting(false); } }}><Download size={16} />{exporting ? '正在导出…' : '导出全部数据'}</button></div>
+    <ChatHistoryCleanup project={project} />
     <p className="settings-hint" title={usage?.dataDir}>{usage?.dataDir || usageError || '读取中…'}</p>
     <div className="validation-setting"><div><label>数据目录总大小</label><p>目录内全部文件（含图片附件、日志与备份配置）</p></div><span>{usage ? formatSize(usage.dirSize) : '—'}</span></div>
     <div className="validation-setting"><div><label>{usage?.backend === 'sqlite' ? 'SQLite 数据库大小' : '工作区文件大小'}</label><p title={usage?.databasePath}>{usage?.backend === 'sqlite' ? 'requirements.sqlite 实时大小，清理后立即变小' : 'workspace.json 当前大小'}</p></div><span>{usage ? formatSize(usage.databaseSize) : '—'}</span></div>
@@ -111,7 +150,7 @@ export type SettingsPageHandle = { requestLeave(): void };
 function fingerprint(value: unknown): string {
   return JSON.stringify(value, (_, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
 }
-export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; onBusyChange(busy: boolean): void; onLeave(): void }>(function SettingsPage({ tab, notify, onArchived, onExport, onBusyChange, onLeave }, ref) {
+export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; project?: ChatProject; notify(text: string, kind?: 'ok' | 'err'): void; onArchived?(): void; onExport(): Promise<void>; onBusyChange(busy: boolean): void; onLeave(): void }>(function SettingsPage({ tab, project, notify, onArchived, onExport, onBusyChange, onLeave }, ref) {
   const [form, setForm] = useState<AISettings>({ provider: '', url: '', apiKey: '' });
   const [backup, setBackup] = useState<BackupSettings>({ ...emptyBackup });
   const [status, setStatus] = useState<BackupStatus>({ running: false });
@@ -467,7 +506,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; notify
         {tab === 'memory' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
           <MemorySettingsPanel value={memory} change={setMemory} info={memoryInfo} disabled={busy || !memoryLoaded} error={memoryError} notify={notify} />
         </form>}
-        {tab === 'data' && <DataSettings notify={notify} onArchived={onArchived} onExport={onExport} />}
+        {tab === 'data' && <DataSettings project={project} notify={notify} onArchived={onArchived} onExport={onExport} />}
       </div>
       {message && <p className={'settings-message' + (messageKind === 'err' ? ' err' : '')} role={messageKind === 'err' ? 'alert' : 'status'}>{message}</p>}
       <div className="settings-footer"><button className="btn open-config-dir" disabled={busy || !bridge.openConfigDir} title={bridge.openConfigDir ? '从资源管理器打开当前配置与数据目录' : '仅桌面版可用'} onClick={() => perform(() => bridge.openConfigDir!(), '已打开配置目录')}><FolderOpen />打开配置目录</button>{tab !== 'data' && tab !== 'server' && <button className="btn primary" disabled={busy || saving || !tabReady} onClick={() => void saveAndFinish()}>{saving ? '保存中…' : '保存设置'}</button>}</div>

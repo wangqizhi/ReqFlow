@@ -3,6 +3,7 @@ package backendgo
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -297,6 +298,108 @@ func TestAIRequirementChatSendsImagesAndRetainsDrafts(t *testing.T) {
 				t.Fatal("accepted non-image attachment")
 			}
 		})
+	}
+}
+
+func TestAIChatPreparedContextExcludesDisabledSources(t *testing.T) {
+	b := aiTestBackend(t)
+	workspace, err := b.Workspace.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := aiMap(aiArray(aiMap(workspace["state"])["projects"])[0])
+	id := aiString(project["id"])
+	sources := map[string]any{"overview": false, "guidance": false, "git": false, "requirements": false, "files": false, "images": false}
+	preview, _, err := b.InvokeAI("ai:requirements:context", []any{id, sources})
+	if err != nil || len(aiMap(preview)["counts"].(map[string]int)) != 0 {
+		t.Fatalf("unexpected context preview: %v, %v", preview, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		messages := aiArray(payload["messages"])
+		prompt := aiString(aiMap(messages[0])["content"])
+		if !strings.Contains(prompt, "具体的澄清问题") || !strings.Contains(prompt, "不要替用户决定关键假设") {
+			t.Error("chat does not instruct the model to clarify material ambiguity")
+		}
+		var context map[string]any
+		if err := json.Unmarshal([]byte(aiString(aiMap(messages[1])["content"])), &context); err != nil {
+			t.Error(err)
+		}
+		for _, key := range []string{"project", "recentRequirements", "files", "gitLog", "imageTurn"} {
+			if coreHas(context, key) {
+				t.Errorf("disabled source leaked: %s", key)
+			}
+		}
+		if len(aiArray(context["currentDrafts"])) != 1 || len(aiArray(context["discussion"])) != 1 {
+			t.Error("turn lost its discussion or candidate data")
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"在哪些项目启用？"}}]}`)
+	}))
+	defer server.Close()
+	if _, err := b.saveAISettings(aiTestSettings(server.URL)); err != nil {
+		t.Fatal(err)
+	}
+	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMr8AAAAASUVORK5CYII="
+	args := []any{id, "chat", "继续讨论", []any{map[string]any{"role": "user", "content": "增加提示"}}, []any{png}, "current", []any{map[string]any{"id": "kept"}}, aiMap(preview)["token"]}
+	result, _, err := b.InvokeAI("ai:requirements", args)
+	if err != nil || aiMap(result)["reply"] != "在哪些项目启用？" || aiMap(result)["sourceCounts"].(map[string]int)["images"] != 0 {
+		t.Fatalf("unexpected chat result: %v, %v", result, err)
+	}
+	args[7] = "invalid"
+	if _, _, err := b.InvokeAI("ai:requirements", args); err == nil {
+		t.Fatal("unrecognized preview was accepted")
+	}
+}
+
+func TestAIChatStoreKeepsDraftAndHistorySeparate(t *testing.T) {
+	dir := t.TempDir()
+	b := NewBackend(dir, dir, "2.18.0")
+	invoke := func(channel string, args ...any) map[string]any {
+		t.Helper()
+		result, handled, err := b.InvokeAI(channel, args)
+		if err != nil || !handled || aiMap(result)["ok"] != true {
+			t.Fatalf("%s: %v, %v", channel, result, err)
+		}
+		return aiMap(result)
+	}
+	draft := map[string]any{"id": "session", "input": "待发送"}
+	turn := func(stamp, text string) map[string]any {
+		return map[string]any{"session": "session", "time": stamp, "title": text, "messages": []any{
+			map[string]any{"role": "user", "content": text}, map[string]any{"role": "assistant", "content": "回复 " + text},
+		}}
+	}
+	invoke("ai:chat:save-sources", "project-a", map[string]any{"images": false})
+	invoke("ai:chat:save-draft", "project-a", draft, turn("2026-11-09T08:00:00Z", "第一轮"))
+	invoke("ai:chat:save-draft", "project-a", draft, turn("2026-11-09T08:01:00Z", "第二轮"))
+	invoke("ai:chat:save-draft", "project-b", draft, turn("2026-11-09T08:02:00Z", "另一个项目"))
+	b = NewBackend(dir, dir, "2.18.0")
+	state := invoke("ai:chat:state", "project-a")
+	if aiMap(state["draft"])["input"] != "待发送" || aiMap(state["sources"])["images"] != false || invoke("ai:chat:state", "missing")["draft"] != nil {
+		t.Fatal("draft or preferences did not persist by project")
+	}
+	messages := invoke("ai:chat:read-history", "project-a", "session")["messages"].([]json.RawMessage)
+	if len(messages) != 4 || !bytes.Contains(messages[0], []byte("第一轮")) || !bytes.Contains(messages[3], []byte("回复 第二轮")) {
+		t.Fatal("conversation order changed")
+	}
+	invoke("ai:chat:clear-history", "project-a")
+	if len(invoke("ai:chat:history", "project-a")["entries"].([]map[string]string)) != 0 ||
+		len(invoke("ai:chat:history", "project-b")["entries"].([]map[string]string)) != 1 || invoke("ai:chat:state", "project-a")["draft"] == nil {
+		t.Fatal("project history cleanup affected draft or another project")
+	}
+	invoke("ai:chat:save-draft", "project-a", draft, turn("2026-11-09T08:03:00Z", "新一轮"))
+	if len(invoke("ai:chat:read-history", "project-a", "session")["messages"].([]json.RawMessage)) != 2 {
+		t.Fatal("cleared historical messages were restored when continuing a draft")
+	}
+	invoke("ai:chat:save-draft", "project-a", nil)
+	if invoke("ai:chat:state", "project-a")["draft"] != nil || len(invoke("ai:chat:history", "project-a")["entries"].([]map[string]string)) != 1 {
+		t.Fatal("discarding the draft must leave history intact")
+	}
+	invoke("ai:chat:clear-history", nil)
+	if len(invoke("ai:chat:history", "project-b")["entries"].([]map[string]string)) != 0 {
+		t.Fatal("all-project cleanup left history")
 	}
 }
 

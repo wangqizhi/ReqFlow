@@ -2,6 +2,10 @@ import { type MouseEvent, useEffect, useRef, useState } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { bridge } from './api';
 
+// Serialize clipboard writes across terminals so that an immediate paste sees
+// the last selection, even when the native bridge resolves out of order.
+let clipboardWrite = Promise.resolve(true);
+
 async function copyText(text: string) {
   try {
     if ((await bridge.writeTerminalClipboard?.(text))?.ok) return true;
@@ -49,20 +53,36 @@ export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
   useEffect(() => () => clearTimeout(messageTimer.current), []);
 
   async function copy(text: string, success = '已复制选中内容') {
-    if (text) notify(await copyText(text) ? success : '复制失败，请重试');
+    if (!text) return false;
+    clipboardWrite = clipboardWrite.catch(() => false).then(() => copyText(text));
+    const copied = await clipboardWrite;
+    notify(copied ? success : '复制失败，请重试');
+    return copied;
   }
 
   async function paste(terminal: Terminal) {
     if (terminal.options.disableStdin) return;
     terminal.focus();
     try {
+      await clipboardWrite;
       const result = await bridge.readTerminalClipboard?.();
       if (result && !result.ok) throw Error(result.error);
       const text = result ? result.text : await navigator.clipboard.readText();
-      if (text && xterm?.current === terminal && !terminal.options.disableStdin) terminal.paste(text);
+      if (text && xterm?.current === terminal && !terminal.options.disableStdin) {
+        terminal.paste(text);
+        notify('已粘贴剪贴板内容');
+      }
     } catch {
       if (xterm?.current === terminal) notify('粘贴失败，请重试');
     }
+  }
+
+  function onMouseDown(event: MouseEvent<HTMLElement>) {
+    if (event.button !== 2) return;
+    // Keep the selection and keep mouse-reporting applications from consuming
+    // the desktop clipboard gesture before contextmenu fires.
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   function onContextMenu(event: MouseEvent<HTMLElement>) {
@@ -73,10 +93,30 @@ export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
     const selection = window.getSelection();
     const domSelection = selection && region.contains(selection.anchorNode) && region.contains(selection.focusNode) ? selection.toString() : '';
     const history = region.querySelector<HTMLElement>('.agent-history-view:not([hidden])');
-    const selected = domSelection || (!history ? terminal?.getSelection() : '') || '';
+    const selected = history || !terminal ? domSelection : terminal.getSelection() || domSelection;
+    if (terminal && !history && !terminal.options.disableStdin) {
+      if (selected && !event.shiftKey) {
+        void copy(selected).then(copied => {
+          if (copied && terminal.getSelection() === selected) terminal.clearSelection();
+        });
+      } else {
+        void paste(terminal);
+      }
+      return;
+    }
     const text = selected || (history ? history.innerText : terminal ? visibleTerminalText(terminal) : region.innerText);
     if (text) void copy(text, selected ? '已复制选中内容' : '已复制终端输出');
     else notify('暂无可复制的终端输出');
+  }
+
+  function onMouseUp(event: MouseEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    const region = event.currentTarget;
+    if (xterm?.current && !region.querySelector('.agent-history-view:not([hidden])')) return;
+    const selection = window.getSelection();
+    if (selection && region.contains(selection.anchorNode) && region.contains(selection.focusNode)) {
+      void copy(selection.toString());
+    }
   }
 
   function bind(terminal: Terminal) {
@@ -95,5 +135,5 @@ export function useTerminalClipboard(xterm?: React.RefObject<Terminal | null>) {
     return terminal.onSelectionChange(() => void copy(terminal.getSelection()));
   }
 
-  return { bind, message, onContextMenu };
+  return { bind, message, onContextMenu, onMouseDown, onMouseUp };
 }

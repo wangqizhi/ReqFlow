@@ -31,7 +31,7 @@ const labels: Record<AIConsoleEntry['kind'], string> = { send: '→ 发送', rec
 
 export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void }) {
   const { entries, pending } = useAIConsole();
-  const { message, onContextMenu } = useTerminalClipboard();
+  const { message, onContextMenu, onMouseDown, onMouseUp } = useTerminalClipboard();
   const body = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useEffect(() => { const el = body.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [entries]);
@@ -43,7 +43,7 @@ export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void
     </header>
     {tabs}
     <div className="publish-terminal-body">
-      <div className="ai-console-log" ref={body} tabIndex={0} role="log" aria-label="AI 交互记录" onContextMenu={onContextMenu}
+      <div className="ai-console-log" ref={body} tabIndex={0} role="log" aria-label="AI 交互记录" onContextMenuCapture={onContextMenu} onMouseDownCapture={onMouseDown} onMouseUp={onMouseUp}
         onScroll={e => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 8; }}>
         {entries.map(e => <div key={e.id} className={'ai-console-entry ' + e.kind}>
           <div className="ai-console-line"><span className="ai-console-time">[{e.time}]</span> <span className="ai-console-kind">{labels[e.kind]}</span> {e.title}</div>
