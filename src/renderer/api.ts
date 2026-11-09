@@ -110,7 +110,7 @@ export interface ReqFlowBridge {
   closeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   maximizeProjectBrowser?(id: string): Promise<{ ok: boolean; error?: string }>;
   windowControl?(action: 'minimize' | 'close' | 'confirmClose'): Promise<void>;
-  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[]): Promise<{ ok: boolean; reply?: string; items?: AIDraft[]; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
+  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[]): Promise<{ ok: boolean; reply?: string; items?: (AIDraft & { id?: string })[] | null; error?: string; contextNote?: string; contextFiles?: string[]; requirementCount?: number }>;
   gitPush?(root: string): Promise<GitOpResult>;
   gitPull?(root: string): Promise<GitOpResult>;
   getBackupSettings?(): Promise<{ ok: boolean; settings: BackupSettings; status: BackupStatus }>;

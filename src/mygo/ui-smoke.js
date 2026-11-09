@@ -527,6 +527,35 @@
     terminalBody.style.maxWidth = '';
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await waitFor(() => !veilVisible());
+    const terminalScreen = terminalBody.querySelector('.xterm-screen');
+    const copyEvent = () => new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: innerWidth - 2, clientY: innerHeight - 2 });
+    const terminalMenu = () => document.querySelector('.terminal-copy-menu');
+    terminalScreen.dispatchEvent(copyEvent());
+    await waitFor(() => !!terminalMenu());
+    const emptyCopyDisabled = terminalMenu().querySelector('button').disabled;
+    terminalMenu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !terminalMenu());
+    const clipboardWrites = [];
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator.clipboard, 'writeText');
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => clipboardWrites.push(text) });
+    try {
+      const rows = [...terminalBody.querySelectorAll('.xterm-accessibility-tree > div')];
+      const row = rows.find(el => el.textContent.trim() === 'stream-last').getBoundingClientRect();
+      const point = { bubbles: true, button: 0, clientX: row.left + 10, clientY: row.top + row.height / 2 };
+      terminalScreen.dispatchEvent(new MouseEvent('mousedown', { ...point, detail: 3 }));
+      document.dispatchEvent(new MouseEvent('mouseup', point));
+      await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
+      clipboardWrites.length = 0;
+      terminalScreen.dispatchEvent(copyEvent());
+      await waitFor(() => !!terminalMenu());
+      const menuBounds = terminalMenu().getBoundingClientRect();
+      await click(terminalMenu().querySelector('button'));
+      await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
+      checks.terminalRightClickCopy = { ok: emptyCopyDisabled && !terminalMenu() && menuBounds.right <= innerWidth && menuBounds.bottom <= innerHeight };
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator.clipboard, 'writeText', clipboardDescriptor);
+      else delete navigator.clipboard.writeText;
+    }
     await switchProject(originalProject);
     // REQ-258：未启动发布的项目没有发布页签，发布输出不跨项目泄漏
     checks.terminalIsolation = { ok: !publishTabPanel() && !publishTabButton() && !terminalText().includes('stream-first') && !terminalText().includes('stream-last') };
@@ -918,6 +947,58 @@
     await waitFor(() => !document.querySelector('.requirement-dialog [aria-label="关闭"]')?.disabled);
     document.querySelector('.requirement-dialog').closest('.overlay').click();
     await waitFor(() => !document.querySelector('.requirement-dialog'));
+    // REQ-305: images and draft selection survive a discussion turn, and only checked drafts are saved.
+    const originalChat = window.reqflow.aiRequirements;
+    const requests = [];
+    const chatDrafts = ['AI 对话检查·已勾选', 'AI 对话检查·已取消'].map(title => ({ title, body: title + '的正文', type: 'feature', priority: 'P1', criteria: [] }));
+    window.reqflow.aiRequirements = async (...args) => {
+      requests.push(args);
+      const items = requests.length === 1 ? chatDrafts : requests.length === 2 ? null : args[6].slice().reverse();
+      return { ok: true, reply: '对话检查回复 ' + requests.length, items, contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
+    };
+    try {
+      await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+      await click(button('AI 需求'));
+      const chat = document.querySelector('.ai-requirements-dialog');
+      const input = chat.querySelector('.ai-chat-compose textarea');
+      const setMessage = async text => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 60));
+      };
+      const data = new DataTransfer();
+      const image = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMr8AAAAASUVORK5CYII='), c => c.charCodeAt(0));
+      data.items.add(new File([image], '聊天室.png', { type: 'image/png' }));
+      input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+      await waitFor(() => !!chat.querySelector('.ai-chat-compose img'));
+      await click(button('发送'));
+      await waitFor(() => chat.querySelectorAll('.ai-draft').length === 2);
+      await click(chat.querySelectorAll('.ai-draft input[type="checkbox"]')[1]);
+      await setMessage('先讨论图中细节');
+      await click(button('发送'));
+      await waitFor(() => chat.textContent.includes('对话检查回复 2'));
+      const afterDiscussion = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
+      const preserved = afterDiscussion[0].checked && !afterDiscussion[1].checked;
+      await setMessage('调整候选需求顺序');
+      await click(button('发送'));
+      await waitFor(() => chat.textContent.includes('对话检查回复 3'));
+      const afterRevision = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
+      const chatRect = chat.querySelector('.ai-chat').getBoundingClientRect();
+      const draftRect = chat.querySelector('.ai-drafts').getBoundingClientRect();
+      const layoutOK = chatRect.right < draftRect.left && chat.querySelector('.dialog-foot').getBoundingClientRect().bottom < innerHeight;
+      const selectionOK = !afterRevision[0].checked && afterRevision[1].checked;
+      await click(button('提交到需求池 · 1 条'));
+      await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
+      const saved = await window.reqflow.getWorkspace();
+      const project = saved.state.projects.find(project => project.id === requests[0][0]);
+      checks.aiRequirementChat = { ok: layoutOK && preserved && selectionOK &&
+        requests[0][1] === 'chat' && requests[0][4][0].startsWith('data:image/png;base64,') && requests[0][5] === 'current' &&
+        requests[1][4][0] === requests[0][4][0] && requests[1][5] === 'previous' &&
+        project.items.some(item => item.title === chatDrafts[0].title && item.status === 'ready') &&
+        !project.items.some(item => item.title === chatDrafts[1].title) };
+    } finally {
+      window.reqflow.aiRequirements = originalChat;
+    }
     // REQ-151：编辑设置浮层按功能分 tab；REQ-150：引导词输入 @ 补全文件与目录
     const linkedDir = document.querySelector('.guide-settings-summary .linked-dir');
     await click(button('编辑设置'));

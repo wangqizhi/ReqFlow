@@ -196,6 +196,68 @@ func TestAIRequirementsChannelUsesGoWorkspace(t *testing.T) {
 	}
 }
 
+func TestAIRequirementChatSendsImagesAndRetainsDrafts(t *testing.T) {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMr8AAAAASUVORK5CYII="
+	for _, format := range []string{"openai", "anthropic"} {
+		t.Run(format, func(t *testing.T) {
+			b := aiTestBackend(t)
+			workspace, err := b.Workspace.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			project := aiMap(aiArray(aiMap(workspace["state"])["projects"])[0])
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&payload)
+				messages := aiArray(payload["messages"])
+				parts := aiArray(aiMap(messages[len(messages)-1])["content"])
+				if len(parts) != 2 {
+					t.Error("expected text and image parts")
+					http.Error(w, "missing parts", http.StatusBadRequest)
+					return
+				}
+				var context map[string]any
+				if err := json.Unmarshal([]byte(aiString(aiMap(parts[0])["text"])), &context); err != nil ||
+					context["mode"] != "chat" || context["imageTurn"] != "previous" ||
+					len(aiArray(context["discussion"])) != 1 || len(aiArray(context["currentDrafts"])) != 1 ||
+					aiMap(context["project"])["name"] != project["name"] {
+					t.Errorf("unexpected chat context: %v", err)
+				}
+				image := aiMap(parts[1])
+				reply := `{"reply":"继续讨论","items":null}`
+				if format == "anthropic" {
+					source := aiMap(image["source"])
+					if image["type"] != "image" || source["media_type"] != "image/png" || source["data"] != png {
+						t.Error("invalid Anthropic image block")
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]any{"type": "text", "text": reply}}})
+				} else {
+					if image["type"] != "image_url" || aiMap(image["image_url"])["url"] != "data:image/png;base64,"+png {
+						t.Error("invalid OpenAI image block")
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
+				}
+			}))
+			defer server.Close()
+			settings := aiTestSettings(server.URL)
+			settings["format"] = format
+			if _, err = b.saveAISettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			args := []any{project["id"], "chat", "讨论上张图", []any{map[string]any{"role": "user", "content": "截图"}}, []any{"data:image/png;base64," + png}, "previous", []any{map[string]any{"id": "candidate-1", "title": "已有候选"}}}
+			value, handled, err := b.InvokeAI("ai:requirements", args)
+			result := aiMap(value)
+			if err != nil || !handled || result["reply"] != "继续讨论" || !coreHas(result, "items") || result["items"] != nil {
+				t.Fatalf("chat request failed: %v, %v", result, err)
+			}
+			args[4] = []any{"data:image/png;base64,SGVsbG8="}
+			if _, _, err := b.InvokeAI("ai:requirements", args); err == nil {
+				t.Fatal("accepted non-image attachment")
+			}
+		})
+	}
+}
+
 func TestAICommitChannelUsesActualStagedGitDiff(t *testing.T) {
 	b := aiTestBackend(t)
 	workspace, err := b.Workspace.Get()

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { Minus, Trash } from './icons';
+import { useTerminalCopy } from './terminal-copy';
 
 /** 底部终端「AI 交互」页签（REQ-295）：记录发送给 AI 供应商的内容与收到的回复，供用户查看交互过程。 */
 export type AIConsoleEntry = { id: number; time: string; kind: 'send' | 'recv' | 'info' | 'error'; title: string; text?: string };
@@ -30,18 +31,19 @@ const labels: Record<AIConsoleEntry['kind'], string> = { send: '→ 发送', rec
 
 export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void }) {
   const { entries, pending } = useAIConsole();
+  const { message, onContextMenu, copyMenu } = useTerminalCopy();
   const body = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useEffect(() => { const el = body.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [entries]);
   return <section className="publish-terminal ai-console" aria-label="AI 交互">
     <header><strong>Terminal · AI 交互</strong>
-      <span className={'terminal-status' + (pending ? ' waiting' : '')} role="status">{pending ? '等待 AI 响应…' : entries.length ? '展示发送给 AI 供应商的内容与收到的回复' : '暂无 AI 交互记录'}</span>
+      <span className={'terminal-status' + (pending ? ' waiting' : '')} role="status">{message || (pending ? '等待 AI 响应…' : entries.length ? '展示发送给 AI 供应商的内容与收到的回复' : '暂无 AI 交互记录')}</span>
       <button className="icon-btn" aria-label="清空 AI 交互记录" title="清空记录" disabled={!entries.length || !!pending} onClick={() => aiConsole.clear()}><Trash size={15} /></button>
       <button className="icon-btn" aria-label="收起 AI 交互终端" title="收起" onClick={onClose}><Minus size={16} /></button>
     </header>
     {tabs}
     <div className="publish-terminal-body">
-      <div className="ai-console-log" ref={body} tabIndex={0} role="log" aria-label="AI 交互记录"
+      <div className="ai-console-log" ref={body} tabIndex={0} role="log" aria-label="AI 交互记录" onContextMenu={onContextMenu}
         onScroll={e => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 8; }}>
         {entries.map(e => <div key={e.id} className={'ai-console-entry ' + e.kind}>
           <div className="ai-console-line"><span className="ai-console-time">[{e.time}]</span> <span className="ai-console-kind">{labels[e.kind]}</span> {e.title}</div>
@@ -49,5 +51,6 @@ export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void
         </div>)}
       </div>
     </div>
+    {copyMenu}
   </section>;
 }
