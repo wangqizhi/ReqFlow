@@ -777,6 +777,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .ai-chat-compose .field { margin-bottom: 8px; }
 .ai-chat-compose textarea { resize: none; }
 .ai-chat-compose > p { margin: 8px 0 0; }
+.ai-chat-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.ai-chat-usage progress { width: 56px; height: 6px; accent-color: var(--accent); }
 .ai-chat-actions, .ai-draft-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ai-chat-actions { justify-content: space-between; }
 .ai-chat-images { display: flex; gap: 10px; overflow-x: auto; margin: 6px 0 10px; }

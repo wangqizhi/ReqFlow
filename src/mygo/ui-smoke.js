@@ -236,6 +236,16 @@
       await new Promise(resolve => setTimeout(resolve, 50));
     };
     const settingsTab = text => [...document.querySelectorAll('[aria-label="设置功能菜单"] button')].find(el => el.textContent === text);
+    const capacityInput = document.querySelector('input[aria-describedby="ai-chat-context-capacity-hint"]');
+    await edit(capacityInput, '100');
+    await click(button('保存设置'));
+    await waitFor(() => document.querySelector('.settings-message.err')?.textContent.includes('8192'));
+    const invalidCapacityPreserved = capacityInput.value === '100';
+    await edit(capacityInput, '128000');
+    await click(button('保存设置'));
+    await waitFor(saveButtonReady);
+    const savedCapacity = await window.mygo.call('ReqFlow.Invoke', 'ai:settings:get', []);
+    checks.aiChatCapacitySetting = { ok: invalidCapacityPreserved && savedCapacity.settings.chatContextTokens === 128000 };
     // REQ-294：全局记忆可在设置中配置预留大小与手动记忆，保存后生成文件并拼接进开发 Prompt。
     await click(settingsTab('全局记忆'));
     await waitFor(() => document.querySelectorAll('.memory-note-preview').length === 6 && !document.querySelector('.memory-settings input[type="number"]').disabled);
@@ -997,15 +1007,21 @@
     // REQ-305: images and draft selection survive a discussion turn, and only checked drafts are saved.
     const originalChat = window.reqflow.aiRequirements;
     const requests = [];
+    const held = new Map();
     const markdownReply = '### 对话检查回复 2\n\n- **讨论要点**\n- `候选保留`';
     const chatDrafts = ['AI 对话检查·已勾选', 'AI 对话检查·已取消'].map(title => ({ title, body: title + '的正文', type: 'feature', priority: 'P1', criteria: [] }));
+    chatDrafts[1].body += '。待确认：启用范围。';
     window.reqflow.aiRequirements = async (...args) => {
       requests.push(args);
-      const items = requests.length === 1 ? chatDrafts : requests.length === 2 ? null : args[6].slice().reverse()
+      const turn = requests.length;
+      if (turn >= 2) await new Promise(resolve => held.set(turn, resolve));
+      if (turn === 4) return { ok: false, error: '模拟回复失败' };
+      const items = turn === 1 ? chatDrafts : turn === 2 ? null : args[6].slice().reverse()
         .map((item, index) => index === 0 ? { ...item, body: '按对话修改的说明' } : item);
-      return { ok: true, reply: requests.length === 2 ? markdownReply : '对话检查回复 ' + requests.length, items,
+      return { ok: true, reply: turn === 1 ? '第二条候选应在哪些项目启用？' : turn === 2 ? markdownReply : '对话检查回复 ' + turn, items,
         reasoning: '模型返回的思考摘要', toolCalls: [{ name: 'edit_requirement_drafts', operations: ['update'] }],
-        sourceCounts: { overview: 2, images: args[4].length } };
+        sourceCounts: { overview: 2, images: args[4].length },
+        usage: { capacity: 256000, contextTokens: 205000, inputTokens: 100, outputTokens: 20, tps: 10, compressedMessages: turn === 3 ? 2 : 0 } };
     };
     try {
       await click(document.querySelector('[aria-label="选择记录需求方式"]'));
@@ -1025,10 +1041,20 @@
       await waitFor(() => !!chat.querySelector('.ai-chat-compose img'));
       await click(button('发送'));
       await waitFor(() => chat.querySelectorAll('.ai-draft').length === 2);
+      const clarificationWithDraft = chat.textContent.includes('第二条候选应在哪些项目启用？') &&
+        chat.querySelectorAll('.ai-draft textarea')[2].value.includes('待确认：启用范围');
       await click(chat.querySelectorAll('.ai-draft input[type="checkbox"]')[1]);
       const plainMessage = '**先讨论图中细节**';
       await setMessage(plainMessage);
       await click(button('发送'));
+      await waitFor(() => held.has(2));
+      const canEditWhileSending = !input.readOnly && input.value === '';
+      await setMessage('第一版暂存');
+      await click(button('暂存下一条'));
+      const revisedMessage = '第二条只对当前项目启用，请同时调整候选顺序';
+      await setMessage(revisedMessage);
+      const noParallelRequest = requests.length === 2;
+      held.get(2)();
       await waitFor(() => chat.textContent.includes('对话检查回复 2'));
       const message = [...chat.querySelectorAll('.ai-discussion.assistant')].at(-1);
       const previewOK = () => message.querySelector('h3')?.textContent === '对话检查回复 2' && !!message.querySelector('li strong') && !!message.querySelector('li code');
@@ -1036,15 +1062,17 @@
       await click(message.querySelector('button'));
       const rawOK = message.querySelector('.ai-discussion-source')?.textContent === markdownReply;
       await click(message.querySelector('button'));
-      const userMessage = [...chat.querySelectorAll('.ai-discussion.user')].at(-1);
+      const userMessage = [...chat.querySelectorAll('.ai-discussion.user')].find(node => node.textContent === plainMessage);
       const plainOK = userMessage?.textContent === plainMessage && !userMessage.querySelector('button, strong');
       checks.aiChatMarkdown = { ok: initiallyRendered && rawOK && previewOK() && plainOK };
       checks.aiChatProcess = { ok: message.querySelector('.ai-chat-trace')?.textContent.includes('模型返回的思考摘要') &&
         [...message.querySelectorAll('.ai-chat-trace')].some(trace => trace.textContent.includes('edit_requirement_drafts') && trace.textContent.includes('修改候选')) };
       const afterDiscussion = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
       const preserved = afterDiscussion[0].checked && !afterDiscussion[1].checked;
-      await setMessage('调整候选需求顺序');
-      await click(button('发送'));
+      await waitFor(() => held.has(3));
+      checks.aiChatQueueOrder = { ok: canEditWhileSending && noParallelRequest &&
+        requests[2][2] === revisedMessage && requests[2][3].at(-1).content === markdownReply };
+      held.get(3)();
       await waitFor(() => chat.textContent.includes('对话检查回复 3'));
       const afterRevision = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
       const chatRect = chat.querySelector('.ai-chat').getBoundingClientRect();
@@ -1055,6 +1083,7 @@
       const synchronized = change?.querySelector('summary')?.textContent.includes('修改') &&
         change.textContent.includes('按对话修改的说明') &&
         chat.querySelector('.ai-draft textarea').value === '按对话修改的说明';
+      checks.aiChatClarification = { ok: clarificationWithDraft && synchronized && requests[1][6][1].id === requests[2][6][1].id };
       await setMessage('关闭后恢复的输入');
       await click(button('关闭'));
       await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
@@ -1064,12 +1093,16 @@
       input = chat.querySelector('.ai-chat-compose textarea');
       await waitFor(() => !input.readOnly);
       checks.aiChatDraftRecovery = { ok: input.value === '关闭后恢复的输入' && chat.querySelectorAll('.ai-draft').length === 2 && chat.textContent.includes('对话检查回复 3') };
+      checks.aiChatUsageRecovery = { ok: chat.querySelector('.ai-chat-usage').textContent.includes('容量接近上限') &&
+        chat.querySelector('.ai-chat-usage').textContent.includes('输入 300 · 输出 60') &&
+        chat.querySelector('.ai-chat-usage').textContent.includes('10.0 TPS') && chat.textContent.includes('已压缩 2 条历史消息') };
       await click(button('聊天历史'));
       await waitFor(() => !!chat.querySelector('.ai-chat-history-entry'));
       await click(chat.querySelector('.ai-chat-history-entry'));
       await waitFor(() => chat.querySelector('[aria-label="历史消息"]').textContent.includes('对话检查回复 3'));
       checks.aiChatLocalHistory = { ok: chat.querySelectorAll('[aria-label="历史消息"] time').length === 6 && !chat.querySelector('.ai-chat-compose') };
       await click(button('返回当前会话'));
+      input = chat.querySelector('.ai-chat-compose textarea');
       await click(chat.querySelector('.ai-chat-context summary'));
       const imageToggle = () => [...chat.querySelectorAll('.ai-chat-source-row input')].at(-1);
       await click(imageToggle());
@@ -1077,13 +1110,34 @@
       const preferences = await window.reqflow.getAIChatState(requests[0][0]);
       checks.aiChatSourceSettings = { ok: preferences.sources.images === false && !!requests[0][7] && chat.textContent.includes('来源 · 项目说明') };
       await click(chat.querySelector('.ai-chat-context summary'));
+      await click(button('发送'));
+      await waitFor(() => held.has(4));
+      await setMessage('失败后保留');
+      await click(button('暂存下一条'));
+      held.get(4)();
+      await waitFor(() => chat.textContent.includes('暂存消息已保留'));
+      checks.aiChatQueueFailure = { ok: requests.length === 4 && input.value === '失败后保留' && chat.textContent.includes('模拟回复失败') };
+      await click(button('发送'));
+      await waitFor(() => held.has(5));
+      await setMessage('关闭时保留暂存');
+      await click(button('暂存下一条'));
+      await click(button('保留草稿并关闭'));
+      await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
+      held.get(5)();
+      await click(document.querySelector('[aria-label="选择记录需求方式"]'));
+      await click(button('AI 需求'));
+      chat = document.querySelector('.ai-requirements-dialog');
+      input = chat.querySelector('.ai-chat-compose textarea');
+      await waitFor(() => !input.readOnly);
+      checks.aiChatQueueClose = { ok: requests.length === 5 && input.value === '关闭时保留暂存' && chat.textContent.includes('暂存消息已保留') };
       await click(chat.querySelector('.ai-draft [aria-label^="删除候选"]'));
       await click(button('确认删除'));
       await waitFor(() => chat.querySelectorAll('.ai-draft').length === 1);
       checks.aiChatCandidateDeletion = { ok: chat.textContent.includes('对话检查回复 3') && chat.querySelector('.ai-draft input[type="checkbox"]').checked };
       await click(button('提交到需求池 · 1 条'));
       await waitFor(() => !document.querySelector('.ai-requirements-dialog'));
-      checks.aiChatSubmitClearsDraft = { ok: !(await window.reqflow.getAIChatState(requests[0][0])).draft };
+      const afterSubmit = (await window.reqflow.getAIChatState(requests[0][0])).draft;
+      checks.aiChatSubmitClearsDraft = { ok: afterSubmit?.queued && afterSubmit.input === '关闭时保留暂存' && !afterSubmit.drafts.length && !afterSubmit.messages.length };
       const saved = await window.reqflow.getWorkspace();
       const project = saved.state.projects.find(project => project.id === requests[0][0]);
       checks.aiRequirementChat = { ok: layoutOK && preserved && selectionOK && synchronized &&

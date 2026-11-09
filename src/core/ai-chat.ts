@@ -12,8 +12,17 @@ export type AIRequirementToolCall = { name: string; operations: ('create' | 'upd
 export type ChatMessage = {
   role: 'user' | 'assistant'; content: string; time?: string; images?: ChatImage[]; reasoning?: string;
   toolCalls?: AIRequirementToolCall[]; changes?: { action: '新增' | '修改'; item: AIDraft }[]; sourceCounts?: ChatSourceCounts;
+  interrupted?: boolean;
 };
 export type ChatCandidate = { item: AIDraft & { id: string }; selected: boolean };
-export type ChatDraft = { id: string; input: string; images: ChatImage[]; messages: ChatMessage[]; drafts: ChatCandidate[] };
+export type ChatDraft = {
+  id: string; input: string; images: ChatImage[]; messages: ChatMessage[]; drafts: ChatCandidate[];
+  outgoing?: ChatMessage; queued?: boolean; usage?: ChatUsage;
+};
+export type ChatUsage = {
+  contextTokens: number; inputTokens: number; outputTokens: number; tps: number; estimated: boolean;
+  compressedMessages?: number; estimatedTotals?: boolean; partialTotals?: boolean;
+};
+export type ChatTurnUsage = ChatUsage & { capacity: number };
 export type ChatTurn = { session: string; time: string; title: string; messages: ChatMessage[] };
 export type ChatHistoryEntry = { id: string; time: string; title: string };

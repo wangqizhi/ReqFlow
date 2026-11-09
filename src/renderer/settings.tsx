@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { bridge, type MemoryInfo, type MemorySettings } from './api';
 import { MemorySettingsPanel, emptyMemory } from './memory-settings';
-import type { AISettings, AIRequestLog, AICLIStatus, AIProviderCLI, AIReasoningEffort } from '../core/ai';
+import { defaultChatContextTokens, minChatContextTokens, maxChatContextTokens, type AISettings, type AIRequestLog, type AICLIStatus, type AIProviderCLI, type AIReasoningEffort } from '../core/ai';
 import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CORE_PROMPT_TEMPLATE } from '../core/domain';
@@ -198,7 +198,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   }, [tab]);
   const profiles = form.profiles || [];
   function draftProfiles(): AISettings[] {
-    const { profiles: _, activeProfileId: __, ...current } = form;
+    const { profiles: _, activeProfileId: __, chatContextTokens: ___, ...current } = form;
     return profiles.map(profile => profile.id === form.activeProfileId ? current : profile);
   }
   function configuration(): AISettings { return { ...form, profiles: draftProfiles() }; }
@@ -209,15 +209,15 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const reasoningLevels = selectedModel?.reasoningEfforts || [];
   function chooseProfile(id: string) {
     const drafts = draftProfiles(); const profile = drafts.find(profile => profile.id === id);
-    if (profile) { setForm({ ...profile, profiles: drafts, activeProfileId: id, requestLogging: form.requestLogging }); setVisible(false); setMessage(''); }
+    if (profile) { setForm({ ...profile, profiles: drafts, activeProfileId: id, requestLogging: form.requestLogging, chatContextTokens: form.chatContextTokens }); setVisible(false); setMessage(''); }
   }
   function addProfile() {
     const profile: AISettings = { id: crypto.randomUUID(), provider: '新配置', kind: 'api', url: '', apiKey: '', format: 'openai', model: '' };
-    setForm({ ...profile, profiles: [...draftProfiles(), profile], activeProfileId: profile.id, requestLogging: form.requestLogging }); setVisible(false);
+    setForm({ ...profile, profiles: [...draftProfiles(), profile], activeProfileId: profile.id, requestLogging: form.requestLogging, chatContextTokens: form.chatContextTokens }); setVisible(false);
   }
   function removeProfile() {
     const remaining = draftProfiles().filter(profile => profile.id !== form.activeProfileId);
-    if (remaining.length) { setForm({ ...remaining[0], profiles: remaining, activeProfileId: remaining[0].id, requestLogging: form.requestLogging }); setVisible(false); }
+    if (remaining.length) { setForm({ ...remaining[0], profiles: remaining, activeProfileId: remaining[0].id, requestLogging: form.requestLogging, chatContextTokens: form.chatContextTokens }); setVisible(false); }
   }
   async function detectCLIs() {
     if (!bridge.detectAIProviderCLIs || detecting) return;
@@ -285,7 +285,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       let next = settings;
       if (!settings.profiles?.length) { const id = settings.id || crypto.randomUUID(); const profile = { ...settings, id }; next = { ...profile, profiles: [profile], activeProfileId: id }; }
       setForm(next);
-      const { profiles: _, activeProfileId: __, ...current } = next;
+      const { profiles: _, activeProfileId: __, chatContextTokens: ___, ...current } = next;
       setSavedAI(fingerprint({ ...next, profiles: next.profiles!.map(profile => profile.id === next.activeProfileId ? current : profile) }));
       setLoaded(true);
     }).catch((e) => notify(e.message, 'err'));
@@ -472,6 +472,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
             {!!reasoningLevels.length && <div className="field"><span>思考等级</span><div className="segmented" role="group" aria-label="CLI 思考等级">{(['none', ...reasoningLevels.filter(level => level !== 'none')] as AIReasoningEffort[]).map(level => <button key={level} className={(form.reasoningEffort || 'none') === level ? 'on' : ''} type="button" disabled={busy || !loaded} aria-pressed={(form.reasoningEffort || 'none') === level} onClick={() => setForm({ ...form, reasoningEffort: level })}>{reasoningLabels[level]}</button>)}</div>{!reasoningLevels.includes('none') && <p className="settings-hint">此模型不能完全关闭思考；选择关闭时使用模型支持的最低等级。</p>}</div>}
             <p className="settings-hint">复用本机 CLI 登录与供应商配置。请先在终端完成登录；选择后保存即可用于所有 AI 优化与内容生成。仅显示可读取的周/月额度快照。</p>
           </>}
+          <label className="field">需求聊天室上下文容量（Token）
+            <input type="number" min={minChatContextTokens} max={maxChatContextTokens} step={1}
+              aria-describedby="ai-chat-context-capacity-hint" disabled={busy || !loaded}
+              value={form.chatContextTokens === 0 ? '' : form.chatContextTokens ?? defaultChatContextTokens}
+              onChange={e => setForm({ ...form, chatContextTokens: Number(e.target.value) })} />
+          </label>
+          <p className="settings-hint" id="ai-chat-context-capacity-hint">默认 256,000。可填 8,192–2,000,000 之间的整数，建议按供应商模型的上下文窗口配置。</p>
           <div className="settings-actions"><button type="button" className="btn" disabled={busy || !loaded || !bridge.testAISettings} onClick={() => void perform(() => bridge.testAISettings!(form), '连接成功，模型已回复 OK')}>测试连接</button></div>
         </form>}
         {tab === 'template' && <form onSubmit={(e) => {

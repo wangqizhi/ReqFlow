@@ -2,7 +2,10 @@
 import type { Item, Project } from './domain';
 export type AIProviderCLI = 'codex' | 'zcode' | 'pi' | 'claude';
 export type AIReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-export interface AISettings { id?: string; kind?: 'api' | 'cli'; cli?: AIProviderCLI; activeProfileId?: string; profiles?: AISettings[]; provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; reasoningEffort?: AIReasoningEffort; requestLogging?: boolean }
+export interface AISettings { id?: string; kind?: 'api' | 'cli'; cli?: AIProviderCLI; activeProfileId?: string; profiles?: AISettings[]; provider: string; url: string; apiKey: string; format?: 'openai' | 'anthropic'; model?: string; reasoningEffort?: AIReasoningEffort; requestLogging?: boolean; chatContextTokens?: number }
+export const defaultChatContextTokens = 256000;
+export const minChatContextTokens = 8192;
+export const maxChatContextTokens = 2000000;
 export interface AICLIModel { id: string; name: string; reasoningEfforts?: AIReasoningEffort[] }
 export interface AICLIStatus { id: AIProviderCLI; installed: boolean; version?: string; path?: string; error?: string; models?: AICLIModel[]; modelsNote?: string; usage?: { label: string; usedPercent: number; updatedAt: string; resetsAt: number }[] }
 export interface AIRequestEvent { phase: 'request' | 'response' | 'complete' | 'error'; elapsedMs: number; status?: number; reasoningEffort?: AIReasoningEffort }
@@ -13,9 +16,14 @@ export function validateAISettings(value: AISettings): AISettings {
   if (value.model !== undefined && typeof value.model !== 'string') throw Error('模型名称无效');
   if (value.reasoningEffort !== undefined && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(value.reasoningEffort)) throw Error('思考等级无效');
   if (value.requestLogging !== undefined && typeof value.requestLogging !== 'boolean') throw Error('请求日志设置无效');
+  const capacity = value.chatContextTokens;
+  if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < minChatContextTokens || capacity > maxChatContextTokens)) {
+    throw Error('聊天室上下文容量须为 8192–2000000 之间的整数');
+  }
   if (value.kind && !['api', 'cli'].includes(value.kind)) throw Error('AI 供应商类型无效');
   if (value.kind === 'cli' && !['codex', 'zcode', 'pi', 'claude'].includes(value.cli || '')) throw Error('CLI 供应商无效');
   const settings: AISettings = { id: value.id, kind: value.kind || 'api', cli: value.cli, provider: value.provider.trim(), url: value.url.trim(), apiKey: value.apiKey.trim(), format: value.format || 'openai', model: value.model?.trim() || '', reasoningEffort: value.reasoningEffort || 'none', requestLogging: value.requestLogging ?? true };
+  if (capacity !== undefined) settings.chatContextTokens = capacity;
   if (settings.url && !/^https?:\/\//i.test(settings.url)) throw Error('调用 URL 必须使用 HTTP 或 HTTPS');
   if (settings.url) new URL(settings.url);
   if (value.profiles !== undefined) {
@@ -29,7 +37,7 @@ export function validateAISettings(value: AISettings): AISettings {
     });
     const active = profiles.find(profile => profile.id === value.activeProfileId);
     if (!active) throw Error('当前 AI 配置不存在');
-    return { ...active, requestLogging: settings.requestLogging, profiles, activeProfileId: active.id };
+    return { ...active, requestLogging: settings.requestLogging, chatContextTokens: capacity, profiles, activeProfileId: active.id };
   }
   return settings;
 }

@@ -33,11 +33,15 @@ export function useAIChatSession(project: string) {
     setDraft(next);
   }
 
-  function flush() {
+  function flush(turn?: ChatTurn) {
     clearTimeout(timer.current);
     const value = pending.current;
     pending.current = undefined;
-    return value === undefined ? writes.get(project) || Promise.resolve() : saveDraft(project, value);
+    if (value === undefined) return writes.get(project) || Promise.resolve();
+    return saveDraft(project, value, turn).catch(error => {
+      if (current.current === value) pending.current = value;
+      throw error;
+    });
   }
 
   useEffect(() => {
@@ -68,25 +72,24 @@ export function useAIChatSession(project: string) {
     };
   }, [project]);
 
-  function edit(patch: Partial<ChatDraft>) {
-    const next = { ...current.current, ...patch };
+  function edit(patch: Partial<ChatDraft> | ((current: ChatDraft) => Partial<ChatDraft>)) {
+    const next = { ...current.current, ...(typeof patch === 'function' ? patch(current.current) : patch) };
     replace(next);
     pending.current = next;
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       void flush().then(() => setWarning('')).catch(error => {
-        if (current.current === next) pending.current = next;
         setWarning(`未能自动保存草稿：${error.message}`);
       });
     }, 280);
   }
 
-  async function persist(next: ChatDraft | null, turn?: ChatTurn) {
+  async function persist(next: ChatDraft | null) {
     clearTimeout(timer.current);
     const unsaved = pending.current;
     pending.current = undefined;
     try {
-      await saveDraft(project, next, turn);
+      await saveDraft(project, next);
       replace(next || emptyDraft());
       setWarning('');
     } catch (error) {

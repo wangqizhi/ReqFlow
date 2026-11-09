@@ -14,18 +14,19 @@ import (
 )
 
 type AISettings struct {
-	ID              string       `json:"id,omitempty"`
-	Kind            string       `json:"kind,omitempty"`
-	CLI             string       `json:"cli,omitempty"`
-	ActiveProfileID string       `json:"activeProfileId,omitempty"`
-	Profiles        []AISettings `json:"profiles,omitempty"`
-	Provider        string       `json:"provider"`
-	URL             string       `json:"url"`
-	APIKey          string       `json:"apiKey"`
-	Format          string       `json:"format"`
-	Model           string       `json:"model"`
-	ReasoningEffort string       `json:"reasoningEffort,omitempty"`
-	RequestLogging  bool         `json:"requestLogging"`
+	ID                string       `json:"id,omitempty"`
+	Kind              string       `json:"kind,omitempty"`
+	CLI               string       `json:"cli,omitempty"`
+	ActiveProfileID   string       `json:"activeProfileId,omitempty"`
+	Profiles          []AISettings `json:"profiles,omitempty"`
+	Provider          string       `json:"provider"`
+	URL               string       `json:"url"`
+	APIKey            string       `json:"apiKey"`
+	Format            string       `json:"format"`
+	Model             string       `json:"model"`
+	ReasoningEffort   string       `json:"reasoningEffort,omitempty"`
+	RequestLogging    bool         `json:"requestLogging"`
+	ChatContextTokens int          `json:"chatContextTokens,omitzero"`
 }
 
 func aiMap(value any) map[string]any { v, _ := value.(map[string]any); return v }
@@ -101,6 +102,13 @@ func ValidateAISettings(value any) (AISettings, error) {
 			return s, errors.New("请求日志设置无效")
 		}
 		s.RequestLogging = enabled
+	}
+	if value, ok := v["chatContextTokens"]; ok {
+		number := aiNumber(value)
+		if number < minChatContextTokens || number > maxChatContextTokens || number != float64(int(number)) {
+			return s, errors.New("聊天室上下文容量须为 8192–2000000 之间的整数")
+		}
+		s.ChatContextTokens = int(number)
 	}
 	if s.URL != "" {
 		u, err := url.Parse(s.URL)
@@ -272,6 +280,7 @@ func (b *Backend) saveAISettings(value any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	stored["chatContextTokens"] = s.chatContextCapacity()
 	profiles := []any{}
 	for _, profile := range s.Profiles {
 		encoded, _, encodeErr := b.encodeAIProfile(profile)
@@ -319,9 +328,10 @@ func validateAIConfiguration(value any) (AISettings, error) {
 		seen[profile.ID] = true
 		profiles = append(profiles, profile)
 		if profile.ID == active {
-			logging := s.RequestLogging
+			logging, capacity := s.RequestLogging, s.ChatContextTokens
 			s = profile
 			s.RequestLogging = logging
+			s.ChatContextTokens = capacity
 			found = true
 		}
 	}

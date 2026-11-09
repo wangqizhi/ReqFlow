@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AIDraft } from '../core/ai';
-import { chatSources, type ChatCandidate as Draft, type ChatDraft, type ChatHistoryEntry, type ChatImage as Image, type ChatMessage as Message, type ChatSource, type ChatSourceCounts } from '../core/ai-chat';
+import { defaultChatContextTokens, type AIDraft } from '../core/ai';
+import { chatSources, type ChatCandidate as Draft, type ChatHistoryEntry, type ChatImage as Image, type ChatMessage as Message, type ChatSource, type ChatSourceCounts } from '../core/ai-chat';
 import type { Project } from '../core/domain';
 import { bridge } from './api';
 import { useAIChatSession } from './ai-chat-session';
@@ -34,6 +34,7 @@ function reconcileDrafts(previous: Draft[], items: (AIDraft & { id?: string })[]
 function ChatMessage({ message }: { message: Message }) {
   const [source, setSource] = useState(false);
   if (message.role === 'user') return <article className="ai-discussion user" aria-label="你的消息">
+    {message.interrupted && <p className="settings-hint">此消息未收到回复</p>}
     {message.content && <div className="ai-discussion-plain">{message.content}</div>}
     {!!message.images?.length && <div className="ai-chat-images">{message.images.map((image, n) => <img key={n} src={image.url} alt={image.name} title={image.name} />)}</div>}
   </article>;
@@ -129,8 +130,10 @@ function ChatHistory({ project }: { project: string }) {
 
 export function AIRequirements({ project, onClose, insert }: { project: Project; onClose(): void; insert(items: AIDraft[]): Promise<boolean> }) {
   const { draft, sources, setSources, ready, warning, edit, persist, flush } = useAIChatSession(project.id);
-  const { input, images, messages, drafts } = draft;
-  const [action, setAction] = useState<'images' | 'send' | 'save' | 'delete' | 'discard' | 'sources'>();
+  const { input, images, messages, drafts, outgoing, queued } = draft;
+  const [action, setAction] = useState<'send' | 'save' | 'delete' | 'discard' | 'sources'>();
+  const [readingImages, setReadingImages] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [error, setError] = useState('');
   const [away, setAway] = useState(false);
   const [context, setContext] = useState<{ token: string; counts: ChatSourceCounts }>();
@@ -139,18 +142,47 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   const [showHistory, setShowHistory] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [capacity, setCapacity] = useState(defaultChatContextTokens);
   const fileInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const history = useRef<HTMLDivElement>(null);
   const followHistory = useRef(true);
   const locked = useRef(false);
+  const active = useRef(false);
+  const autoSend = useRef(false);
+  const closingRef = useRef(false);
+  const imageRead = useRef(false);
   const selected = drafts.filter(draft => draft.selected).map(draft => draft.item);
   const sending = action === 'send';
-  const conversation: Message[] = sending ? [...messages, { role: 'user', content: input.trim(), images }] : messages;
-  const recent = messages.slice(-16);
+  const conversation = outgoing ? [...messages, { ...outgoing, interrupted: !sending }] : messages;
+  const recent = messages.filter(message => !message.interrupted);
   const previousImages = recent.findLast(message => message.images?.length)?.images;
   const attached = sources.images === false ? [] : images.length ? images : previousImages || [];
-  const sendable = !!context && (input.trim() || (sources.images !== false && images.length));
+  const hasMessage = !!(input.trim() || (sources.images !== false && images.length));
+  const sendable = !!context && hasMessage;
+  const usage = draft.usage;
+  const contextPercent = usage ? 100 * usage.contextTokens / capacity : 0;
+  const previousUsageUnavailable = !usage && recent.some(message => message.role === 'assistant');
+
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void bridge.getAISettings().then(result => {
+      if (alive && result.ok) setCapacity(result.settings.chatContextTokens ?? defaultChatContextTokens);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (autoSend.current && !action && !readingImages && !closing) {
+      autoSend.current = false;
+      if (queued && sendable) void send();
+    }
+  }, [action, queued, sendable, readingImages, closing]);
 
   useEffect(() => {
     if (!ready) return;
@@ -175,14 +207,14 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || locked.current) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || (locked.current && !sending)) return;
       if (confirmation) setConfirmation('');
       else if (showHistory) setShowHistory(false);
       else void close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, confirmation, showHistory, draft]);
+  }, [onClose, confirmation, showHistory, draft, action, readingImages]);
   useLayoutEffect(() => {
     if (history.current && followHistory.current) history.current.scrollTop = history.current.scrollHeight;
   }, [messages, sending, showHistory]);
@@ -201,11 +233,31 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   }
 
   async function close() {
+    if (closingRef.current || imageRead.current) return;
+    if (sending) {
+      closingRef.current = true;
+      autoSend.current = false;
+      setClosing(true);
+      try {
+        await flush();
+        active.current = false;
+        onClose();
+      } catch (error) {
+        closingRef.current = false;
+        setClosing(false);
+        setError(`草稿写入失败，聊天室仍打开：${(error as Error).message}`);
+      }
+      return;
+    }
     await run('save', async () => {
-      if (submitted) await persist(null);
+      if (submitted) await finishSubmission();
       else await flush();
       onClose();
     });
+  }
+
+  function finishSubmission() {
+    return persist(queued ? { id: crypto.randomUUID(), input, images, queued, messages: [], drafts: [] } : null);
   }
 
   function changeSource(key: ChatSource, enabled: boolean) {
@@ -218,9 +270,12 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
     });
   }
 
-  function addImages(files: File[]) {
-    if (!files.length) return;
-    void run('images', async () => {
+  async function addImages(files: File[]) {
+    if (!files.length || imageRead.current || closingRef.current || (locked.current && !sending)) return;
+    imageRead.current = true;
+    setReadingImages(true);
+    setError('');
+    try {
       if (images.length + files.length > 4) throw Error('每条消息最多插入 4 张图片');
       if (files.some(file => !imageTypes.includes(file.type) || !file.size)) throw Error('请选择有效的 PNG、JPEG、WebP 或 GIF 图片');
       if ([...images, ...files].reduce((size, file) => size + file.size, 0) > 5 * 1024 * 1024) throw Error('每条消息的图片总大小不能超过 5 MB');
@@ -230,30 +285,74 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
         reader.onerror = () => reject(Error('读取图片失败，请重新选择'));
         reader.readAsDataURL(file);
       })));
-      edit({ images: [...images, ...added] });
-    });
+      if (active.current) edit(current => ({ images: [...current.images, ...added] }));
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      imageRead.current = false;
+      setReadingImages(false);
+    }
+  }
+
+  function sendOrQueue() {
+    if (closingRef.current || imageRead.current) return;
+    if (sending && hasMessage) {
+      edit({ queued: true });
+      void flush().catch(e => setError(`暂存写入失败：${e.message}`));
+    } else if (!action) void send();
   }
 
   async function send() {
-    if (!bridge.aiRequirements || !context || !sendable) return;
+    if (locked.current || closingRef.current || imageRead.current || !ready || submitted || !bridge.aiRequirements || !context || !sendable) return;
+    autoSend.current = false;
     await run('send', async () => {
       scrollToLatest();
-      const time = new Date().toISOString();
+      const message: Message = { role: 'user', content: input.trim(), images: sources.images === false ? [] : images, time: new Date().toISOString() };
+      const previous = outgoing ? [...messages, { ...outgoing, interrupted: true }] : messages;
+      edit({ messages: previous, outgoing: message, queued: false, input: '', images: sources.images === false ? images : [] });
       const discussion = recent.map(({ role, content, images: pictures }) => ({
         role, content: sources.images !== false && pictures?.length ? `${content}\n（此消息附有 ${pictures.length} 张图片）` : content,
       }));
-      const result = await bridge.aiRequirements!(project.id, 'chat', input.trim(), discussion,
-        attached.map(image => image.url), images.length ? 'current' : 'previous', drafts.map(draft => draft.item), context.token);
-      if (!result?.ok) throw Error(result?.error || 'AI 需求仅桌面版可用');
+      const result = await (async () => {
+        try {
+          await flush();
+          const response = await bridge.aiRequirements!(project.id, 'chat', message.content, discussion,
+            attached.map(image => image.url), images.length ? 'current' : 'previous', drafts.map(draft => draft.item), context.token);
+          if (!response?.ok) throw Error(response?.error || 'AI 需求仅桌面版可用');
+          return response;
+        } catch (error) {
+          if (!active.current || closingRef.current) throw error;
+          edit(current => {
+            if (current.input || (sources.images !== false && current.images.length)) return {};
+            return { outgoing: undefined, input: message.content, images: message.images?.length ? message.images : current.images };
+          });
+          throw Error(`${(error as Error).message}。下一条消息会留在输入框，请确认后手动发送。`);
+        }
+      })();
+      if (!active.current || closingRef.current) return;
       const revision = result.items ? reconcileDrafts(drafts, result.items) : undefined;
       const replyTime = new Date().toISOString();
-      const turn: Message[] = [{ role: 'user', content: input.trim(), images: sources.images === false ? [] : images, time },
+      const turn: Message[] = [message,
         { role: 'assistant', content: result.reply || '', reasoning: result.reasoning, toolCalls: result.toolCalls,
           changes: revision?.changes, sourceCounts: result.sourceCounts, time: replyTime }];
-      const next: ChatDraft = { ...draft, input: '', images: sources.images === false ? images : [], messages: [...messages, ...turn], drafts: revision?.drafts || drafts };
-      try { await persist(next, { session: draft.id, time: replyTime, title: input.trim(), messages: turn }); }
+      const reported = result.usage;
+      if (reported) setCapacity(reported.capacity);
+      edit({
+        outgoing: undefined, messages: [...previous, ...turn], drafts: revision?.drafts || drafts,
+        usage: reported ? {
+          contextTokens: reported.contextTokens, tps: reported.tps, estimated: reported.estimated,
+          inputTokens: (usage?.inputTokens ?? 0) + reported.inputTokens,
+          outputTokens: (usage?.outputTokens ?? 0) + reported.outputTokens,
+          compressedMessages: reported.compressedMessages,
+          estimatedTotals: usage?.estimatedTotals || reported.estimated,
+          partialTotals: usage?.partialTotals || previousUsageUnavailable,
+        } : usage,
+      });
+      try {
+        await flush({ session: draft.id, time: replyTime, title: message.content, messages: turn });
+        autoSend.current = !closingRef.current;
+      }
       catch (error) {
-        edit(next);
         throw Error(`已收到回复，但历史记录写入失败：${(error as Error).message}`);
       }
     });
@@ -264,15 +363,17 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
     edit({ drafts: drafts.map(draft => draft.item.id === id ? { ...draft, item: { ...draft.item, ...patch } } : draft) });
   }
 
-  const disabled = !ready || !!action || submitted;
-  const hasDraft = !!(input || images.length || messages.length || drafts.length);
+  const disabled = !ready || !!action || readingImages || closing || submitted;
+  const composerDisabled = !ready || closing || submitted || (!!action && !sending);
+  const closeDisabled = closing || readingImages || (!!action && !sending);
+  const hasDraft = !!(input || images.length || messages.length || drafts.length || outgoing);
 
   return <div className="overlay"><div className="dialog ai-requirements-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-requirements-title">
     <div className="dialog-head">
       <div><h3 id="ai-requirements-title">AI 需求 · {project.name}</h3><p>和 AI 讨论需求，生成或修改候选后勾选提交。</p></div>
       <div className="ai-chat-actions">
         <button type="button" className="btn sm" disabled={!!action} onClick={() => { setConfirmation(''); setShowHistory(!showHistory); }}><History />{showHistory ? '返回当前会话' : '聊天历史'}</button>
-        <button className="icon-btn" aria-label="关闭 AI 需求" disabled={!!action} onClick={() => void close()}><X /></button>
+        <button className="icon-btn" aria-label="关闭 AI 需求" disabled={closeDisabled} onClick={() => void close()}><X /></button>
       </div>
     </div>
     {showHistory ? <ChatHistory project={project.id} /> : <div className="ai-requirements-body">
@@ -297,35 +398,48 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
           }}>
           {!conversation.length && <div className="ai-chat-intro"><span><Wand size={20} /></span><strong>{ready ? '从一个想法开始' : '正在恢复会话…'}</strong><p>描述问题或请 AI 根据项目现状提出建议。讨论形成的需求会出现在右侧。</p></div>}
           {conversation.map((message, index) => <ChatMessage key={index} message={message} />)}
-          {sending && <p className="ai-chat-waiting" role="status"><RefreshCw size={16} />正在处理这轮讨论…</p>}
+          {sending && <p className="ai-chat-waiting" role="status"><RefreshCw size={16} />正在检查上下文并生成回复，超限时会压缩历史…</p>}
         </div>
         {away && <button type="button" className="btn sm ai-chat-latest" onClick={scrollToLatest}><ChevronDown />回到最新</button>}
-        <form className="ai-chat-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
+        <form className="ai-chat-compose" onSubmit={e => { e.preventDefault(); sendOrQueue(); }}>
           <label className="field"><span className="visually-hidden">消息</span>
-            <textarea ref={composer} autoFocus rows={2} maxLength={20000} readOnly={disabled} value={input} placeholder="输入想法、问题或修改意见"
-              onChange={e => edit({ input: e.target.value })}
+            <textarea ref={composer} autoFocus rows={2} maxLength={20000} readOnly={composerDisabled} value={input} placeholder={sending ? '可编辑下一条消息' : '输入想法、问题或修改意见'}
+              onChange={e => edit({ input: e.target.value, queued: queued && !!(e.target.value.trim() || (sources.images !== false && images.length)) })}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
-                  e.preventDefault(); void send();
+                  e.preventDefault(); sendOrQueue();
                 }
               }}
               onPaste={e => {
-                if (disabled) return;
+                if (composerDisabled || readingImages) return;
                 const files = Array.from(e.clipboardData.files).filter(file => file.type.startsWith('image/'));
                 if (files.length) { e.preventDefault(); addImages(files); }
               }} />
           </label>
           {!!images.length && <div className="ai-chat-images">{images.map((image, index) => <div key={index}>
             <img src={image.url} alt={image.name} title={image.name} />
-            <button type="button" className="icon-btn" aria-label={`移除图片 ${index + 1}`} disabled={disabled} onClick={() => edit({ images: images.filter((_, n) => n !== index) })}><X size={14} /></button>
+            <button type="button" className="icon-btn" aria-label={`移除图片 ${index + 1}`} disabled={composerDisabled || readingImages} onClick={() => {
+              const remaining = images.filter((_, n) => n !== index);
+              edit({ images: remaining, queued: queued && !!(input.trim() || (sources.images !== false && remaining.length)) });
+            }}><X size={14} /></button>
           </div>)}</div>}
           <div className="ai-chat-actions">
-            <input className="visually-hidden" ref={fileInput} tabIndex={-1} type="file" accept={imageTypes.join(',')} multiple disabled={disabled} onChange={e => { addImages(Array.from(e.target.files || [])); e.target.value = ''; }} />
-            <button type="button" className="btn" disabled={disabled} onClick={() => fileInput.current?.click()}><ImageIcon />{action === 'images' ? '读取中…' : '插入图片'}</button>
-            <button className="btn primary" disabled={disabled || !sendable || !bridge.aiRequirements}>{action === 'send' ? '发送中…' : '发送'}</button>
+            <input className="visually-hidden" ref={fileInput} tabIndex={-1} type="file" accept={imageTypes.join(',')} multiple disabled={composerDisabled || readingImages} onChange={e => { void addImages(Array.from(e.target.files || [])); e.target.value = ''; }} />
+            <button type="button" className="btn" disabled={composerDisabled || readingImages} onClick={() => fileInput.current?.click()}><ImageIcon />{readingImages ? '读取中…' : '插入图片'}</button>
+            <button className="btn primary" disabled={composerDisabled || readingImages || !sendable || !bridge.aiRequirements || (sending && queued)}>{sending ? (queued ? '已暂存' : '暂存下一条') : '发送'}</button>
+            {sending && queued && <button className="btn" type="button" onClick={() => edit({ queued: false })}>取消自动发送</button>}
           </div>
           {contextError && <p className="error" role="alert">上下文预览失败，可从「本轮来源」刷新。</p>}
-          <p className="settings-hint">Enter 发送 · Shift+Enter 换行 · 可粘贴图片，每条最多 4 张、合计 5 MB</p>
+          {queued ? <p className="settings-hint" role="status">{sending ? '当前回复成功后自动发送，可继续修改或清空。' : '暂存消息已保留，请确认后手动发送。'}</p> :
+            <p className="settings-hint">{sending ? 'Enter 暂存 · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行 · 可粘贴图片，每条最多 4 张、合计 5 MB'}</p>}
+          <div className="ai-chat-usage" aria-label="会话 Token 用量">
+            <span title="最近一次请求的输入与生成内容">{contextPercent >= 80 ? '容量接近上限 · ' : ''}上下文 {usage?.estimated ? '约 ' : ''}{usage ? usage.contextTokens.toLocaleString() : previousUsageUnavailable ? '—' : '0'} / {capacity.toLocaleString()} Token{!previousUsageUnavailable && `（${contextPercent.toFixed(1)}%）`}</span>
+            <progress aria-label="上下文使用比例" max={100} value={Math.min(100, contextPercent)} />
+            <span>累计{usage?.estimatedTotals ? '估算' : ''}输入 {usage?.inputTokens.toLocaleString() ?? (previousUsageUnavailable ? '—' : '0')} · 输出 {usage?.outputTokens.toLocaleString() ?? (previousUsageUnavailable ? '—' : '0')}</span>
+            <span title="最近一次输出 Token 除以整轮请求耗时">最近输出 {usage ? `${usage.tps.toFixed(1)} TPS` : '—'}</span>
+          </div>
+          {(previousUsageUnavailable || usage?.partialTotals) && <p className="settings-hint">旧版会话用量无法恢复，累计值从升级后的回复开始统计。</p>}
+          {!!usage?.compressedMessages && <p className="settings-hint" role="status">上一轮已压缩 {usage.compressedMessages} 条历史消息，完整记录仍保留。</p>}
         </form>
       </section>
       <section className="ai-drafts" aria-label="候选需求">
@@ -372,11 +486,11 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
         <button className="btn" disabled={disabled} onClick={() => setConfirmation('')}>取消放弃</button>
         <button className="btn danger" disabled={disabled} onClick={() => void run('discard', async () => { await persist(null); setConfirmation(''); })}>确认放弃草稿</button>
       </> : <button className="btn ai-chat-discard" disabled={disabled || !hasDraft} onClick={() => setConfirmation('discard')}>放弃草稿…</button>)}
-      <button className="btn" disabled={!!action} onClick={() => void close()}>{submitted ? '重试清理并关闭' : '关闭'}</button>
+      <button className="btn" disabled={closeDisabled} onClick={() => void close()}>{submitted ? '重试清理并关闭' : sending ? '保留草稿并关闭' : '关闭'}</button>
       {!showHistory && <button className="btn primary" disabled={disabled || !selected.length || selected.some(item => !item.body.trim())} onClick={() => void run('save', async () => {
         if (!await insert(selected)) throw Error('提交失败，候选需求已保留，请重试。');
         setSubmitted(true);
-        try { await persist(null); }
+        try { await finishSubmission(); }
         catch (error) { throw Error(`已提交到需求池，清理会话草稿失败：${(error as Error).message}`); }
         onClose();
       })}>{action === 'save' ? '处理中…' : `提交到需求池 · ${selected.length} 条`}</button>}

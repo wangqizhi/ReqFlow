@@ -321,8 +321,10 @@ func TestAIChatPreparedContextExcludesDisabledSources(t *testing.T) {
 		}
 		messages := aiArray(payload["messages"])
 		prompt := aiString(aiMap(messages[0])["content"])
-		if !strings.Contains(prompt, "具体的澄清问题") || !strings.Contains(prompt, "不要替用户决定关键假设") {
-			t.Error("chat does not instruct the model to clarify material ambiguity")
+		for _, expectation := range []string{"建立第一版候选", "待确认", "不要自行补齐关键假设", "在同一次工具调用的 reply 中提出", "按原有 ID 更新候选"} {
+			if !strings.Contains(prompt, expectation) {
+				t.Errorf("chat prompt does not specify %q", expectation)
+			}
 		}
 		var context map[string]any
 		if err := json.Unmarshal([]byte(aiString(aiMap(messages[1])["content"])), &context); err != nil {
@@ -424,7 +426,9 @@ func TestAIRequirementChatToolPatchesDrafts(t *testing.T) {
 					}
 					var input any
 					_ = json.Unmarshal([]byte(argsJSON), &input)
-					_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{
+					_ = json.NewEncoder(w).Encode(map[string]any{"usage": map[string]int{
+						"input_tokens": 100, "output_tokens": 40, "cache_read_input_tokens": 15, "cache_creation_input_tokens": 5,
+					}, "content": []any{
 						map[string]any{"type": "thinking", "thinking": reasoning},
 						map[string]any{"type": "tool_use", "name": aiRequirementToolName, "input": input},
 					}})
@@ -447,7 +451,10 @@ func TestAIRequirementChatToolPatchesDrafts(t *testing.T) {
 					}
 					message["tool_calls"] = []any{map[string]any{"function": map[string]any{"name": aiRequirementToolName, "arguments": argsJSON}}}
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}})
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{"message": message}},
+					"usage":   map[string]int{"prompt_tokens": 120, "completion_tokens": 40},
+				})
 			}))
 			defer server.Close()
 			settings := aiTestSettings(server.URL)
@@ -461,6 +468,11 @@ func TestAIRequirementChatToolPatchesDrafts(t *testing.T) {
 			drafts := []any{old, map[string]any{"id": "draft-2"}, map[string]any{"id": "untouched"}}
 			value, handled, err := b.InvokeAI("ai:requirements", []any{project["id"], "chat", "更新候选", []any{}, nil, "", drafts})
 			result := aiMap(value)
+			usage := aiMap(result["usage"])
+			if usage["inputTokens"] != 120 || usage["outputTokens"] != 40 || usage["contextTokens"] != 160 ||
+				usage["capacity"] != defaultChatContextTokens || usage["estimated"] != false || aiNumber(usage["tps"]) <= 0 {
+				t.Fatalf("unexpected provider usage: %v", usage)
+			}
 			items := aiArray(result["items"])
 			if err != nil || !handled || result["reply"] != "已补充验收条件" || result["reasoning"] != reasoning || len(items) != 4 {
 				t.Fatalf("tool response: %v, %v", result, err)
@@ -477,6 +489,32 @@ func TestAIRequirementChatToolPatchesDrafts(t *testing.T) {
 				t.Fatal("accepted a candidate removal")
 			}
 		})
+	}
+}
+
+func TestAIChatBudgetCompactsOnlyHistory(t *testing.T) {
+	discussion := []any{
+		map[string]any{"role": "user", "content": "早期需求：" + strings.Repeat("旧", 18000)},
+		map[string]any{"role": "assistant", "content": "早期答复"},
+		map[string]any{"role": "user", "content": "最近消息"},
+		map[string]any{"role": "assistant", "content": "最近答复"},
+	}
+	context := map[string]any{"instruction": "本轮输入", "currentDrafts": []any{map[string]any{"id": "draft-1"}}}
+	payload, tokens, compressed, err := budgetChatHistory(context, discussion, aiRequirementChatSystem, 0, minChatContextTokens)
+	if err != nil || compressed != 2 || tokens+chatReplyReserve > minChatContextTokens {
+		t.Fatalf("unexpected budget: tokens=%d compressed=%d err=%v", tokens, compressed, err)
+	}
+	for _, expected := range []string{"本轮输入", "draft-1", "早期需求", "最近消息", "最近答复"} {
+		if !strings.Contains(string(payload), expected) {
+			t.Errorf("compacted payload lost %q", expected)
+		}
+	}
+	if len(discussion) != 4 || strings.Contains(string(payload), strings.Repeat("旧", 500)) {
+		t.Fatal("original history was altered or old content was not condensed")
+	}
+	context = map[string]any{"instruction": strings.Repeat("大", 18000), "currentDrafts": []any{}}
+	if _, _, _, err := budgetChatHistory(context, discussion, aiRequirementChatSystem, 0, minChatContextTokens); err == nil {
+		t.Fatal("over-budget required context should fail without truncating the input")
 	}
 }
 
