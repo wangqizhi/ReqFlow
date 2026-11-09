@@ -86,6 +86,8 @@ func (n *nativeHost) call(method string, args []any) (any, error) {
 		return nil, fmt.Errorf("native window is unavailable")
 	}
 	switch method {
+	case "terminal.clipboard.read":
+		return mygo.Clipboard.ReadText(), nil
 	case "window.confirmClose":
 		if n.confirmClose != nil {
 			n.confirmClose()

@@ -448,8 +448,31 @@
     await waitFor(() => !!document.querySelector('.publish-terminal .xterm'));
     const publishTabPanel = () => document.querySelector('.terminal-tab-panel[aria-label="发布"]');
     const publishTabButton = () => [...document.querySelectorAll('.terminal-tab')].find(el => el.textContent.startsWith('发布'));
+    const rightClick = () => new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
     checks.terminalImmediate = { ok: !!document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm') && !document.querySelector('.terminal-elapsed') && !document.querySelector('.terminal-indicator.failure') };
     checks.terminalPublishTabOnDemand = { ok: !publishTabPanel() && !publishTabButton() };
+    const originalReadClipboard = window.reqflow.readTerminalClipboard;
+    const originalWriteAgent = window.reqflow.writeAgent;
+    const pasted = [];
+    window.reqflow.readTerminalClipboard = async () => ({ ok: true, text: '粘贴测试\n下一行' });
+    window.reqflow.writeAgent = async (_run, text) => { pasted.push(text); return { ok: true }; };
+    try {
+      const shell = document.querySelector('.terminal-tab-panel[aria-label="PowerShell"] .xterm');
+      const textarea = shell.querySelector('textarea');
+      const noMenu = !shell.dispatchEvent(rightClick());
+      await waitFor(() => pasted.some(text => text.includes('粘贴测试\r下一行')));
+      const key = (letter, shiftKey = false) => new KeyboardEvent('keydown', {
+        key: letter, code: 'Key' + letter.toUpperCase(), keyCode: letter.toUpperCase().charCodeAt(0), ctrlKey: true, shiftKey, bubbles: true, cancelable: true,
+      });
+      textarea.dispatchEvent(key('v'));
+      await waitFor(() => pasted.filter(text => text.includes('粘贴测试\r下一行')).length === 2);
+      textarea.dispatchEvent(key('c'));
+      await waitFor(() => pasted.includes('\x03'));
+      checks.terminalPaste = { ok: noMenu && !document.querySelector('.terminal-copy-menu') };
+    } finally {
+      window.reqflow.readTerminalClipboard = originalReadClipboard;
+      window.reqflow.writeAgent = originalWriteAgent;
+    }
     // Cancel a real script from the product button, then retry successfully below.
     await waitFor(() => button('发布') && !button('发布').disabled);
     await click(button('发布'));
@@ -528,17 +551,13 @@
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await waitFor(() => !veilVisible());
     const terminalScreen = terminalBody.querySelector('.xterm-screen');
-    const copyEvent = () => new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: innerWidth - 2, clientY: innerHeight - 2 });
-    const terminalMenu = () => document.querySelector('.terminal-copy-menu');
-    terminalScreen.dispatchEvent(copyEvent());
-    await waitFor(() => !!terminalMenu());
-    const emptyCopyDisabled = terminalMenu().querySelector('button').disabled;
-    terminalMenu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await waitFor(() => !terminalMenu());
     const clipboardWrites = [];
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator.clipboard, 'writeText');
     Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => clipboardWrites.push(text) });
+    let reads = 0;
+    window.reqflow.readTerminalClipboard = async () => { reads++; return { ok: true, text: '只读终端不会接收此内容' }; };
     try {
+      terminalScreen.dispatchEvent(rightClick());
       const rows = [...terminalBody.querySelectorAll('.xterm-accessibility-tree > div')];
       const row = rows.find(el => el.textContent.trim() === 'stream-last').getBoundingClientRect();
       const point = { bubbles: true, button: 0, clientX: row.left + 10, clientY: row.top + row.height / 2 };
@@ -546,13 +565,11 @@
       document.dispatchEvent(new MouseEvent('mouseup', point));
       await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
       clipboardWrites.length = 0;
-      terminalScreen.dispatchEvent(copyEvent());
-      await waitFor(() => !!terminalMenu());
-      const menuBounds = terminalMenu().getBoundingClientRect();
-      await click(terminalMenu().querySelector('button'));
+      const copyWithoutMenu = !terminalScreen.dispatchEvent(rightClick());
       await waitFor(() => clipboardWrites.some(text => text.trim() === 'stream-last'));
-      checks.terminalRightClickCopy = { ok: emptyCopyDisabled && !terminalMenu() && menuBounds.right <= innerWidth && menuBounds.bottom <= innerHeight };
+      checks.terminalRightClickCopy = { ok: copyWithoutMenu && reads === 0 && !document.querySelector('.terminal-copy-menu') };
     } finally {
+      window.reqflow.readTerminalClipboard = originalReadClipboard;
       if (clipboardDescriptor) Object.defineProperty(navigator.clipboard, 'writeText', clipboardDescriptor);
       else delete navigator.clipboard.writeText;
     }
@@ -950,11 +967,12 @@
     // REQ-305: images and draft selection survive a discussion turn, and only checked drafts are saved.
     const originalChat = window.reqflow.aiRequirements;
     const requests = [];
+    const markdownReply = '### 对话检查回复 2\n\n- **讨论要点**\n- `候选保留`';
     const chatDrafts = ['AI 对话检查·已勾选', 'AI 对话检查·已取消'].map(title => ({ title, body: title + '的正文', type: 'feature', priority: 'P1', criteria: [] }));
     window.reqflow.aiRequirements = async (...args) => {
       requests.push(args);
       const items = requests.length === 1 ? chatDrafts : requests.length === 2 ? null : args[6].slice().reverse();
-      return { ok: true, reply: '对话检查回复 ' + requests.length, items, contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
+      return { ok: true, reply: requests.length === 2 ? markdownReply : '对话检查回复 ' + requests.length, items, contextNote: '项目上下文', contextFiles: ['README.md'], requirementCount: 3 };
     };
     try {
       await click(document.querySelector('[aria-label="选择记录需求方式"]'));
@@ -977,6 +995,13 @@
       await setMessage('先讨论图中细节');
       await click(button('发送'));
       await waitFor(() => chat.textContent.includes('对话检查回复 2'));
+      const message = [...chat.querySelectorAll('.ai-discussion.assistant')].at(-1);
+      const previewOK = () => message.querySelector('h3')?.textContent === '对话检查回复 2' && !!message.querySelector('li strong') && !!message.querySelector('li code');
+      const initiallyRendered = previewOK();
+      await click(message.querySelector('button'));
+      const rawOK = message.querySelector('.ai-discussion-source')?.textContent === markdownReply;
+      await click(message.querySelector('button'));
+      checks.aiChatMarkdown = { ok: initiallyRendered && rawOK && previewOK() };
       const afterDiscussion = chat.querySelectorAll('.ai-draft input[type="checkbox"]');
       const preserved = afterDiscussion[0].checked && !afterDiscussion[1].checked;
       await setMessage('调整候选需求顺序');

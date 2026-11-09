@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { Minus, Trash } from './icons';
-import { useTerminalCopy } from './terminal-copy';
+import { useTerminalClipboard } from './terminal-clipboard';
 
 /** 底部终端「AI 交互」页签（REQ-295）：记录发送给 AI 供应商的内容与收到的回复，供用户查看交互过程。 */
 export type AIConsoleEntry = { id: number; time: string; kind: 'send' | 'recv' | 'info' | 'error'; title: string; text?: string };
@@ -31,7 +31,7 @@ const labels: Record<AIConsoleEntry['kind'], string> = { send: '→ 发送', rec
 
 export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void }) {
   const { entries, pending } = useAIConsole();
-  const { message, onContextMenu, copyMenu } = useTerminalCopy();
+  const { message, onContextMenu } = useTerminalClipboard();
   const body = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useEffect(() => { const el = body.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [entries]);
@@ -51,6 +51,5 @@ export function AIConsole({ tabs, onClose }: { tabs?: ReactNode; onClose(): void
         </div>)}
       </div>
     </div>
-    {copyMenu}
   </section>;
 }

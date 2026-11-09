@@ -23,6 +23,7 @@ const channels = {
   downloadUpdate: 'update:download',
   installUpdate: 'update:install',
   windowControl: 'window:control',
+  readTerminalClipboard: 'terminal:clipboard:read',
   openProjectBrowser: 'browser:open',
   closeProjectBrowser: 'browser:close',
   maximizeProjectBrowser: 'browser:maximize',

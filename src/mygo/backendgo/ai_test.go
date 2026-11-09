@@ -196,6 +196,45 @@ func TestAIRequirementsChannelUsesGoWorkspace(t *testing.T) {
 	}
 }
 
+func TestAIRequirementChatReplyFormats(t *testing.T) {
+	const markdown = "### 讨论要点\n\n- **保留**候选需求"
+	const candidate = `{"reply":"## 已整理","items":[{"id":"candidate-1","title":"标题","body":"内容含有 { 和 }","type":"feature","priority":"P1","criteria":[]}]}`
+	for _, tc := range []struct {
+		name, input, reply string
+		items              int // -1 means retain existing drafts.
+	}{
+		{"markdown", markdown, markdown, -1},
+		{"reply only", `{"reply":"继续讨论"}`, "继续讨论", -1},
+		{"wrapped candidates", "整理如下：\n\n```JSON\n" + candidate + "\n```\n可以继续修改。", "## 已整理", 1},
+		{"empty candidates", `{"reply":"已清空","items":[]}`, "已清空", 0},
+		{"markdown example", "```json\n{\"example\":true}\n```", "```json\n{\"example\":true}\n```", -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseRequirementReply(tc.input, true)
+			if err != nil || result["reply"] != tc.reply {
+				t.Fatalf("unexpected reply: %v, %v", result, err)
+			}
+			if tc.items == -1 {
+				if !coreHas(result, "items") || result["items"] != nil {
+					t.Fatalf("discussion would replace drafts: %v", result)
+				}
+			} else if items, ok := result["items"].([]any); !ok || len(items) != tc.items {
+				t.Fatalf("unexpected candidates: %v", result)
+			} else if len(items) > 0 && aiMap(items[0])["id"] != "candidate-1" {
+				t.Fatalf("candidate ID was lost: %v", items[0])
+			}
+		})
+	}
+	for _, input := range []string{
+		"整理如下：\n```json\n" + strings.TrimSuffix(candidate, "}"),
+		`{"reply":"已整理","items":[{"body":""}]}`,
+	} {
+		if _, err := parseRequirementReply(input, true); err == nil {
+			t.Fatal("invalid candidate response accepted")
+		}
+	}
+}
+
 func TestAIRequirementChatSendsImagesAndRetainsDrafts(t *testing.T) {
 	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMr8AAAAASUVORK5CYII="
 	for _, format := range []string{"openai", "anthropic"} {

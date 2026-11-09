@@ -327,6 +327,9 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, errors.New("浏览窗口不可用")
 		}
 		return desktopOK(nil), nil
+	case "terminal:clipboard:read":
+		text, err := desktopNative(b, "terminal.clipboard.read")
+		return desktopOK(map[string]any{"text": text}), err
 	case "window:control":
 		action := desktopText(args, 0)
 		if action != "minimize" && action != "close" && action != "confirmClose" {

@@ -3,12 +3,33 @@ import type { AIDraft } from '../core/ai';
 import type { Project } from '../core/domain';
 import { bridge } from './api';
 import { ImageIcon, X } from './icons';
+import { renderMarkdown } from './markdown';
 
 type Image = { name: string; size: number; url: string };
 type Message = { role: 'user' | 'assistant'; content: string; images?: Image[] };
 type Draft = { item: AIDraft & { id: string }; selected: boolean };
 const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const kinds = [['feature', '新需求'], ['improvement', '优化'], ['bug', '修复']];
+
+function ChatMessage({ message }: { message: Message }) {
+  const [source, setSource] = useState(false);
+  return <article className={`ai-discussion ${message.role}`}>
+    <div className="ai-discussion-head">
+      <strong>{message.role === 'user' ? '你' : 'AI'}</strong>
+      {message.content && <button type="button" className="btn sm" onClick={() => setSource(!source)}>{source ? '显示预览' : '查看原文'}</button>}
+    </div>
+    {message.content && (source
+      ? <pre className="ai-discussion-source">{message.content}</pre>
+      : <div className="fb-md ai-discussion-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+        onClick={e => {
+          const link = (e.target as HTMLElement).closest('a');
+          if (!link || !bridge.openExternal) return;
+          e.preventDefault();
+          void bridge.openExternal(link.href);
+        }} />)}
+    {!!message.images?.length && <div className="ai-chat-images">{message.images.map((image, n) => <img key={n} src={image.url} alt={image.name} title={image.name} />)}</div>}
+  </article>;
+}
 
 export function AIRequirements({ project, onClose, insert }: { project: Project; onClose(): void; insert(items: AIDraft[]): Promise<boolean> }) {
   const [input, setInput] = useState('');
@@ -106,11 +127,7 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
         <div className="ai-chat-history" ref={history} role="log" aria-label="对话记录" tabIndex={0}>
           <p className="settings-hint">{context}</p>
           {!conversation.length && <p className="ai-chat-intro">告诉 AI 你想解决的问题，也可以请它根据项目现状提出建议。</p>}
-          {conversation.map((message, index) => <article key={index} className={`ai-discussion ${message.role}`}>
-            <strong>{message.role === 'user' ? '你' : 'AI'}</strong>
-            {message.content && <p>{message.content}</p>}
-            {!!message.images?.length && <div className="ai-chat-images">{message.images.map((image, n) => <img key={n} src={image.url} alt={image.name} title={image.name} />)}</div>}
-          </article>)}
+          {conversation.map((message, index) => <ChatMessage key={index} message={message} />)}
           {sending && <p className="settings-hint" role="status">AI 正在回复…</p>}
         </div>
         <form className="ai-chat-compose" onSubmit={e => { e.preventDefault(); void send(); }}>

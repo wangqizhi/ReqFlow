@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css';
 import { bridge, type TerminalSession, type TerminalPeer } from './api';
 import { agentLogOnly, agentName } from './assignment';
 import { Check, Minus, Maximize2, RefreshCw, X } from './icons';
-import { useTerminalCopy } from './terminal-copy';
+import { useTerminalClipboard } from './terminal-clipboard';
 
 const settingKey = 'reqflow-lab-terminal';
 const settingEvent = 'reqflow-terminal-changed';
@@ -46,10 +46,6 @@ function elapsedTime(start: number, end: number) {
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   return (seconds >= 3600 ? String(Math.floor(seconds / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(seconds / 60) % 60).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
 }
-// REQ-256：终端选中即复制。交互终端里 Ctrl+C 需要发送中断信号，复制操作改由选区完成。
-function copySelectionOnSelect(terminal: Terminal, copy: (text: string) => Promise<void>) {
-  return terminal.onSelectionChange(() => void copy(terminal.getSelection()));
-}
 export function PublishTerminal({ runId, project, session, onClose, onDetach, tabs }: { runId: string; project: string; session: PublishSession; tabs?: ReactNode; onClose(): void; onDetach?(): Promise<void> }) {
   const container = useRef<HTMLDivElement>(null);
   const veil = useRef<HTMLDivElement>(null);
@@ -59,7 +55,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
   current.current = session;
   const [readError, setReadError] = useState('');
   const xterm = useRef<Terminal>(null);
-  const { copy, message: copyMessage, onContextMenu, copyMenu } = useTerminalCopy(() => xterm.current?.getSelection());
+  const { bind, message: copyMessage, onContextMenu } = useTerminalClipboard(xterm);
   const [detachError, setDetachError] = useState(''), [detaching, setDetaching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now);
@@ -114,8 +110,7 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
     terminal.loadAddon(fit);
     terminal.open(content);
     xterm.current = terminal;
-    // REQ-256：选中即复制
-    const selectionSub = copySelectionOnSelect(terminal, copy);
+    const selectionSub = bind(terminal);
     let disposed = false, timer: ReturnType<typeof setTimeout>, offset = 0;
     let cycleTimer: ReturnType<typeof setTimeout> | undefined, drainTimer: ReturnType<typeof setTimeout> | undefined, frame = 0;
     let renderSub: { dispose(): void } | undefined, renderFallback: ReturnType<typeof setTimeout> | undefined;
@@ -231,13 +226,12 @@ export function PublishTerminal({ runId, project, session, onClose, onDetach, ta
       {!session.idle && <time className="terminal-elapsed" aria-label={session.running ? '运行时间' : '总用时'} dateTime={'PT' + Math.max(0, Math.floor(((session.endedAt || now) - session.startedAt) / 1000)) + 'S'}>{session.running ? '运行 ' : '用时 '}{elapsedTime(session.startedAt, session.endedAt || now)}</time>}
       {onDetach && <button className="icon-btn" aria-label="在独立窗口打开终端" title="在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}
       <button className="icon-btn" aria-label={onDetach ? '收起终端' : '关闭终端'} title="关闭显示，发布继续运行" onClick={onClose}><Minus size={16} /></button></header>{tabs}
-    <div className="publish-terminal-body" onContextMenu={onContextMenu}>
+    <div className="publish-terminal-body" onContextMenuCapture={onContextMenu}>
       <div className="publish-terminal-content" ref={container} />
       <div className="terminal-loading" ref={veil} role="status" aria-hidden={!loading && !detaching}>
         <RefreshCw size={20} className="terminal-loading-spinner" /><span>{detaching ? '正在打开独立终端…' : '正在加载终端…'}</span>
       </div>
     </div>
-    {copyMenu}
   </section>;
 }
 
@@ -282,7 +276,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
   const [done, setDone] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const xterm = useRef<Terminal>(null);
-  const { copy, message: copyMessage, onContextMenu, copyMenu } = useTerminalCopy(() => xterm.current?.getSelection());
+  const { bind, message: copyMessage, onContextMenu } = useTerminalClipboard(xterm);
   const [stopping, setStopping] = useState(false);
   // REQ-212：最大化到独立窗口时不中断会话，窗口关闭后主界面恢复停靠终端。
   const [detaching, setDetaching] = useState(false);
@@ -301,8 +295,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     const terminal = new Terminal({ disableStdin: logOnly, cursorBlink: !logOnly, scrollback: 20000, fontSize: 13, screenReaderMode: false, fontFamily: 'Consolas, "Microsoft YaHei", monospace', theme: { background: '#1c1917', foreground: '#e7e5e4' } });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(container.current!);
     xterm.current = terminal;
-    // REQ-256：选中即复制
-    const selectionSub = copySelectionOnSelect(terminal, copy);
+    const selectionSub = bind(terminal);
     // A native scrollbar remains visible, including when xterm auto-hides its own.
     const scrollbar = historyScroll.current!, spacer = historySize.current!;
     let syncingTop = -1;
@@ -372,7 +365,7 @@ export function AgentTerminal({ runId, project, agent, onClose, onDetach, onStat
     terminal.focus(); void poll();
     return () => { disposed = true; clearTimeout(timer); observer.disconnect(); scrollbar.removeEventListener('scroll', scrollHistory); scrollSub.dispose(); writeSub.dispose(); input.dispose(); selectionSub.dispose(); terminal.dispose(); xterm.current = null; };
   }, [runId]);
-  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{copyMessage || error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><Minus size={16} /></button></header>{tabs}<div className="publish-terminal-body" onContextMenu={onContextMenu}><div className="publish-terminal-content agent-terminal-content" ref={container} /><pre className="agent-history-view" ref={historyView} hidden /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div>{copyMenu}</section>;
+  return <section className="publish-terminal" aria-label={agent + (logOnly ? ' 任务日志' : ' 交互终端')} data-run-id={runId}><header><strong>Terminal · {project} · {agent}</strong><span className={'terminal-status' + (waiting && !done ? ' waiting' : '')} role="status">{copyMessage || error || (done ? '会话已结束' : logOnly ? '任务执行日志 · 不支持输入 · 结果以待验证回写为准' : waiting ? '可能等待输入，请在终端处理交互' : '可在终端输入，与 ' + agent + ' 沟通')}</span><button className="btn sm" disabled={done || stopping} onClick={async () => { setStopping(true); try { const r = await bridge.stopAgent?.(runId); if (!r?.ok) throw Error(r?.error || '停止失败'); } catch (e: any) { setError(e.message); } finally { setStopping(false); } }}>停止</button>{onDetach && <button className="icon-btn" aria-label={'在独立窗口打开 ' + agent + ' 终端'} title="最大化：在独立窗口打开终端" disabled={detaching} onClick={() => void detach()}><Maximize2 size={16} /></button>}<button className="icon-btn" aria-label={done ? '关闭 ' + agent + ' 终端' : '收起 ' + agent + ' 终端'} title={done ? '关闭终端' : '收起后继续运行'} onClick={() => onClose(done)}><Minus size={16} /></button></header>{tabs}<div className="publish-terminal-body" onContextMenuCapture={onContextMenu}><div className="publish-terminal-content agent-terminal-content" ref={container} /><pre className="agent-history-view" ref={historyView} hidden /><div className="agent-history-scroll" ref={historyScroll} role="region" aria-label="Agent 执行历史滚动条" tabIndex={0}><div ref={historySize} /></div></div></section>;
 }
 
 // 指派终端的独立窗口（REQ-212）：与主窗口共享同一个后端会话，关闭窗口不结束会话。
