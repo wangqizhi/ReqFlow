@@ -24,6 +24,26 @@ func (s AISettings) chatContextCapacity() int {
 type aiChatUsage struct {
 	input, output       int
 	hasInput, hasOutput bool
+	model               string
+	extraInput          int
+	extraOutput         int
+	extraEstimated      bool
+}
+
+// addPass 累加补充整理轮的用量（REQ-315）：只计入累计输入/输出，不改变本轮上下文占用。
+func (u *aiChatUsage) addPass(other aiChatUsage, prompt, reply string) {
+	input, output := other.input, other.output
+	if !other.hasInput {
+		input, u.extraEstimated = estimateChatTokens(prompt), true
+	}
+	if !other.hasOutput {
+		output, u.extraEstimated = estimateChatTokens(reply), true
+	}
+	u.extraInput += input
+	u.extraOutput += output
+	if u.model == "" {
+		u.model = other.model
+	}
 }
 
 func (u *aiChatUsage) read(data map[string]any, anthropic bool) {
@@ -147,8 +167,8 @@ func (u aiChatUsage) result(estimatedInput int, output string, elapsed time.Dura
 		u.output = estimateChatTokens(output)
 	}
 	return map[string]any{
-		"inputTokens": u.input, "outputTokens": u.output, "contextTokens": u.input + u.output,
+		"inputTokens": u.input + u.extraInput, "outputTokens": u.output + u.extraOutput, "contextTokens": u.input + u.output,
 		"tps": float64(u.output) / max(elapsed.Seconds(), 0.001), "capacity": capacity,
-		"estimated": !u.hasInput || !u.hasOutput, "compressedMessages": compressed,
+		"estimated": !u.hasInput || !u.hasOutput || u.extraEstimated, "compressedMessages": compressed,
 	}
 }

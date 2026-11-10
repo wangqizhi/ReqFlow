@@ -321,7 +321,16 @@ func TestAIChatPreparedContextExcludesDisabledSources(t *testing.T) {
 		}
 		messages := aiArray(payload["messages"])
 		prompt := aiString(aiMap(messages[0])["content"])
-		for _, expectation := range []string{"建立第一版候选", "待确认", "不要自行补齐关键假设", "在同一次工具调用的 reply 中提出", "按原有 ID 更新候选"} {
+		if strings.Contains(prompt, "需求整理助手") {
+			var context map[string]any
+			_ = json.Unmarshal([]byte(aiString(aiMap(messages[1])["content"])), &context)
+			if coreHas(context, "project") {
+				t.Error("draft pass leaked disabled project source")
+			}
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"changes\":[]}"}}]}`)
+			return
+		}
+		for _, expectation := range []string{"建立第一版候选", "待确认", "不要自行补齐关键假设", "在同一次工具调用的 reply 中一次性提出", "按原有 ID 更新候选", "同一需求最多追问一轮"} {
 			if !strings.Contains(prompt, expectation) {
 				t.Errorf("chat prompt does not specify %q", expectation)
 			}

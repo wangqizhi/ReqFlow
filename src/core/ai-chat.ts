@@ -9,8 +9,11 @@ export type ChatSources = Partial<Record<ChatSource, boolean>>;
 export type ChatSourceCounts = Partial<Record<ChatSource, number>>;
 export type ChatImage = { name: string; size: number; url: string };
 export type AIRequirementToolCall = { name: string; operations: ('create' | 'update' | 'list')[] };
+/** REQ-319：本轮回复实际使用的模型供应商与模型。 */
+export type ChatModelInfo = { provider: string; model: string; kind?: 'api' | 'cli'; host?: string; reasoningEffort?: string };
+export const chatModelLabel = (info: ChatModelInfo) => [info.provider, info.model].filter(Boolean).join(' / ') + (info.reasoningEffort ? ` · ${info.reasoningEffort}` : '');
 export type ChatMessage = {
-  role: 'user' | 'assistant'; content: string; time?: string; images?: ChatImage[]; reasoning?: string;
+  role: 'user' | 'assistant'; content: string; time?: string; images?: ChatImage[]; reasoning?: string; model?: ChatModelInfo;
   toolCalls?: AIRequirementToolCall[]; changes?: { action: '新增' | '修改'; item: AIDraft }[]; sourceCounts?: ChatSourceCounts;
   interrupted?: boolean;
 };
@@ -21,7 +24,7 @@ export type ChatDraft = {
 };
 export type ChatUsage = {
   contextTokens: number; inputTokens: number; outputTokens: number; tps: number; estimated: boolean;
-  compressedMessages?: number; estimatedTotals?: boolean; partialTotals?: boolean;
+  compressedMessages?: number; estimatedTotals?: boolean; partialTotals?: boolean; model?: ChatModelInfo;
 };
 export type ChatTurnUsage = ChatUsage & { capacity: number };
 export type ChatTurn = { session: string; time: string; title: string; messages: ChatMessage[] };

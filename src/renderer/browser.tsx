@@ -11,6 +11,7 @@ import { ProjectRemoteOverlay } from './project-remote';
 import { SSHDirectory, isSSH } from './ssh-directory';
 import type { RemoteSettings } from '../core/remote';
 import { highlightCode } from './highlight';
+import { BrowserStatusBar, usePushLog } from './browser-status';
 import {
   ChevronRight, Copy, Eye, ExternalLink, FileText, Folder, FolderOpen, GitBranch,
   ImageIcon, ListNumbers, Minus, Pencil, Plus, RefreshCw, Save, Server, X, Wand, Settings
@@ -101,6 +102,10 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   const [tree, setTree] = useState<Record<string, FileEntry[] | 'loading' | 'error'>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
   const [file, setFile] = useState<FileEntry | null>(null);
+  // REQ-318：底部信息栏显示最近选中的文件或目录；保存后刷新信息
+  const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
+  const [statRefresh, setStatRefresh] = useState(0);
+  const pushLog = usePushLog(root);
   const [kind, setKind] = useState<'md' | 'image' | 'text' | 'other'>('other');
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileError, setFileError] = useState('');
@@ -157,6 +162,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
 
   // 关联目录变化（含首次打开）时重置并加载根目录
   useEffect(() => {
+    setSelectedEntry(null);
     if (!root) { setTree({}); setFile(null); return; }
     setTree({});
     setFile(null); setImage(null); setFileError(''); setContent('');
@@ -200,6 +206,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
         return false;
       }
       await refreshGit();
+      setStatRefresh(n => n + 1);
       if (opts?.tree) { setTree({}); loadDir(''); }
       if (r.summary) notify(r.summary);
       return true;
@@ -292,6 +299,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   }
 
   async function openFile(entry: FileEntry) {
+    setSelectedEntry(entry);
     if (!entry.dir) setFile(entry);
     else return;
     const k = kindOf(entry.name);
@@ -333,7 +341,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     try {
       const r = await bridge.writeFile?.(root, file.rel, content);
       if (!r || !r.ok) notify((r && !r.ok ? r.error : '保存失败') || '保存失败', 'err');
-      else { setSavedContent(content); notify('已保存 ' + file.name); }
+      else { setSavedContent(content); setStatRefresh(n => n + 1); notify('已保存 ' + file.name); }
     } finally {
       setSaving(false);
     }
@@ -389,7 +397,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
     return (
       <div key={rel || 'root'} className="fb-branch">
         <button className={'fb-row dir' + (isOpen ? ' open' : '')} style={{ paddingLeft: 6 + depth * 14 }}
-          onClick={() => toggleDir(rel)} title={rel || '项目根目录'}
+          onClick={() => { toggleDir(rel); setSelectedEntry(entry); }} title={rel || '项目根目录'}
           onContextMenu={(ev) => { ev.preventDefault(); setFileMenu({ x: ev.clientX, y: ev.clientY, entry }); }}>
           <span className="fb-chev"><ChevronRight size={13} /></span>
           {isOpen ? <FolderOpen size={15} /> : <Folder size={15} />}
@@ -639,7 +647,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                         )}
                       </div>
 
-                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span>{git.hasRemote && <button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => bridge.gitPush?.(root))}>Push</button>}</div>
+                      <div className="fb-git-group"><span>历史 Git Log · 最近 30 条</span>{git.hasRemote && <button className="btn sm" title={git.upstream ? '推送当前分支到上游' : '推送当前分支并关联 origin'} disabled={gitBusy || aiBusy || (git.ahead === 0 && git.upstream) || !bridge.gitPush} onClick={() => gitOp(() => pushLog.track(async () => bridge.gitPush?.(root)))}>Push</button>}</div>
                       {!(git.log || []).length && <p className="fb-git-empty">暂无提交记录</p>}
                       <div className="fb-git-logs">{(git.log || []).map((entry) => <div key={entry.hash} className="fb-git-log" title={entry.hash + '\n' + entry.author + ' · ' + entry.date + '\n\n' + entry.message}><code>{entry.hash.slice(0, 7)}</code><span>{entry.message.split('\n')[0]}</span></div>)}</div>
 
@@ -766,6 +774,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             )}
           </div>
         </section>
+        <BrowserStatusBar root={root} entry={selectedEntry} refreshKey={statRefresh} push={pushLog.log} notify={notify} />
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ import type { BackupSettings, BackupStatus, RemoteSettings } from '../core/remot
 import type { UpdateState } from '../core/update';
 import type { PublishLogSettings, PublishRequestLog } from '../core/publish-log';
 
-import type { AIRequirementToolCall, ChatDraft, ChatHistoryEntry, ChatMessage, ChatSourceCounts, ChatSources, ChatTurn, ChatTurnUsage } from '../core/ai-chat';
+import type { AIRequirementToolCall, ChatDraft, ChatModelInfo, ChatHistoryEntry, ChatMessage, ChatSourceCounts, ChatSources, ChatTurn, ChatTurnUsage } from '../core/ai-chat';
 
 export type WorkspaceResult =
   | { ok: true; state: Workspace; version: number; warning?: string; summary?: string; createdProjectId?: string }
@@ -25,6 +25,10 @@ export type MemoryInfo = { settings: MemorySettings; sections: MemorySection[]; 
 
 /** 「浏览项目」的目录条目（rel 为相对关联目录、以 / 分隔的路径）。 */
 export type FileEntry = { name: string; rel: string; dir: boolean; size: number };
+export type FileInfo = {
+  path: string; name: string; dir: boolean; size: number; mode: string; modified: string; writable: boolean;
+  symlink?: boolean; attributes?: string; owner?: string; remote?: boolean;
+};
 
 /** Git 变动条目（porcelain XY：index=暂存区状态，worktree=工作区状态）。 */
 export type GitChange = { path: string; index: string; worktree: string };
@@ -114,7 +118,7 @@ export interface ReqFlowBridge {
   windowControl?(action: 'minimize' | 'close' | 'confirmClose' | 'confirmStopPublish'): Promise<void>;
   readTerminalClipboard?(): Promise<{ ok: boolean; text?: string; error?: string }>;
   writeTerminalClipboard?(text: string): Promise<{ ok: boolean; error?: string }>;
-  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[], contextToken?: string): Promise<{ ok: boolean; reply?: string; reasoning?: string; toolCalls?: AIRequirementToolCall[]; items?: (AIDraft & { id?: string })[] | null; error?: string; sourceCounts?: ChatSourceCounts; usage?: ChatTurnUsage }>;
+  aiRequirements?(project: string, mode: string, instruction: string, discussion: { role: string; content: string }[], images?: string[], imageTurn?: 'current' | 'previous', drafts?: (AIDraft & { id: string })[], contextToken?: string): Promise<{ ok: boolean; reply?: string; reasoning?: string; toolCalls?: AIRequirementToolCall[]; items?: (AIDraft & { id?: string })[] | null; error?: string; sourceCounts?: ChatSourceCounts; usage?: ChatTurnUsage; model?: ChatModelInfo }>;
   prepareAIRequirementContext?(project: string, sources: ChatSources): Promise<{ ok: boolean; token?: string; counts?: ChatSourceCounts; error?: string }>;
   getAIChatState?(project: string): Promise<{ ok: boolean; draft?: ChatDraft; sources?: ChatSources; error?: string }>;
   saveAIChatDraft?(project: string, draft: ChatDraft | null, turn?: ChatTurn): Promise<{ ok: boolean; error?: string }>;
@@ -123,6 +127,8 @@ export interface ReqFlowBridge {
   readAIChatHistory?(project: string, session: string): Promise<{ ok: boolean; messages?: ChatMessage[]; error?: string }>;
   clearAIChatHistory?(project: string | null): Promise<{ ok: boolean; error?: string }>;
   gitPush?(root: string): Promise<GitOpResult>;
+  /** REQ-318：读取最近一次 Push 的过程输出（进行中时轮询）。 */
+  gitPushOutput?(root: string): Promise<{ ok: boolean; lines?: string[]; running?: boolean; failed?: boolean; started?: boolean; startedAt?: string; endedAt?: string; error?: string }>;
   gitPull?(root: string): Promise<GitOpResult>;
   getBackupSettings?(): Promise<{ ok: boolean; settings: BackupSettings; status: BackupStatus }>;
   saveBackupSettings?(settings: BackupSettings): Promise<{ ok: boolean; error?: string }>;
@@ -188,6 +194,8 @@ export interface ReqFlowBridge {
   readImage?(root: string, rel: string): Promise<{ ok: true; mime: string; dataUrl: string; size: number } | { ok: false; error: string }>;
   writeFile?(root: string, rel: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
   revealFile?(root: string, rel: string): Promise<{ ok: boolean; error?: string }>;
+  /** REQ-318：文件或目录的路径、大小、权限与修改时间。 */
+  statFile?(root: string, rel: string): Promise<({ ok: true } & FileInfo) | { ok: false; error: string }>;
   openExternal?(url: string): Promise<{ ok: boolean; error?: string }>;
   // 实验室：仅放行 codex://threads 深链，用于调起 Codex 桌面窗口
   openCodexDeepLink?(url: string): Promise<{ ok: boolean; error?: string }>;

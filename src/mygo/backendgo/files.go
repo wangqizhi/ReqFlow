@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // DesktopSafePath checks lexical and resolved paths, including Windows junctions.
@@ -57,6 +58,8 @@ func (b *Backend) desktopFiles(channel string, args []any) (any, error) {
 		return nil, e
 	}
 	switch channel {
+	case "fs:stat":
+		return desktopOK(desktopFileInfo(file, info)), nil
 	case "fs:list":
 		entries, e := os.ReadDir(file)
 		if e != nil {
@@ -129,4 +132,20 @@ func (b *Backend) desktopFiles(channel string, args []any) (any, error) {
 		return desktopOK(nil), e
 	}
 	return nil, errors.New("未知文件操作")
+}
+
+// REQ-318：浏览项目底部信息栏显示的文件基本信息。
+func desktopFileInfo(file string, info os.FileInfo) map[string]any {
+	result := map[string]any{
+		"path": file, "name": info.Name(), "dir": info.IsDir(), "size": info.Size(),
+		"mode": info.Mode().Perm().String(), "modified": info.ModTime().Format(time.RFC3339),
+		"writable": info.Mode().Perm()&0200 != 0,
+	}
+	if link, e := os.Lstat(file); e == nil && link.Mode()&os.ModeSymlink != 0 {
+		result["symlink"] = true
+	}
+	if attributes := desktopFileAttributes(file); attributes != "" {
+		result["attributes"] = attributes
+	}
+	return result
 }

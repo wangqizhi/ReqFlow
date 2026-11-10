@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +93,10 @@ func (w *aiLimitedOutput) Write(data []byte) (int, error) {
 }
 
 func RunRemoteGit(args []string, root string, settings map[string]any) (string, error) {
+	return runRemoteGit(args, root, settings, nil)
+}
+
+func runRemoteGit(args []string, root string, settings map[string]any, progress io.Writer) (string, error) {
 	ssh, err := aiSSHCommand(settings)
 	if err != nil {
 		return "", err
@@ -106,6 +111,9 @@ func RunRemoteGit(args []string, root string, settings map[string]any) (string, 
 	stderr := &aiLimitedOutput{limit: 1024 * 1024}
 	command.Stdout = stdout
 	command.Stderr = stderr
+	if progress != nil {
+		command.Stderr = io.MultiWriter(stderr, progress)
+	}
 	err = command.Run()
 	if ctx.Err() != nil {
 		return "", errors.New("Git 连接超时，请检查仓库地址与认证")

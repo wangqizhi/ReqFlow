@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { defaultChatContextTokens, type AIDraft } from '../core/ai';
-import { chatSources, type ChatCandidate as Draft, type ChatHistoryEntry, type ChatImage as Image, type ChatMessage as Message, type ChatSource, type ChatSourceCounts } from '../core/ai-chat';
+import { chatModelLabel, chatSources, type ChatCandidate as Draft, type ChatHistoryEntry, type ChatImage as Image, type ChatMessage as Message, type ChatSource, type ChatSourceCounts } from '../core/ai-chat';
 import type { Project } from '../core/domain';
 import { bridge } from './api';
 import { useAIChatSession } from './ai-chat-session';
@@ -10,6 +10,7 @@ import { renderMarkdown } from './markdown';
 const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const kinds = [['feature', '新需求'], ['improvement', '优化'], ['bug', '修复']];
 const toolActions = { create: '新增候选', update: '修改候选', list: '查看候选' };
+const contextRefreshMs = 25 * 60 * 1000;
 
 function reconcileDrafts(previous: Draft[], items: (AIDraft & { id?: string })[]) {
   const existing = new Map(previous.map(draft => [draft.item.id, draft]));
@@ -41,6 +42,7 @@ function ChatMessage({ message }: { message: Message }) {
   return <article className={`ai-discussion ${message.role}`}>
     <div className="ai-discussion-head">
       <strong><Wand size={16} />需求助手</strong>
+      {message.model && <span className="ai-chat-model" title={`模型供应商：${message.model.provider || '未命名'}${message.model.host ? `（${message.model.host}）` : ''}\n模型：${message.model.model}`}>{chatModelLabel(message.model)}</span>}
       {message.content && <button type="button" className="btn sm" onClick={() => setSource(!source)}>{source ? '显示预览' : '查看原文'}</button>}
     </div>
     {message.sourceCounts && <p className="ai-chat-sources-used">来源 · {chatSources.filter(([key]) => (message.sourceCounts?.[key] || 0) > 0)
@@ -136,7 +138,7 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState('');
   const [away, setAway] = useState(false);
-  const [context, setContext] = useState<{ token: string; counts: ChatSourceCounts }>();
+  const [context, setContext] = useState<{ token: string; counts: ChatSourceCounts; time: number }>();
   const [contextError, setContextError] = useState('');
   const [refreshContext, setRefreshContext] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
@@ -193,11 +195,20 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
       try {
         const result = await bridge.prepareAIRequirementContext?.(project.id, sources);
         if (!result?.ok || !result.token) throw Error(result?.error || '上下文预览不可用');
-        if (alive) setContext({ token: result.token, counts: result.counts || {} });
+        if (alive) setContext({ token: result.token, counts: result.counts || {}, time: Date.now() });
       } catch (e) { if (alive) setContextError((e as Error).message); }
     })();
     return () => { alive = false; };
   }, [ready, sources, project.id, refreshContext]);
+
+  // REQ-320：上下文预览 30 分钟失效，空闲时提前自动刷新；预览失败 15 秒后自动重试，无需手动点「刷新来源」。
+  useEffect(() => {
+    if (!ready || action) return;
+    const delay = contextError ? 15000 : context ? Math.max(1000, context.time + contextRefreshMs - Date.now()) : 0;
+    if (!delay) return;
+    const timer = setTimeout(() => setRefreshContext(value => value + 1), delay);
+    return () => clearTimeout(timer);
+  }, [ready, action, context, contextError]);
 
   function scrollToLatest() {
     followHistory.current = true;
@@ -302,6 +313,14 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
     } else if (!action) void send();
   }
 
+  /** 重新准备上下文预览并返回新 token（REQ-320 自动刷新）。 */
+  async function freshContext() {
+    const result = await bridge.prepareAIRequirementContext?.(project.id, sources);
+    if (!result?.ok || !result.token) throw Error(result?.error || '上下文预览不可用');
+    if (active.current) setContext({ token: result.token, counts: result.counts || {}, time: Date.now() });
+    return result.token;
+  }
+
   async function send() {
     if (locked.current || closingRef.current || imageRead.current || !ready || submitted || !bridge.aiRequirements || !context || !sendable) return;
     autoSend.current = false;
@@ -316,8 +335,12 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
       const result = await (async () => {
         try {
           await flush();
-          const response = await bridge.aiRequirements!(project.id, 'chat', message.content, discussion,
-            attached.map(image => image.url), images.length ? 'current' : 'previous', drafts.map(draft => draft.item), context.token);
+          const request = (token: string) => bridge.aiRequirements!(project.id, 'chat', message.content, discussion,
+            attached.map(image => image.url), images.length ? 'current' : 'previous', drafts.map(draft => draft.item), token);
+          // REQ-320：上下文过期时自动重新准备并重发一次，不要求手动刷新来源。
+          const token = Date.now() - context.time > contextRefreshMs ? await freshContext() : context.token;
+          let response = await request(token);
+          if (!response?.ok && /上下文预览已失效/.test(response?.error || '')) response = await request(await freshContext());
           if (!response?.ok) throw Error(response?.error || 'AI 需求仅桌面版可用');
           return response;
         } catch (error) {
@@ -334,7 +357,7 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
       const replyTime = new Date().toISOString();
       const turn: Message[] = [message,
         { role: 'assistant', content: result.reply || '', reasoning: result.reasoning, toolCalls: result.toolCalls,
-          changes: revision?.changes, sourceCounts: result.sourceCounts, time: replyTime }];
+          changes: revision?.changes, sourceCounts: result.sourceCounts, model: result.model, time: replyTime }];
       const reported = result.usage;
       if (reported) setCapacity(reported.capacity);
       edit({
@@ -346,6 +369,7 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
           compressedMessages: reported.compressedMessages,
           estimatedTotals: usage?.estimatedTotals || reported.estimated,
           partialTotals: usage?.partialTotals || previousUsageUnavailable,
+          model: result.model,
         } : usage,
       });
       try {
@@ -437,6 +461,7 @@ export function AIRequirements({ project, onClose, insert }: { project: Project;
             <progress aria-label="上下文使用比例" max={100} value={Math.min(100, contextPercent)} />
             <span>累计{usage?.estimatedTotals ? '估算' : ''}输入 {usage?.inputTokens.toLocaleString() ?? (previousUsageUnavailable ? '—' : '0')} · 输出 {usage?.outputTokens.toLocaleString() ?? (previousUsageUnavailable ? '—' : '0')}</span>
             <span title="最近一次输出 Token 除以整轮请求耗时">最近输出 {usage ? `${usage.tps.toFixed(1)} TPS` : '—'}</span>
+            {usage?.model && <span className="ai-chat-usage-model" title={`模型供应商：${usage.model.provider || '未命名'}${usage.model.host ? `（${usage.model.host}）` : ''}\n模型：${usage.model.model}`}>模型 {chatModelLabel(usage.model)}</span>}
           </div>
           {(previousUsageUnavailable || usage?.partialTotals) && <p className="settings-hint">旧版会话用量无法恢复，累计值从升级后的回复开始统计。</p>}
           {!!usage?.compressedMessages && <p className="settings-hint" role="status">上一轮已压缩 {usage.compressedMessages} 条历史消息，完整记录仍保留。</p>}

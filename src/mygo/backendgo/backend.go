@@ -27,6 +27,7 @@ type Backend struct {
 	mu                                                     sync.Mutex
 	aiSessions                                             map[string]string
 	aiRequirementContexts                                  map[string]preparedRequirementContext
+	gitProgress                                            map[string]*gitProgress
 	desktopLogMu                                           sync.Mutex
 	desktopLogPending                                      []any
 	desktopPublishMu                                       sync.Mutex

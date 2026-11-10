@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -566,50 +567,76 @@ func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (a
 		}
 		summary, e := b.desktopCheckout(root, remote, true)
 		return desktopOK(map[string]any{"summary": summary}), e
+	case "git:push:output":
+		return b.gitProgressOutput(root), nil
 	case "git:push":
-		remote, bound, e := b.desktopRemoteFor(root)
+		progress := b.beginGitProgress(root)
+		summary, e := b.desktopPush(ctx, root, progress)
+		progress.finish(e, summary)
 		if e != nil {
 			return nil, e
 		}
-		if bound {
-			run := func(args ...string) (string, error) { return RunRemoteGit(args, root, remote) }
-			if _, e := run("rev-parse", "--git-dir"); e != nil {
-				return nil, e
-			}
-			if _, e := run("rev-parse", "--verify", "HEAD"); e != nil {
-				return nil, errors.New("还没有提交，先 Commit 后再 Push")
-			}
-			remotes, e := run("remote")
-			if e != nil {
-				return nil, e
-			}
-			exists := false
-			for _, name := range strings.Fields(remotes) {
-				if name == "origin" {
-					exists = true
-				}
-			}
-			values := []string{"remote", "add", "origin", desktopString(remote["url"])}
-			if exists {
-				values = []string{"remote", "set-url", "origin", desktopString(remote["url"])}
-			}
-			if _, e = run(values...); e != nil {
-				return nil, e
-			}
-			out, e := run("push", "-u", "origin", "HEAD")
-			if strings.TrimSpace(out) == "" {
-				out = "已推送当前分支并关联 origin"
-			}
-			return desktopOK(map[string]any{"summary": strings.TrimSpace(out)}), e
-		}
-		out, stderr, e := desktopRun(ctx, "git", []string{"push"}, root, 60*time.Second)
-		if e != nil {
-			return nil, desktopGitError(stderr)
-		}
-		if strings.TrimSpace(out) == "" {
-			out = "已推送"
-		}
-		return desktopOK(map[string]any{"summary": strings.TrimSpace(out)}), nil
+		return desktopOK(map[string]any{"summary": summary}), nil
 	}
 	return nil, errors.New("未知 Git 操作")
+}
+
+func (b *Backend) desktopPush(ctx context.Context, root string, progress *gitProgress) (string, error) {
+	remote, bound, e := b.desktopRemoteFor(root)
+	if e != nil {
+		return "", e
+	}
+	if bound {
+		run := func(args ...string) (string, error) { return RunRemoteGit(args, root, remote) }
+		if _, e := run("rev-parse", "--git-dir"); e != nil {
+			return "", e
+		}
+		if _, e := run("rev-parse", "--verify", "HEAD"); e != nil {
+			return "", errors.New("还没有提交，先 Commit 后再 Push")
+		}
+		remotes, e := run("remote")
+		if e != nil {
+			return "", e
+		}
+		exists := false
+		for _, name := range strings.Fields(remotes) {
+			if name == "origin" {
+				exists = true
+			}
+		}
+		values := []string{"remote", "add", "origin", desktopString(remote["url"])}
+		if exists {
+			values = []string{"remote", "set-url", "origin", desktopString(remote["url"])}
+		}
+		if _, e = run(values...); e != nil {
+			return "", e
+		}
+		progress.add("$ git push --progress -u origin HEAD")
+		out, e := runRemoteGit([]string{"push", "--progress", "-u", "origin", "HEAD"}, root, remote, progress)
+		if e != nil {
+			return "", e
+		}
+		if strings.TrimSpace(out) == "" {
+			out = "已推送当前分支并关联 origin"
+		}
+		return strings.TrimSpace(out), nil
+	}
+	progress.add("$ git push --progress")
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cmd := desktopCommand(ctx, "git", []string{"push", "--progress"}, root)
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.MultiWriter(&stderr, progress)
+	e = cmd.Run()
+	if ctx.Err() != nil {
+		return "", errors.New("命令超时：git push")
+	}
+	if e != nil {
+		return "", desktopGitError(stderr.String())
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		return "已推送", nil
+	}
+	return strings.TrimSpace(out.String()), nil
 }

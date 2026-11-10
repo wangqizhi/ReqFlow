@@ -178,6 +178,17 @@ func sshOperation(c *sftp.Client, u *url.URL, channel string, args []any) (any, 
 		})
 		return desktopOK(map[string]any{"entries": values}), nil
 	}
+	if channel == "fs:stat" {
+		result := map[string]any{
+			"path": u.Scheme + "://" + u.Host + file, "name": info.Name(), "dir": info.IsDir(), "size": info.Size(),
+			"mode": info.Mode().Perm().String(), "modified": info.ModTime().Format(time.RFC3339), "remote": true,
+			"writable": info.Mode().Perm()&0200 != 0,
+		}
+		if stat, ok := info.Sys().(*sftp.FileStat); ok {
+			result["owner"] = fmt.Sprintf("uid %d / gid %d", stat.UID, stat.GID)
+		}
+		return desktopOK(result), nil
+	}
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("不是可读取的文件")
 	}
