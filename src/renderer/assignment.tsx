@@ -59,7 +59,7 @@ export function useAssignSetting(): [boolean, (enabled: boolean) => Promise<void
 }
 
 export function agentName(id: string) {
-  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id === 'zcode' ? 'ZCode' : id === 'claude-code' ? 'Claude Code' : id === 'dsh' ? 'DeepSeek Harness' : id;
+  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id === 'zcode' ? 'ZCode' : id === 'claude-code' ? 'Claude Code' : id === 'dsh' ? 'DeepSeek Harness' : id === 'antigravity' ? 'Antigravity' : id;
 }
 
 // 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持；REQ-216 新增 Claude Code / DeepSeek Harness）

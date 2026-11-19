@@ -5,7 +5,7 @@ import { validateRemote, type RemoteSettings } from './remote';
 import { validateDate } from './dates';
 /** 图片附件：上传时为 dataUrl；保存后图片外置到数据目录，只保留 path（界面按需读取）。 */
 export type Attachment = { id: string; label: string; name: string; dataUrl?: string; path?: string };
-export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi' | 'claude-code' | 'dsh' | 'opencode'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
+export type AIExecution = { runId: string; client: 'codex' | 'zcode' | 'pi' | 'claude-code' | 'dsh' | 'opencode' | 'antigravity'; startedAt: string; version: number; batchId: string; endedAt?: string; outcome?: 'completed' | 'released'; durationMs?: number };
 export const activeAIExecution = (i: Item) => i.aiExecution?.runId && !i.aiExecution.endedAt ? i.aiExecution : undefined;
 function finishAIExecution(i: Item, now: string, outcome: 'completed' | 'released') {
   const execution = activeAIExecution(i);
@@ -547,7 +547,7 @@ async function applyOperation(s: Workspace, a: any) {
   }
   const now = new Date().toISOString();
   if (a.op === 'executionClaim') {
-    if (!['codex', 'zcode', 'pi', 'claude-code', 'dsh', 'opencode'].includes(a.client) || !/^[a-f0-9-]{36}$/.test(a.run || '')) throw Error('AI 领取客户端或运行 ID 无效');
+    if (!['codex', 'zcode', 'pi', 'claude-code', 'dsh', 'opencode', 'antigravity'].includes(a.client) || !/^[a-f0-9-]{36}$/.test(a.run || '')) throw Error('AI 领取客户端或运行 ID 无效');
     if (!Array.isArray(a.claims) || !a.claims.length) throw Error('AI 领取请求不能为空');
     const seen = new Set();
     for (const r of a.claims) {

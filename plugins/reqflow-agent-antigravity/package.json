@@ -1,0 +1,14 @@
+{
+  "name": "reqflow-agent-antigravity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Antigravity 插件：按当前目录读取 ReqFlow AI 排期需求，实现后回写待验证。",
+  "author": {
+    "name": "ReqFlow"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

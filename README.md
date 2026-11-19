@@ -1,3 +1,10 @@
+# ReqFlow 2.21.0 更新
+
+- 项目设置「编辑设置」弹窗在保存成功后自动关闭并弹出提示，保存失败时继续保留输入并显示原因。
+- 新增 Antigravity 插件 `reqflow-agent-antigravity`，内置 stdio MCP 工具、路由规则与技能，支持按目录匹配项目、原子领取 AI 排期需求并回写待验证。
+- ReqFlow 执行客户端新增 `antigravity` 标识支持，执行中列表与数据看板统一显示为 Antigravity。
+- 详见 [2.21.0 版本说明](docs/release-2.21.0.md)。
+
 # ReqFlow 2.20.0 更新
 
 - AI 需求聊天室在追问时同时给出第一版候选，并标出待确认内容。回答后 AI 会修改原候选。同一需求最多追问一轮，没有答复的细节按默认处理，并在说明中注明。
@@ -485,7 +492,7 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 - **项目文件浏览**：查看 Markdown、图片和文本，编辑文本并使用 `Ctrl+S` 保存；支持语法高亮及文件右键操作。
 - **Git 面板**：初始化仓库、查看变动、暂存、提交、管理分支，以及 Pull/Push。AI 可根据实际暂存 diff 生成提交文案。Git 功能需要本机安装 Git。
 - **远程仓库与备份**：支持配置仓库地址、分支及 SSH Key 路径，测试连接，以及将工作区数据备份到远程仓库。
-- **Agent 对接**：提供 Codex、ZCode、Pi、OpenCode、Claude Code 和 DeepSeek Harness 插件，用当前项目目录匹配需求，并将实现结果转入待验证。Local Agent 实验室打开即主动检测系统里的 Agent 是否安装与版本是否落后。
+- **Agent 对接**：提供 Codex、ZCode、Pi、OpenCode、Claude Code、DeepSeek Harness 和 Antigravity 插件，用当前项目目录匹配需求，并将实现结果转入待验证。Local Agent 实验室打开即主动检测系统里的 Agent 是否安装与版本是否落后。
 
 远程目录在新建项目或浏览项目时连接，使用本机 OpenSSH 默认密钥/SSH Agent，服务器需启用 SFTP；首次连接前请在终端核对主机指纹并加入 known_hosts。目前远程文件提供只读预览，不执行远程 Git、发布或 Agent 派发。远程项目位于「协作项目」下方，连接检查失败时显示红色断线标识。远程 Agent 后续接入见 [设计讨论稿](docs/remote-agent-execution-design.md)。
 
@@ -516,11 +523,11 @@ ReqFlow 2.0 是面向个人开发者的 Windows 桌面工作台，使用 Go/MyGO
 
 执行具体命令时，请将示例路径和 `<项目ID>` 替换为实际值。CLI 默认输出单行 JSON，退出码为 0 或 1；`--pretty` 用于人工阅读。Windows 图形程序在部分终端中可能不直接显示输出，可使用管道、重定向或子进程读取。
 
-可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/`、`.reqflow-pi/`、`.reqflow-opencode/`、`.reqflow-claude-code/` 或 `.reqflow-dsh/`，其中包含本地需求快照。
+可通过 `--data-dir` 或 `REQFLOW_DATA_DIR` 覆盖数据目录。插件运行记录默认位于用户主目录下的 `.reqflow-codex/`、`.reqflow-zcode/`、`.reqflow-pi/`、`.reqflow-opencode/`、`.reqflow-claude-code/`、`.reqflow-dsh/` 或 `.reqflow-antigravity/`，其中包含本地需求快照。
 
 - [完整 CLI 参考](docs/cli-reference.md)
 - [Codex 插件接入](docs/reqflow-codex-plugin.md)
-- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md) · [OpenCode 插件](plugins/reqflow-agent-opencode/README.md) · [Claude Code 插件](plugins/reqflow-agent-claude/README.md) · [DeepSeek Harness 插件](plugins/reqflow-agent-dsh/README.md)
+- [Codex 插件](plugins/reqflow-agent/README.md) · [ZCode 插件](plugins/reqflow-agent-zcode/README.md) · [Pi 插件](plugins/reqflow-agent-pi/README.md) · [OpenCode 插件](plugins/reqflow-agent-opencode/README.md) · [Claude Code 插件](plugins/reqflow-agent-claude/README.md) · [DeepSeek Harness 插件](plugins/reqflow-agent-dsh/README.md) · [Antigravity 插件](plugins/reqflow-agent-antigravity/README.md)
 - [MOD 协议](docs/mod-protocol.md)
 
 ## 本地开发

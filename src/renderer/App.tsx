@@ -44,7 +44,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
@@ -1916,7 +1916,10 @@ export default function App() {
                         for (const operation of operations) {
                           if (!await act({ project: current.id, ...operation }, true, true)) return;
                         }
-                        setGuideSaveMessage(changed ? '引导词已更新，仅影响下次执行，本轮继续使用原引导词' : '设置已保存');
+                        setDeleteRulesConfirm(false);
+                        setGuideSaveMessage('');
+                        setModal('');
+                        notify(changed ? '引导词已更新，仅影响下次执行，本轮继续使用原引导词' : '设置已保存');
                       } finally { guideSavingRef.current = false; setGuideSaving(false); }
                     }}>
                     {guideSaving ? '保存中…' : '保存设置'}
