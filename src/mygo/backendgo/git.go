@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,6 +90,65 @@ func desktopSamePath(a, b string) bool {
 	bb, e := filepath.EvalSymlinks(b)
 	return e == nil && strings.EqualFold(aa, bb)
 }
+
+func desktopDetectProjectRemote(dir string) map[string]any {
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	git := func(args ...string) string {
+		out, err := desktopGitRun(ctx, args, dir)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(out)
+	}
+	if top := git("rev-parse", "--show-toplevel"); top == "" || !desktopSamePath(dir, top) {
+		return nil
+	}
+	readURL := func(name string) string {
+		value, _, _ := strings.Cut(git("config", "--local", "--includes", "--null", "--get-all", "remote."+name+".url"), "\x00")
+		return strings.TrimSpace(value)
+	}
+	branch := strings.TrimPrefix(git("symbolic-ref", "--quiet", "HEAD"), "refs/heads/")
+	name := "origin"
+	address := readURL(name)
+	if address == "" && branch != "" {
+		if tracked := git("config", "--local", "--includes", "--get", "branch."+branch+".remote"); tracked != "" && tracked != "." {
+			name, address = tracked, readURL(tracked)
+		}
+	}
+	if address == "" {
+		remotes := strings.Fields(git("remote"))
+		if len(remotes) != 1 {
+			return nil
+		}
+		name, address = remotes[0], readURL(remotes[0])
+	}
+	if address == "" {
+		return nil
+	}
+	if branch == "" {
+		branch = strings.TrimPrefix(git("symbolic-ref", "--quiet", "refs/remotes/"+name+"/HEAD"), "refs/remotes/"+name+"/")
+	}
+	host := ""
+	if strings.Contains(address, "://") {
+		if parsed, err := url.Parse(address); err == nil {
+			host = parsed.Hostname()
+		}
+	} else {
+		host, _, _ = strings.Cut(address, ":")
+		_, host, _ = strings.Cut(host, "@")
+	}
+	provider := "gitlab"
+	if strings.EqualFold(host, "github.com") {
+		provider = "github"
+	}
+	settings, _ := ValidateRemote(map[string]any{"provider": provider, "url": address, "branch": branch})
+	return settings
+}
+
 func (b *Backend) desktopRemoteFor(root string) (map[string]any, bool, error) {
 	r, e := b.Workspace.Get()
 	if e != nil {

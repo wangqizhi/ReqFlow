@@ -465,6 +465,7 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 			return nil, e
 		}
 	}
+	autoBoundRemote := false
 	if desktopString(action["op"]) == "project" {
 		if strings.TrimSpace(desktopString(action["name"])) == "" {
 			return nil, errors.New("请填写项目名称")
@@ -517,12 +518,22 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 					return nil, e
 				}
 				action["dir"] = prepared
+				if !coreHas(action, "remote") {
+					if remote := desktopDetectProjectRemote(prepared); remote != nil {
+						action["remote"] = remote
+						autoBoundRemote = true
+					}
+				}
 			}
 		}
 	}
 	r, e := b.Workspace.Mutate(action, expected)
 	if e != nil {
 		return nil, e
+	}
+	if autoBoundRemote {
+		r["summary"] = "项目已创建，已关联现有 Git 远程仓库"
+		return desktopOK(r), nil
 	}
 	if desktopString(action["op"]) == "project" && desktopString(desktopMap(action["remote"])["url"]) != "" {
 		ps := desktopProjects(r)

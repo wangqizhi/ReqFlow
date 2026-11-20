@@ -67,12 +67,17 @@ func (b *Backend) desktopFiles(channel string, args []any) (any, error) {
 		}
 		values := make([]map[string]any, 0, len(entries))
 		for _, entry := range entries {
-			size := int64(0)
-			if stat, e := entry.Info(); e == nil && !entry.IsDir() {
-				size = stat.Size()
-			}
 			relative, _ := filepath.Rel(root, filepath.Join(file, entry.Name()))
-			values = append(values, map[string]any{"name": entry.Name(), "rel": filepath.ToSlash(relative), "dir": entry.IsDir(), "size": size})
+			value := map[string]any{"name": entry.Name(), "rel": filepath.ToSlash(relative), "dir": entry.IsDir(), "size": int64(0)}
+			if stat, err := entry.Info(); err == nil {
+				if !entry.IsDir() {
+					value["size"] = stat.Size()
+				}
+				if desktopFileHidden(stat) {
+					value["hidden"] = true
+				}
+			}
+			values = append(values, value)
 		}
 		sort.Slice(values, func(i, j int) bool {
 			if values[i]["dir"] != values[j]["dir"] {

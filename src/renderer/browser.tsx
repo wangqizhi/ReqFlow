@@ -101,6 +101,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
 
   const [tree, setTree] = useState<Record<string, FileEntry[] | 'loading' | 'error'>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
+  const [showHidden, setShowHidden] = useState(true);
   const [file, setFile] = useState<FileEntry | null>(null);
   // REQ-318：底部信息栏显示最近选中的文件或目录；保存后刷新信息
   const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
@@ -393,6 +394,9 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
   function renderDir(rel: string, depth: number): ReactNode {
     const state = tree[rel];
     const isOpen = expanded.has(rel);
+    const visible = Array.isArray(state) && !showHidden
+      ? state.filter((entry) => !entry.hidden && !entry.name.startsWith('.'))
+      : state;
     const entry: FileEntry = { name: (rel || root).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root, rel, dir: true, size: 0 };
     return (
       <div key={rel || 'root'} className="fb-branch">
@@ -408,9 +412,9 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
             {state === undefined && <div className="fb-hint">加载中…</div>}
             {state === 'loading' && <div className="fb-hint">加载中…</div>}
             {state === 'error' && <div className="fb-hint err">读取失败</div>}
-            {Array.isArray(state) && state.length === 0 && <div className="fb-hint">空目录</div>}
-            {Array.isArray(state) && state.map((e) =>
-              e.dir ? (e.name === '.git' ? null : renderDir(e.rel, depth + 1)) : (
+            {Array.isArray(visible) && visible.length === 0 && <div className="fb-hint">{Array.isArray(state) && state.length ? '仅包含隐藏项' : '空目录'}</div>}
+            {Array.isArray(visible) && visible.map((e) =>
+              e.dir ? renderDir(e.rel, depth + 1) : (
                 <button key={e.rel} className={'fb-row file' + (file?.rel === e.rel ? ' active' : '')}
                   style={{ paddingLeft: 6 + (depth + 1) * 14 + 15 }}
                   onClick={() => openFile(e)} title={e.rel}
@@ -533,6 +537,7 @@ export function ProjectBrowser({ project, onClose, onDirChange, notify, onCommit
                 <Settings size={13} />远程仓库设置
               </button>
             </div>
+            {root && <label className="fb-show-hidden"><input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />显示隐藏文件和目录</label>}
           </div>
           <div className="fb-tree-body">
             {!root ? (

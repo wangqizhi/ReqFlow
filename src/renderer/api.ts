@@ -24,7 +24,7 @@ export type MemoryFile = MemorySection & { path: string; size: number; content?:
 export type MemoryInfo = { settings: MemorySettings; sections: MemorySection[]; files: MemoryFile[]; dir: string; used: number; limit: number; prompt: string };
 
 /** 「浏览项目」的目录条目（rel 为相对关联目录、以 / 分隔的路径）。 */
-export type FileEntry = { name: string; rel: string; dir: boolean; size: number };
+export type FileEntry = { name: string; rel: string; dir: boolean; size: number; hidden?: boolean };
 export type FileInfo = {
   path: string; name: string; dir: boolean; size: number; mode: string; modified: string; writable: boolean;
   symlink?: boolean; attributes?: string; owner?: string; remote?: boolean;

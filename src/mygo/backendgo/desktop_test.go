@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -101,6 +102,97 @@ func TestDesktopFilesNativeAndBounds(t *testing.T) {
 		t.Fatal("Go runtime identification missing")
 	}
 }
+
+func TestDesktopListIncludesHiddenEntries(t *testing.T) {
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	root := t.TempDir()
+	for _, name := range []string{".git", "hidden-dir"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("dist/"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		cmd := desktopCommand(context.Background(), "attrib.exe", []string{"+H", "hidden-dir"}, root)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setting hidden attribute: %s %v", output, err)
+		}
+	}
+	entries := desktopTestCall(t, b, "fs:list", root, "")["entries"].([]map[string]any)
+	if len(entries) != 3 || entries[0]["rel"] != ".git" || entries[0]["dir"] != true || entries[2]["rel"] != ".gitignore" || entries[2]["size"] != int64(5) {
+		t.Fatalf("unexpected project entries: %#v", entries)
+	}
+	if runtime.GOOS == "windows" && entries[1]["hidden"] != true {
+		t.Fatalf("missing hidden attribute: %#v", entries[1])
+	}
+}
+
+func TestDesktopCreateAssociatesExistingRemote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git not installed")
+	}
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := desktopCommand(context.Background(), "git", args, root).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	create := func(dir string) (map[string]any, map[string]any) {
+		t.Helper()
+		r := desktopTestCall(t, b, "workspace:apply", map[string]any{"op": "project", "name": filepath.Base(dir), "dir": dir})
+		projects := desktopProjects(r)
+		return desktopMap(desktopMap(projects[len(projects)-1])["remote"]), r
+	}
+	git("init", "-b", "feature/local")
+	git("-c", "user.name=ReqFlow Test", "-c", "user.email=test@reqflow.local", "commit", "--allow-empty", "-m", "Initial")
+	const origin = "git@github.com:sample/project.git"
+	const other = "ssh://git@gitlab.example.invalid:2222/sample/project.git"
+	git("remote", "add", "origin", origin)
+	git("remote", "add", "upstream", other)
+	git("config", "branch.feature/local.remote", "upstream")
+	if err := os.WriteFile(filepath.Join(root, "unsaved.txt"), []byte("local work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	remote, response := create(root)
+	if remote["url"] != origin || remote["provider"] != "github" || remote["branch"] != "feature/local" || desktopString(response["summary"]) == "" || desktopString(response["warning"]) != "" {
+		t.Fatalf("existing origin should be bound without checkout: remote=%#v, warning=%v", remote, response["warning"])
+	}
+	file, err := os.ReadFile(filepath.Join(root, "unsaved.txt"))
+	if err != nil || string(file) != "local work" {
+		t.Fatalf("local file changed: %q, %v", file, err)
+	}
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if remote, _ := create(child); len(remote) != 0 {
+		t.Fatalf("nested directory inherited a remote: %#v", remote)
+	}
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	git("worktree", "add", "-b", "worktree-branch", worktree)
+	if remote, _ := create(worktree); remote["url"] != origin || remote["branch"] != "worktree-branch" {
+		t.Fatalf("worktree configuration was not detected: %#v", remote)
+	}
+	git("remote", "remove", "origin")
+	git("remote", "add", "mirror", "https://mirror.example.invalid/sample/project.git")
+	if remote, _ := create(root); remote["url"] != other || remote["provider"] != "gitlab" {
+		t.Fatalf("tracked remote was not detected: %#v", remote)
+	}
+	git("remote", "remove", "mirror")
+	git("config", "--unset", "branch.feature/local.remote")
+	if remote, _ := create(root); remote["url"] != other {
+		t.Fatalf("sole remote was not detected: %#v", remote)
+	}
+	git("remote", "set-url", "upstream", "https://test-token@gitlab.example.invalid/sample/project.git")
+	if remote, _ := create(root); len(remote) != 0 {
+		t.Fatal("a credential-bearing URL was persisted")
+	}
+}
+
 func TestDesktopGitUnicodeAndLiteralArguments(t *testing.T) {
 	if _, e := exec.LookPath("git"); e != nil {
 		t.Skip("Git not installed")

@@ -3,9 +3,15 @@
 package backendgo
 
 import (
+	"os"
 	"strings"
 	"syscall"
 )
+
+func desktopFileHidden(info os.FileInfo) bool {
+	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return ok && data.FileAttributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
+}
 
 // desktopFileAttributes 返回 Windows 文件属性（只读、隐藏、系统、存档）。
 func desktopFileAttributes(file string) string {
