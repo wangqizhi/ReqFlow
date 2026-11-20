@@ -87,6 +87,7 @@ const channels = {
   testAISettings: 'ai:settings:test',
   getWorkspace: 'workspace:get',
   getLocalWorkspace: 'workspace:local',
+  getAntigravityStatsUsage: 'stats:antigravity-usage',
   apply: 'workspace:apply',
   appInfo: 'app:info',
   showDataFile: 'app:showDataFile',

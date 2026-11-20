@@ -1,4 +1,4 @@
-import { TokenUsage } from './token-usage';
+import { statsClientLabel, statsExecutionClient, TokenUsage } from './token-usage';
 // 数据看板：从工作区数据派生需求与 AI 执行统计，全部前端计算。
 // 图表遵循 docs/ui-guidelines.md 与数据可视化规范：每图单轴、单系列单色（槽 1 蓝）、
 // hairline 实线网格、2px 线宽 + 白环端点、crosshair 悬浮提示与明细表兜底；
@@ -7,14 +7,13 @@ import { TokenUsage } from './token-usage';
 import { useEffect, useMemo, useState } from 'react';
 import { activeAIExecution, type Item, type Project, type Workspace } from '../core/domain';
 import { localDate } from '../core/dates';
-import { bridge, type GitCommit, type GitMilestoneInfo } from './api';
+import { bridge, type GitCommit, type GitMilestoneInfo, type StatsUsageByRun } from './api';
 import { ActivityCalendar } from './stats-calendar';
 import { ChevronRight, GitBranch, RefreshCw } from './icons';
 
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
 const RANGES: [label: string, days: number][] = [['近 7 天', 7], ['近 14 天', 14], ['近 30 天', 30], ['全部', 0]];
-const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity' };
 
 function dayKeyOf(iso: string): string {
   const t = Date.parse(iso);
@@ -227,9 +226,19 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const [milestoneId, setMilestoneId] = useState('');
   const [milestones, setMilestones] = useState<MilestoneState>({ loading: false, error: '', data: null });
   const [reload, setReload] = useState(0);
+  const [usageByRun, setUsageByRun] = useState<StatsUsageByRun>({});
 
   const projects = workspace?.projects || [];
   const milestoneDir = projects.find(p => p.id === milestoneId)?.dir || '';
+
+  useEffect(() => {
+    if (!workspace || !bridge.getAntigravityStatsUsage) return;
+    let cancelled = false;
+    bridge.getAntigravityStatsUsage().then(result => {
+      if (!cancelled && result.ok) setUsageByRun(result.usageByRun);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [workspace]);
 
   // REQ-190：点击项目后读取该项目目录的 Git 历史（只读，最多 120 条）。
   useEffect(() => {
@@ -256,8 +265,14 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       for (const item of project.items || []) {
         const c = createdTime(item);
         if (c) created.push({ day: dayKeyOf(c), project: project.id });
+        const legacyAntigravity = new Set((item.history || []).filter(e =>
+          e?.event === '实现完成' && e.execution?.client === 'pi' && statsExecutionClient(e) === 'antigravity'
+        ).map(e => e.execution.runId));
         for (const e of item.history || []) {
-          if (e?.event === 'AI 领取任务' && typeof e.time === 'string') claims.push({ day: dayKeyOf(e.time), client: String(e.client || '') || '未知' });
+          if (e?.event === 'AI 领取任务' && typeof e.time === 'string') {
+            const client = e.client === 'pi' && legacyAntigravity.has(e.runId) ? 'antigravity' : String(e.client || '');
+            claims.push({ day: dayKeyOf(e.time), client });
+          }
           const execution = e?.event === '实现完成' || e?.event === '释放 AI 任务' ? e.execution : null;
           if (execution?.startedAt) {
             const day = dayKeyOf(execution.startedAt);
@@ -295,7 +310,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const clientRows = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of inRange.claims) counts.set(e.client, (counts.get(e.client) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([client, value]) => ({ label: CLIENT_LABELS[client] || client, value }));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([client, value]) => ({ label: statsClientLabel(client), value }));
   }, [inRange]);
 
   const series = useMemo(() => {
@@ -350,7 +365,6 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
       <LineChart key={`created-${range}-${projectId}`} title="新建需求" points={series.created} width={740} />
     </div>
-    <TokenUsage projects={projects} days={range} projectId={projectId} />
     <div className="stats-grid-2">
       <div className="stats-chart-block"><h4>每日 AI 执行次数</h4><LineChart key={`claims-${range}`} title="AI 执行次数" points={series.claims} width={354} height={150} /></div>
       <div className="stats-chart-block"><h4>每日 AI 执行用时</h4><LineChart key={`minutes-${range}`} title="AI 执行用时" unit=" 分" points={series.minutes} width={354} height={150} /></div>
@@ -359,6 +373,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} /></div>
       <div className="stats-chart-block"><h4>AI 客户端使用</h4><BarList rows={clientRows} unit=" 次" /></div>
     </div>
+    <TokenUsage projects={projects} days={range} projectId={projectId} usageByRun={usageByRun} />
     <div className="settings-actions">
       <button className="btn" aria-expanded={showTable} onClick={() => setShowTable(!showTable)}>{showTable ? '收起明细表' : '展开明细表'}</button>
     </div>

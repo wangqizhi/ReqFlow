@@ -24,5 +24,16 @@ try {
   for (const item of projects[0].items) for (const event of item.history) event.time = '2020-01-01T00:00:00Z';
   assert.deepEqual(taskUsageRows(projects, 7), []);
   assert.equal(taskUsageRows(projects, 0).length, 1);
-  console.log('PASS: shared run usage deduplication, latest snapshot, project/date filters.');
+  const antigravityUsage = { run: [{ model: 'gemini-example', inputTokens: 50, outputTokens: 10, scope: 'run', sessionId: 'agy-session' }] };
+  for (const item of projects[0].items) for (const event of item.history) {
+    event.execution.client = 'pi';
+    event.note = '[ReqFlow Antigravity run run]\nCompleted';
+    delete event.usage;
+  }
+  const recovered = taskUsageRows(projects, 0, 'p', antigravityUsage);
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].client, 'antigravity');
+  assert.equal(recovered[0].model, 'gemini-example');
+  assert.equal(recovered[0].input, 50);
+  console.log('PASS: shared usage deduplication, project/date filters, and Antigravity history.');
 } finally { await rm(temp, { recursive: true, force: true }); }

@@ -1,8 +1,18 @@
 import { useState } from 'react';
 import type { Project } from '../core/domain';
 import { localDate } from '../core/dates';
+import type { StatsUsageByRun } from './api';
 
-type UsageRow = { key: string; projectId: string; project: string; requirement: string; model: string; effort: string; input: number; output: number; cached: number; reasoning: number; source: string; shared: boolean; time: string };
+type UsageRow = { key: string; projectId: string; project: string; requirement: string; client: string; model: string; effort: string; input: number; output: number; cached: number; reasoning: number; source: string; shared: boolean; time: string };
+
+const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity' };
+export const statsClientLabel = (id: string) => CLIENT_LABELS[id] || id || '未知';
+
+export function statsExecutionClient(event: { execution?: { client?: string; runId?: string }; note?: string }): string {
+  const { client = '', runId } = event.execution || {};
+  if (client === 'pi' && runId && typeof event.note === 'string' && event.note.startsWith(`[ReqFlow Antigravity run ${runId}]\n`)) return 'antigravity';
+  return client;
+}
 
 const exactTokens = (value: number) => `${value.toLocaleString('zh-CN')} Token`;
 export function formatTokens(value: number): string {
@@ -70,17 +80,20 @@ function TokenValue({ value }: { value: number }) {
   return <span title={exactTokens(value)} aria-label={exactTokens(value)}>{formatTokens(value)}</span>;
 }
 
-export function taskUsageRows(projects: Project[], days: number, projectId = ''): UsageRow[] {
+export function taskUsageRows(projects: Project[], days: number, projectId = '', usageByRun: StatsUsageByRun = {}): UsageRow[] {
   const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - Math.max(0, days - 1));
   const cutoff = days ? start.getTime() : 0;
   const rows = new Map<string, UsageRow>();
   for (const project of projects) {
     if (projectId && project.id !== projectId) continue;
     for (const item of project.items || []) for (const event of item.history || []) {
-      if (event.event !== '实现完成' || !Array.isArray(event.usage) || Date.parse(event.time) < cutoff) continue;
-      for (const [index, u] of event.usage.entries()) {
+      if (event.event !== '实现完成' || Date.parse(event.time) < cutoff) continue;
+      const run = event.execution?.runId;
+      const client = statsExecutionClient(event);
+      const usage = Array.isArray(event.usage) && event.usage.length ? event.usage : client === 'antigravity' && run ? usageByRun[run] : undefined;
+      if (!Array.isArray(usage)) continue;
+      for (const [index, u] of usage.entries()) {
         const shared = u.scope === 'run';
-        const run = event.execution?.runId;
         // Shared task snapshots may be collected again as each requirement
         // completes. Keep the newest cumulative snapshot, never add copies.
         const key = shared && run && u.sessionId
@@ -89,16 +102,16 @@ export function taskUsageRows(projects: Project[], days: number, projectId = '')
         const previous = rows.get(key);
         const requirement = previous && !previous.requirement.split('、').includes(item.number) ? `${previous.requirement}、${item.number}` : previous?.requirement || item.number;
         if (previous && Date.parse(previous.time) > Date.parse(event.time)) { previous.requirement = requirement; continue; }
-        rows.set(key, { key, projectId: project.id, project: project.name, requirement, model: u.model || '未知模型', effort: u.reasoningEffort || '未提供', input: Number(u.inputTokens) || 0, output: Number(u.outputTokens) || 0, cached: Number(u.cachedInputTokens) || 0, reasoning: Number(u.reasoningOutputTokens) || 0, source: u.source || '客户端上报', shared, time: event.time });
+        rows.set(key, { key, projectId: project.id, project: project.name, requirement, client, model: u.model || '未知模型', effort: u.reasoningEffort || '未提供', input: Number(u.inputTokens) || 0, output: Number(u.outputTokens) || 0, cached: Number(u.cachedInputTokens) || 0, reasoning: Number(u.reasoningOutputTokens) || 0, source: u.source || '客户端上报', shared, time: event.time });
       }
     }
   }
   return [...rows.values()];
 }
 
-export function TokenUsage({ projects, days, projectId }: { projects: Project[]; days: number; projectId: string }) {
+export function TokenUsage({ projects, days, projectId, usageByRun }: { projects: Project[]; days: number; projectId: string; usageByRun: StatsUsageByRun }) {
   const [group, setGroup] = useState('model');
-  const rows = taskUsageRows(projects, days, projectId);
+  const rows = taskUsageRows(projects, days, projectId, usageByRun);
   const groups = new Map<string, { label: string; input: number; output: number; cached: number; reasoning: number }>();
   for (const row of rows) {
     const label = group === 'model' ? `${row.model} · ${row.effort}` : group === 'project' ? row.project : `${row.project} · ${row.requirement}${row.shared ? '（共享执行）' : ''}`;
@@ -114,7 +127,7 @@ export function TokenUsage({ projects, days, projectId }: { projects: Project[];
   return <div className="stats-chart-block token-usage-block">
     <div className="stats-chart-head"><h4>任务 Token 消耗</h4><div className="segmented" role="group" aria-label="Token 统计维度">{[['model', '模型与思考等级'], ['project', '项目'], ['requirement', '需求']].map(([id, label]) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'on' : ''} onClick={() => setGroup(id)}>{label}</button>)}</div></div>
     <p className="settings-hint">仅统计实际采集或上报的已完成任务。未采集不代表零消耗；缓存输入和推理输出已包含在输入、输出中。共享执行只计一次，需求维度标注共享，不估算分摊。遵循当前时间范围与项目筛选。</p>
-    {!rows.length ? <p className="settings-hint">暂无已采集用量。Codex 可读取精确会话记录；其他客户端可随完成报告上报实际用量。</p> : <>
+    {!rows.length ? <p className="settings-hint">暂无已采集用量。用量来自匹配的本机会话或客户端完成报告。</p> : <>
       <div className="token-summary">
         {[['总消耗', total, '输入 + 输出'], ['输入', totals.input, `其中缓存 ${formatTokens(totals.cached)}`], ['输出', totals.output, `其中推理 ${formatTokens(totals.reasoning)}`]].map(([label, value, hint]) => <div className="token-summary-card" key={label}><span>{label}</span><strong><TokenValue value={Number(value)} /><small>Token</small></strong><span>{hint}</span></div>)}
         <div className="token-summary-card"><span>缓存输入占比</span><strong>{totals.input ? `${(totals.cached / totals.input * 100).toFixed(1)}%` : '—'}</strong><span title={exactTokens(totals.cached)}>已采集缓存 / 输入</span></div>
@@ -127,7 +140,7 @@ export function TokenUsage({ projects, days, projectId }: { projects: Project[];
       </div>
       <p className="settings-hint">单位：Token；万 = 10,000，亿 = 100,000,000。悬停数值查看精确数量；缓存与推理为包含项，不重复累加。无采集记录的日期显示 0，仅表示当日无已采集完成任务。</p>
       <div className="token-usage-scroll"><table className="stats-table"><thead><tr><th>{group === 'model' ? '模型 · 思考等级' : group === 'project' ? '项目' : '需求'}</th><th>输入</th><th>其中缓存</th><th>输出</th><th>其中推理</th><th>合计</th></tr></thead><tbody>{ranked.map(([key, sum]) => <tr key={key}><td>{sum.label}</td><td><TokenValue value={sum.input} /></td><td><TokenValue value={sum.cached} /></td><td><TokenValue value={sum.output} /></td><td><TokenValue value={sum.reasoning} /></td><td><TokenValue value={sum.input + sum.output} /></td></tr>)}</tbody></table></div>
-      <details><summary>采集明细与来源 · {rows.length}</summary><div className="token-usage-scroll"><table className="stats-table"><thead><tr><th>项目 / 需求</th><th>模型</th><th>思考等级</th><th>Token（精确值）</th><th>来源</th></tr></thead><tbody>{rows.map(row => <tr key={row.key}><td>{row.project} / {row.requirement}{row.shared ? '（共享执行）' : ''}</td><td>{row.model}</td><td>{row.effort}</td><td>{(row.input + row.output).toLocaleString('zh-CN')}</td><td>{row.source}</td></tr>)}</tbody></table></div></details>
+      <details><summary>采集明细与来源 · {rows.length}</summary><div className="token-usage-scroll"><table className="stats-table"><thead><tr><th>项目 / 需求</th><th>客户端</th><th>模型</th><th>思考等级</th><th>Token（精确值）</th><th>来源</th></tr></thead><tbody>{rows.map(row => <tr key={row.key}><td>{row.project} / {row.requirement}{row.shared ? '（共享执行）' : ''}</td><td>{statsClientLabel(row.client)}</td><td>{row.model}</td><td>{row.effort}</td><td>{(row.input + row.output).toLocaleString('zh-CN')}</td><td>{row.source}</td></tr>)}</tbody></table></div></details>
     </>}
   </div>;
 }
