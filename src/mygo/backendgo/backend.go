@@ -519,7 +519,7 @@ func (b *Backend) desktopApply(action map[string]any) (any, error) {
 				}
 				action["dir"] = prepared
 				if !coreHas(action, "remote") {
-					if remote := desktopDetectProjectRemote(prepared); remote != nil {
+					if remote, err := desktopDetectProjectRemote(context.Background(), prepared); err == nil {
 						action["remote"] = remote
 						autoBoundRemote = true
 					}

@@ -193,6 +193,53 @@ func TestDesktopCreateAssociatesExistingRemote(t *testing.T) {
 	}
 }
 
+func TestDesktopAssociateRemoteForExistingProject(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git not installed")
+	}
+	b := NewBackend(t.TempDir(), t.TempDir(), "test")
+	root := t.TempDir()
+	created := desktopTestCall(t, b, "workspace:apply", map[string]any{"op": "project", "name": "Existing", "dir": root})
+	projects := desktopProjects(created)
+	project := desktopMap(projects[len(projects)-1])
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := desktopCommand(context.Background(), "git", args, root).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	git("init", "-b", "feature/existing")
+	result, err := b.Invoke(context.Background(), "git:detectRemote", []any{root})
+	if err != nil || desktopMap(result)["ok"] != false || !strings.Contains(desktopString(desktopMap(result)["error"]), "未配置远程地址") {
+		t.Fatalf("missing remote should give a clear error: %v %v", result, err)
+	}
+	const address = "ssh://git@gitlab.example.invalid:2222/team/project.git"
+	git("remote", "add", "upstream", address)
+	configPath := filepath.Join(root, ".git", "config")
+	original, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detected := desktopTestCall(t, b, "git:detectRemote", root)
+	remote := desktopMap(detected["remote"])
+	if remote["url"] != address || remote["provider"] != "gitlab" || remote["branch"] != "feature/existing" {
+		t.Fatalf("unexpected remote settings: %#v", remote)
+	}
+	action := map[string]any{"op": "projectRemote", "project": project["id"], "remote": remote, "expectedDir": t.TempDir()}
+	result, err = b.Invoke(context.Background(), "workspace:apply", []any{action})
+	if err != nil || desktopMap(result)["ok"] != false || !strings.Contains(desktopString(desktopMap(result)["error"]), "目录已变更") {
+		t.Fatalf("settings must not be applied to a different directory: %v %v", result, err)
+	}
+	action["expectedDir"] = project["dir"]
+	updated := desktopProjects(desktopTestCall(t, b, "workspace:apply", action))
+	if saved := desktopMap(desktopMap(updated[len(updated)-1])["remote"]); saved["url"] != address || saved["branch"] != "feature/existing" {
+		t.Fatalf("existing project was not associated: %#v", saved)
+	}
+	if current, err := os.ReadFile(configPath); err != nil || string(current) != string(original) {
+		t.Fatalf("association changed local Git config: %v", err)
+	}
+}
+
 func TestDesktopGitUnicodeAndLiteralArguments(t *testing.T) {
 	if _, e := exec.LookPath("git"); e != nil {
 		t.Skip("Git not installed")

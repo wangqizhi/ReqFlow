@@ -2069,7 +2069,7 @@ export default function App() {
           onDirChange={async (dir) => { if (!await act({ op: 'projectDir', dir }, true)) throw Error('目录未保存，请检查提示后重试'); }}
           notify={notify}
           onCommitted={load}
-          saveRemote={async (remote) => !!await act({ op: 'projectRemote', remote }, true)}
+          saveRemote={async (remote, expectedDir) => !!await act({ op: 'projectRemote', remote, expectedDir }, true)}
         />
       )}
     </div>

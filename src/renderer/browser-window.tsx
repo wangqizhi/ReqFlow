@@ -29,7 +29,7 @@ export function BrowserWindow({ id }: { id: string }) {
   return <>
     {message && <div role="alert" className="browser-window-message" onClick={() => setMessage('')}>{message}</div>}
     {project
-      ? <ProjectBrowser project={project} onClose={() => void bridge.closeProjectBrowser?.(id)} onDirChange={async dir => { if (!await update('projectDir', { dir })) throw Error('目录未保存'); }} notify={(text) => setMessage(text)} onCommitted={load} saveRemote={(remote: RemoteSettings) => update('projectRemote', { remote })} />
+      ? <ProjectBrowser project={project} onClose={() => void bridge.closeProjectBrowser?.(id)} onDirChange={async dir => { if (!await update('projectDir', { dir })) throw Error('目录未保存'); }} notify={(text) => setMessage(text)} onCommitted={load} saveRemote={(remote: RemoteSettings, expectedDir) => update('projectRemote', { remote, expectedDir })} />
       : <div className="browser-window-loading" role="status">
           <div className="browser-window-loading-bar" aria-hidden="true" />
           {state && !message ? <span>未找到该项目，可能已被删除</span> : <><RefreshCw size={22} className="terminal-loading-spinner" /><span>{message || '正在加载项目…'}</span></>}

@@ -107,6 +107,7 @@ const channels = {
   openExternal: 'shell:openExternal',
   openCodexDeepLink: 'shell:openCodexDeepLink',
   gitAvailable: 'git:available',
+  detectProjectRemote: 'git:detectRemote',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
   gitMilestones: 'git:milestones',

@@ -135,6 +135,7 @@ export interface ReqFlowBridge {
   syncBackup?(): Promise<{ ok: boolean; error?: string; status: BackupStatus }>;
   importBackup?(settings: BackupSettings): Promise<{ ok: boolean; error?: string; settings?: BackupSettings; status?: BackupStatus; projects?: number; items?: number }>;
   testRemote?(settings: RemoteSettings): Promise<{ ok: boolean; error?: string }>;
+  detectProjectRemote?(dir: string): Promise<{ ok: true; remote: RemoteSettings } | { ok: false; error: string }>;
   applyRemote?(project: string): Promise<{ ok: boolean; error?: string }>;
   pickSSHKey?(): Promise<{ ok: boolean; path?: string }>;
   /** 验证源（REQ-060）：选择本地验证程序；打开配置的 exe / url。仅桌面版提供。 */

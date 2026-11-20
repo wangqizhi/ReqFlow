@@ -87,7 +87,7 @@ type Props = {
   onClose: () => void;
   onCommitted: () => Promise<void>;
   onDirChange: (dir: string) => Promise<unknown>;
-  saveRemote: (remote: RemoteSettings) => Promise<boolean>;
+  saveRemote: (remote: RemoteSettings, expectedDir?: string) => Promise<boolean>;
   notify: (text: string, kind?: 'ok' | 'err') => void;
 };
 

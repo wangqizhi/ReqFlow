@@ -1194,6 +1194,9 @@ func coreApplyOperation(s, a map[string]any) error {
 		p["guideVersion"] = coreNum(p["guideVersion"]) + 1
 		return nil
 	case "projectRemote":
+		if dir, ok := a["expectedDir"]; ok && coreString(dir) != coreString(p["dir"]) {
+			return errors.New("项目目录已变更，请重新读取 Git 远程配置")
+		}
 		remote, e := ValidateRemote(a["remote"])
 		if e != nil {
 			return e

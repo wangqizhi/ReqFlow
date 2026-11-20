@@ -579,6 +579,7 @@ async function applyOperation(s: Workspace, a: any) {
     return;
   }
   if (a.op === 'projectRemote') {
+    if (a.expectedDir !== undefined && a.expectedDir !== (p.dir || '')) throw Error('项目目录已变更，请重新读取 Git 远程配置');
     p.remote = validateRemote(a.remote);
     return;
   }

@@ -91,11 +91,11 @@ func desktopSamePath(a, b string) bool {
 	return e == nil && strings.EqualFold(aa, bb)
 }
 
-func desktopDetectProjectRemote(dir string) map[string]any {
+func desktopDetectProjectRemote(ctx context.Context, dir string) (map[string]any, error) {
 	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
-		return nil
+		return nil, errors.New("请选择 Git 仓库根目录")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	git := func(args ...string) string {
 		out, err := desktopGitRun(ctx, args, dir)
@@ -104,8 +104,15 @@ func desktopDetectProjectRemote(dir string) map[string]any {
 		}
 		return strings.TrimSpace(out)
 	}
-	if top := git("rev-parse", "--show-toplevel"); top == "" || !desktopSamePath(dir, top) {
-		return nil
+	top, err := desktopGitRun(ctx, []string{"rev-parse", "--show-toplevel"}, dir)
+	if ctx.Err() != nil {
+		return nil, errors.New("读取 Git 配置超时，请重试")
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return nil, errors.New("未找到 Git，请检查本机 Git 安装")
+	}
+	if err != nil || !desktopSamePath(dir, strings.TrimSpace(top)) {
+		return nil, errors.New("无法读取该目录的 Git 仓库，请检查目录和 Git 配置")
 	}
 	readURL := func(name string) string {
 		value, _, _ := strings.Cut(git("config", "--local", "--includes", "--null", "--get-all", "remote."+name+".url"), "\x00")
@@ -121,16 +128,24 @@ func desktopDetectProjectRemote(dir string) map[string]any {
 	}
 	if address == "" {
 		remotes := strings.Fields(git("remote"))
-		if len(remotes) != 1 {
-			return nil
+		if ctx.Err() != nil {
+			return nil, errors.New("读取 Git 配置超时，请重试")
 		}
-		name, address = remotes[0], readURL(remotes[0])
+		if len(remotes) > 1 {
+			return nil, errors.New("检测到多个 Git 远程，无法自动选择，请手动填写仓库地址")
+		}
+		if len(remotes) == 1 {
+			name, address = remotes[0], readURL(remotes[0])
+		}
+	}
+	if address != "" && branch == "" {
+		branch = strings.TrimPrefix(git("symbolic-ref", "--quiet", "refs/remotes/"+name+"/HEAD"), "refs/remotes/"+name+"/")
+	}
+	if ctx.Err() != nil {
+		return nil, errors.New("读取 Git 配置超时，请重试")
 	}
 	if address == "" {
-		return nil
-	}
-	if branch == "" {
-		branch = strings.TrimPrefix(git("symbolic-ref", "--quiet", "refs/remotes/"+name+"/HEAD"), "refs/remotes/"+name+"/")
+		return nil, errors.New("本地 Git 仓库未配置远程地址")
 	}
 	host := ""
 	if strings.Contains(address, "://") {
@@ -145,8 +160,7 @@ func desktopDetectProjectRemote(dir string) map[string]any {
 	if strings.EqualFold(host, "github.com") {
 		provider = "github"
 	}
-	settings, _ := ValidateRemote(map[string]any{"provider": provider, "url": address, "branch": branch})
-	return settings
+	return ValidateRemote(map[string]any{"provider": provider, "url": address, "branch": branch})
 }
 
 func (b *Backend) desktopRemoteFor(root string) (map[string]any, bool, error) {
@@ -281,6 +295,17 @@ func desktopParseStatus(out string) map[string]any {
 
 func (b *Backend) desktopGit(ctx context.Context, channel string, args []any) (any, error) {
 	root := desktopText(args, 0)
+	if channel == "git:detectRemote" {
+		dir, err := desktopPrepareDirectory(root, false)
+		if err != nil {
+			return nil, err
+		}
+		remote, err := desktopDetectProjectRemote(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		return desktopOK(map[string]any{"remote": remote}), nil
+	}
 	if channel == "dir:prepare" {
 		remote := map[string]any{}
 		var e error
