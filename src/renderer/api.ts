@@ -29,6 +29,8 @@ export type StatsTokenUsage = {
   sessionId?: string;
 };
 export type StatsUsageByRun = Record<string, StatsTokenUsage[]>;
+export type StatsLocalUsage = StatsTokenUsage & { projectId: string; client: string; sessionId: string; day: string };
+export type StatsLocalUsageResult = { ok: true; usageByRun: StatsUsageByRun; sessions: StatsLocalUsage[] } | { ok: false; error: string };
 
 /** 全局记忆（REQ-294）：跨项目记忆设置与已生成的 Markdown 文件。 */
 export type MemorySettings = { enabled: boolean; limitKB: number; recentLimit: number; notes: Record<string, string> };
@@ -219,7 +221,7 @@ export interface ReqFlowBridge {
   gitStatus?(root: string): Promise<({ ok: true } & GitStatusInfo) | { ok: false; error: string }>;
   /** 里程碑视图：读取项目目录最近的 Git 提交历史（只读）。仅桌面版提供。 */
   gitMilestones?(root: string, limit?: number): Promise<({ ok: true } & GitMilestoneInfo) | { ok: false; error: string }>;
-  getAntigravityStatsUsage?(): Promise<{ ok: true; usageByRun: StatsUsageByRun } | { ok: false; error: string }>;
+  getLocalStatsUsage?(since: string): Promise<StatsLocalUsageResult>;
   gitInit?(root: string): Promise<GitOpResult>;
   gitStage?(root: string, mode: 'stage' | 'unstage', paths: string[]): Promise<GitOpResult>;
   gitCommit?(root: string, message: string, project?: string, items?: { id: string; version: number }[]): Promise<GitOpResult>;

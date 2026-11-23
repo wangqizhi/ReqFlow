@@ -7,13 +7,13 @@ import { statsClientLabel, statsExecutionClient, TokenUsage } from './token-usag
 import { useEffect, useMemo, useState } from 'react';
 import { activeAIExecution, type Item, type Project, type Workspace } from '../core/domain';
 import { localDate } from '../core/dates';
-import { bridge, type GitCommit, type GitMilestoneInfo, type StatsUsageByRun } from './api';
+import { bridge, type GitCommit, type GitMilestoneInfo } from './api';
 import { ActivityCalendar } from './stats-calendar';
 import { ChevronRight, GitBranch, RefreshCw } from './icons';
 
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
-const RANGES: [label: string, days: number][] = [['近 7 天', 7], ['近 14 天', 14], ['近 30 天', 30], ['全部', 0]];
+const RANGES: [label: string, days: number][] = [['今日', 1], ['近 7 天', 7], ['近 14 天', 14], ['近 30 天', 30], ['全部', 0]];
 
 function dayKeyOf(iso: string): string {
   const t = Date.parse(iso);
@@ -226,19 +226,16 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const [milestoneId, setMilestoneId] = useState('');
   const [milestones, setMilestones] = useState<MilestoneState>({ loading: false, error: '', data: null });
   const [reload, setReload] = useState(0);
-  const [usageByRun, setUsageByRun] = useState<StatsUsageByRun>({});
-
+  const [today, setToday] = useState(() => localDate());
   const projects = workspace?.projects || [];
   const milestoneDir = projects.find(p => p.id === milestoneId)?.dir || '';
 
   useEffect(() => {
-    if (!workspace || !bridge.getAntigravityStatsUsage) return;
-    let cancelled = false;
-    bridge.getAntigravityStatsUsage().then(result => {
-      if (!cancelled && result.ok) setUsageByRun(result.usageByRun);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [workspace]);
+    const nextDay = new Date();
+    nextDay.setHours(24, 0, 0, 0);
+    const timer = window.setTimeout(() => setToday(localDate()), nextDay.getTime() - Date.now() + 50);
+    return () => window.clearTimeout(timer);
+  }, [today]);
 
   // REQ-190：点击项目后读取该项目目录的 Git 历史（只读，最多 120 条）。
   useEffect(() => {
@@ -276,7 +273,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
           const execution = e?.event === '实现完成' || e?.event === '释放 AI 任务' ? e.execution : null;
           if (execution?.startedAt) {
             const day = dayKeyOf(execution.startedAt);
-            if (e.event === '实现完成') finished.push({ day });
+            if (e.event === '实现完成') finished.push({ day: dayKeyOf(e.time) });
             const ms = Number(execution.durationMs);
             if (Number.isFinite(ms) && ms > 0) durations.push({ day, minutes: Math.round(ms / 60000) });
           }
@@ -289,12 +286,14 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   // 范围内日期序列（旧 → 新）；「全部」从数据最早一天起
   const days = useMemo(() => {
     const all = [...events.created, ...events.claims, ...events.finished, ...events.durations].map(e => e.day).filter(Boolean).sort();
-    const start = range === 0 ? (all[0] || localDate(new Date(Date.now() - 6 * 864e5))) : localDate(new Date(Date.now() - (range - 1) * 864e5));
-    const end = localDate();
+    const last = new Date(today + 'T00:00:00');
+    const first = new Date(last);
+    first.setDate(first.getDate() - (range ? range - 1 : 6));
+    const start = range === 0 ? all[0] || localDate(first) : localDate(first);
     const list: string[] = [];
-    for (let t = new Date(start + 'T00:00:00'), last = new Date(end + 'T00:00:00'); t <= last && list.length < 400; t = new Date(t.getTime() + 864e5)) list.push(localDate(t));
+    for (let t = new Date(start + 'T00:00:00'); t <= last && list.length < 400; t.setDate(t.getDate() + 1)) list.push(localDate(t));
     return list;
-  }, [events, range]);
+  }, [events, range, today]);
 
   const inRange = useMemo(() => {
     const set = new Set(days);
@@ -373,7 +372,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} /></div>
       <div className="stats-chart-block"><h4>AI 客户端使用</h4><BarList rows={clientRows} unit=" 次" /></div>
     </div>
-    <TokenUsage projects={projects} days={range} projectId={projectId} usageByRun={usageByRun} />
+    <TokenUsage projects={projects} days={range} projectId={projectId} today={today} loadLocalUsage={bridge.getLocalStatsUsage} />
     <div className="settings-actions">
       <button className="btn" aria-expanded={showTable} onClick={() => setShowTable(!showTable)}>{showTable ? '收起明细表' : '展开明细表'}</button>
     </div>

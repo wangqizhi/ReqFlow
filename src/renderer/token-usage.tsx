@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Project } from '../core/domain';
 import { localDate } from '../core/dates';
-import type { StatsUsageByRun } from './api';
+import type { StatsLocalUsage, StatsLocalUsageResult, StatsUsageByRun } from './api';
 
 type UsageRow = { key: string; projectId: string; project: string; requirement: string; client: string; model: string; effort: string; input: number; output: number; cached: number; reasoning: number; source: string; shared: boolean; time: string };
 
@@ -11,6 +11,7 @@ export const statsClientLabel = (id: string) => CLIENT_LABELS[id] || id || '未�
 export function statsExecutionClient(event: { execution?: { client?: string; runId?: string }; note?: string }): string {
   const { client = '', runId } = event.execution || {};
   if (client === 'pi' && runId && typeof event.note === 'string' && event.note.startsWith(`[ReqFlow Antigravity run ${runId}]\n`)) return 'antigravity';
+  if (client === 'pi' && runId && typeof event.note === 'string' && event.note.startsWith(`[ReqFlow OpenCode run ${runId}]\n`)) return 'opencode';
   return client;
 }
 
@@ -47,7 +48,7 @@ export function usageTrend(rows: UsageRow[], days: number) {
   return { monthly, points };
 }
 
-function TokenTrend({ rows, days }: { rows: UsageRow[]; days: number }) {
+function TokenTrend({ rows, days, includeLocal }: { rows: UsageRow[]; days: number; includeLocal: boolean }) {
   const { monthly, points } = usageTrend(rows, days);
   const [focus, setFocus] = useState('');
   const tip = points.find(point => point.date === focus);
@@ -58,7 +59,7 @@ function TokenTrend({ rows, days }: { rows: UsageRow[]; days: number }) {
   const y = (value: number) => bottom - value / max * (bottom - top);
   const labels = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])];
   return <figure className="token-trend">
-    <figcaption><strong>{monthly ? '每月' : '每日'} Token 消耗</strong><span role="status">{tip ? `${tip.date} · ${exactTokens(tip.value)}` : '按任务完成日期汇总 · 悬停或聚焦查看精确值'}</span></figcaption>
+    <figcaption><strong>{monthly ? '每月' : '每日'} Token 消耗</strong><span role="status">{tip ? `${tip.date} · ${exactTokens(tip.value)}` : `${includeLocal ? '按任务完成日期与本地会话用量日期汇总' : '按任务完成日期汇总'} · 悬停或聚焦查看精确值`}</span></figcaption>
     <svg viewBox={`0 0 ${width} 198`} role="group" aria-label={`${monthly ? '每月' : '每日'} Token 消耗趋势`}>
       {[0, max / 2, max].map(value => <g key={value} aria-hidden="true">
         <line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="token-grid" />
@@ -80,14 +81,22 @@ function TokenValue({ value }: { value: number }) {
   return <span title={exactTokens(value)} aria-label={exactTokens(value)}>{formatTokens(value)}</span>;
 }
 
-export function taskUsageRows(projects: Project[], days: number, projectId = '', usageByRun: StatsUsageByRun = {}): UsageRow[] {
-  const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - Math.max(0, days - 1));
-  const cutoff = days ? start.getTime() : 0;
+function usageRangeStart(days: number, today: string) {
+  const start = new Date(today + 'T00:00:00');
+  start.setDate(start.getDate() - Math.max(0, days - 1));
+  return start;
+}
+
+export function taskUsageRows(projects: Project[], days: number, projectId = '', usageByRun: StatsUsageByRun = {}, today = localDate()): UsageRow[] {
+  const cutoff = days ? usageRangeStart(days, today).getTime() : 0;
+  const end = new Date(today + 'T00:00:00');
+  end.setDate(end.getDate() + 1);
   const rows = new Map<string, UsageRow>();
   for (const project of projects) {
     if (projectId && project.id !== projectId) continue;
     for (const item of project.items || []) for (const event of item.history || []) {
-      if (event.event !== '实现完成' || Date.parse(event.time) < cutoff) continue;
+      const stamp = Date.parse(event.time);
+      if (event.event !== '实现完成' || !Number.isFinite(stamp) || stamp < cutoff || stamp >= end.getTime()) continue;
       const run = event.execution?.runId;
       const client = statsExecutionClient(event);
       const usage = Array.isArray(event.usage) && event.usage.length ? event.usage : client === 'antigravity' && run ? usageByRun[run] : undefined;
@@ -109,9 +118,46 @@ export function taskUsageRows(projects: Project[], days: number, projectId = '',
   return [...rows.values()];
 }
 
-export function TokenUsage({ projects, days, projectId, usageByRun }: { projects: Project[]; days: number; projectId: string; usageByRun: StatsUsageByRun }) {
+function localUsageRows(sessions: StatsLocalUsage[], projects: Project[], projectId: string, since: string, today: string): UsageRow[] {
+  const names = new Map(projects.map(project => [project.id, project.name]));
+  return sessions.filter(row => (!projectId || row.projectId === projectId) && row.day >= since && row.day <= today)
+    .map(row => ({
+      key: JSON.stringify([row.projectId, row.client, row.sessionId, row.day, row.model, row.reasoningEffort]),
+      projectId: row.projectId, project: names.get(row.projectId) || '未关联项目', requirement: '本地会话',
+      client: row.client, model: row.model, effort: row.reasoningEffort || '未提供', input: row.inputTokens,
+      output: row.outputTokens, cached: row.cachedInputTokens || 0, reasoning: row.reasoningOutputTokens || 0,
+      source: 'Agent 本地会话', shared: false, time: row.day + 'T00:00:00',
+    }));
+}
+
+export function TokenUsage({ projects, days, projectId, today, loadLocalUsage }: {
+  projects: Project[]; days: number; projectId: string; today: string;
+  loadLocalUsage?: (since: string) => Promise<StatsLocalUsageResult>;
+}) {
   const [group, setGroup] = useState('model');
-  const rows = taskUsageRows(projects, days, projectId, usageByRun);
+  const [includeLocal, setIncludeLocal] = useState(false);
+  const [localUsage, setLocalUsage] = useState<StatsLocalUsageResult | null>(null);
+  const since = days ? usageRangeStart(days, today).toISOString() : '';
+
+  useEffect(() => {
+    setLocalUsage(null);
+    if (!includeLocal) return;
+    if (!loadLocalUsage) {
+      setLocalUsage({ ok: false, error: '本地会话用量需要桌面版' });
+      return;
+    }
+    let cancelled = false;
+    loadLocalUsage(since).then(result => {
+      if (!cancelled) setLocalUsage(result);
+    }).catch(() => {
+      if (!cancelled) setLocalUsage({ ok: false, error: '读取本地会话用量失败，可重新勾选重试' });
+    });
+    return () => { cancelled = true; };
+  }, [includeLocal, since, projects, loadLocalUsage]);
+
+  const supplemental = includeLocal && localUsage?.ok ? localUsage : null;
+  const rows = taskUsageRows(projects, days, projectId, supplemental?.usageByRun, today);
+  if (supplemental) rows.push(...localUsageRows(supplemental.sessions, projects, projectId, days ? localDate(new Date(since)) : '', today));
   const groups = new Map<string, { label: string; input: number; output: number; cached: number; reasoning: number }>();
   for (const row of rows) {
     const label = group === 'model' ? `${row.model} · ${row.effort}` : group === 'project' ? row.project : `${row.project} · ${row.requirement}${row.shared ? '（共享执行）' : ''}`;
@@ -125,20 +171,25 @@ export function TokenUsage({ projects, days, projectId, usageByRun }: { projects
   const ranked = [...groups].sort((a, b) => b[1].input + b[1].output - a[1].input - a[1].output);
   const largest = Math.max(1, ...ranked.map(([, sum]) => sum.input + sum.output));
   return <div className="stats-chart-block token-usage-block">
-    <div className="stats-chart-head"><h4>任务 Token 消耗</h4><div className="segmented" role="group" aria-label="Token 统计维度">{[['model', '模型与思考等级'], ['project', '项目'], ['requirement', '需求']].map(([id, label]) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'on' : ''} onClick={() => setGroup(id)}>{label}</button>)}</div></div>
-    <p className="settings-hint">仅统计实际采集或上报的已完成任务。未采集不代表零消耗；缓存输入和推理输出已包含在输入、输出中。共享执行只计一次，需求维度标注共享，不估算分摊。遵循当前时间范围与项目筛选。</p>
-    {!rows.length ? <p className="settings-hint">暂无已采集用量。用量来自匹配的本机会话或客户端完成报告。</p> : <>
+    <div className="stats-chart-head">
+      <h4>任务 Token 消耗</h4>
+      <div className="segmented" role="group" aria-label="Token 统计维度">{[['model', '模型与思考等级'], ['project', '项目'], ['requirement', '需求']].map(([id, label]) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'on' : ''} onClick={() => setGroup(id)}>{label}</button>)}</div>
+      <label className="fb-show-hidden token-local-check"><input type="checkbox" checked={includeLocal} onChange={e => setIncludeLocal(e.target.checked)} />计入 Agent 本地会话</label>
+    </div>
+    <p className="settings-hint">默认统计已回写用量的完成任务。未采集不代表零消耗。缓存输入与推理输出已包含在总量中，共享执行只计一次。</p>
+    {includeLocal && <p className="settings-hint" role="status">{!localUsage ? '正在读取本地会话用量…' : localUsage.ok ? '本地会话按实际用量日期统计。未关联项目的会话可在「全部」项目中查看。' : localUsage.error}</p>}
+    {!rows.length ? <p className="settings-hint">当前筛选范围暂无已采集用量。</p> : <>
       <div className="token-summary">
         {[['总消耗', total, '输入 + 输出'], ['输入', totals.input, `其中缓存 ${formatTokens(totals.cached)}`], ['输出', totals.output, `其中推理 ${formatTokens(totals.reasoning)}`]].map(([label, value, hint]) => <div className="token-summary-card" key={label}><span>{label}</span><strong><TokenValue value={Number(value)} /><small>Token</small></strong><span>{hint}</span></div>)}
         <div className="token-summary-card"><span>缓存输入占比</span><strong>{totals.input ? `${(totals.cached / totals.input * 100).toFixed(1)}%` : '—'}</strong><span title={exactTokens(totals.cached)}>已采集缓存 / 输入</span></div>
       </div>
-      <TokenTrend rows={rows} days={days} />
+      <TokenTrend rows={rows} days={days} includeLocal={!!supplemental} />
       <div className="token-ranking"><h4>{group === 'model' ? '模型与思考等级' : group === 'project' ? '项目' : '需求'}消耗排行 <span>前 {Math.min(8, ranked.length)} 项 · 合计占比</span></h4>
         {ranked.slice(0, 8).map(([key, sum]) => { const value = sum.input + sum.output; return <div className="token-rank-row" key={key} title={`${sum.label}：${exactTokens(value)}`}>
           <span className="token-rank-label">{sum.label}</span><span className="token-rank-track" aria-hidden="true"><span style={{ width: `${value / largest * 100}%` }} /></span><strong><TokenValue value={value} /></strong><span>{total ? `${(value / total * 100).toFixed(1)}%` : '—'}</span>
         </div>; })}
       </div>
-      <p className="settings-hint">单位：Token；万 = 10,000，亿 = 100,000,000。悬停数值查看精确数量；缓存与推理为包含项，不重复累加。无采集记录的日期显示 0，仅表示当日无已采集完成任务。</p>
+      <p className="settings-hint">悬停数值可查看精确 Token 数。无采集记录的日期显示 0。</p>
       <div className="token-usage-scroll"><table className="stats-table"><thead><tr><th>{group === 'model' ? '模型 · 思考等级' : group === 'project' ? '项目' : '需求'}</th><th>输入</th><th>其中缓存</th><th>输出</th><th>其中推理</th><th>合计</th></tr></thead><tbody>{ranked.map(([key, sum]) => <tr key={key}><td>{sum.label}</td><td><TokenValue value={sum.input} /></td><td><TokenValue value={sum.cached} /></td><td><TokenValue value={sum.output} /></td><td><TokenValue value={sum.reasoning} /></td><td><TokenValue value={sum.input + sum.output} /></td></tr>)}</tbody></table></div>
       <details><summary>采集明细与来源 · {rows.length}</summary><div className="token-usage-scroll"><table className="stats-table"><thead><tr><th>项目 / 需求</th><th>客户端</th><th>模型</th><th>思考等级</th><th>Token（精确值）</th><th>来源</th></tr></thead><tbody>{rows.map(row => <tr key={row.key}><td>{row.project} / {row.requirement}{row.shared ? '（共享执行）' : ''}</td><td>{statsClientLabel(row.client)}</td><td>{row.model}</td><td>{row.effort}</td><td>{(row.input + row.output).toLocaleString('zh-CN')}</td><td>{row.source}</td></tr>)}</tbody></table></div></details>
     </>}

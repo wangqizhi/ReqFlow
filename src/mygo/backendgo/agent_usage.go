@@ -181,12 +181,22 @@ func readClaudeTaskUsage(file, root, session, effort string, since time.Time) []
 			return
 		}
 		seen[id] = true
-		groups.add(coreString(msg["model"]), effort, coreNum(usage["input_tokens"]), coreNum(usage["cache_read_input_tokens"]), coreNum(usage["cache_creation_input_tokens"]), coreNum(usage["output_tokens"]), coreNum(coreMap(usage["output_tokens_details"])["thinking_tokens"]))
+		step := claudeUsageStep(msg, time.Time{}, effort)
+		groups.add(step.model, step.effort, step.input-step.cached, step.cached, 0, step.output, step.reasoning)
 	})
 	if err != nil || !verified {
 		return nil
 	}
 	return groups.result()
+}
+
+func claudeUsageStep(msg map[string]any, at time.Time, effort string) localUsageStep {
+	u := coreMap(msg["usage"])
+	cached := coreNum(u["cache_read_input_tokens"])
+	return localUsageStep{at: at, model: coreString(msg["model"]), effort: effort,
+		input:  coreNum(u["input_tokens"]) + coreNum(u["cache_creation_input_tokens"]) + cached,
+		output: coreNum(u["output_tokens"]), cached: cached,
+		reasoning: coreNum(coreMap(u["output_tokens_details"])["thinking_tokens"])}
 }
 
 // Pi：首行 session 记录会话 ID 与目录，assistant 消息带 usage 与 thinkingLevel。

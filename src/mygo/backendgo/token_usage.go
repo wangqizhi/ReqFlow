@@ -1,13 +1,14 @@
 package backendgo
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Usage is optional evidence supplied by a provider, never a text-length estimate.
@@ -109,71 +110,105 @@ func codexTaskUsage(root, session, start string) []any {
 }
 
 func readCodexTaskUsage(file, root, session string, since time.Time) []any {
-	f, err := os.Open(file)
+	log := readCodexUsage(file)
+	if log.session != session || log.dir == "" || !strings.EqualFold(filepath.Clean(log.dir), filepath.Clean(root)) {
+		return nil
+	}
+	groups := newUsageGroups("codex-session", session)
+	for _, step := range log.steps {
+		if step.at.Before(since) || step.firstTotal && log.started.Before(since) {
+			continue
+		}
+		groups.add(step.model, step.effort, step.input-step.cached, step.cached, 0, step.output, step.reasoning)
+	}
+	valid, err := validateTokenUsage(groups.result())
 	if err != nil {
 		return nil
 	}
+	return valid
+}
+
+type codexUsageStep struct {
+	localUsageStep
+	firstTotal bool
+	responseID string
+}
+
+type codexUsageLog struct {
+	session, dir string
+	started      time.Time
+	steps        []codexUsageStep
+	responses    []codexUsageStep
+}
+
+func readCodexUsage(file string) codexUsageLog {
+	f, err := os.Open(file)
+	if err != nil {
+		return codexUsageLog{}
+	}
 	defer f.Close()
-	scan := bufio.NewScanner(f)
-	scan.Buffer(make([]byte, 65536), 8*1024*1024)
-	verified, baseline := false, false
+	var log codexUsageLog
+	var previous [4]int64
+	baseline := false
 	model, effort := "", ""
-	previous := map[string]int64{}
-	groups := map[string]map[string]any{}
-	for scan.Scan() {
-		var event map[string]any
-		if json.Unmarshal(scan.Bytes(), &event) != nil {
-			continue
+	var reader = io.Reader(f)
+	if strings.HasSuffix(file, ".zst") {
+		decoder, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			return log
 		}
+		defer decoder.Close()
+		reader = decoder
+	}
+	err = scanJSONLines(reader, func(event map[string]any) {
 		payload := coreMap(event["payload"])
-		stamp, _ := time.Parse(time.RFC3339Nano, coreString(event["timestamp"]))
-		if event["type"] == "session_meta" {
-			verified = payload["id"] == session && strings.EqualFold(filepath.Clean(coreString(payload["cwd"])), filepath.Clean(root))
-			baseline = !stamp.Before(since)
+		stamp := usageStamp(event["timestamp"])
+		if event["type"] == "session_meta" && log.session == "" {
+			log.session, log.dir = coreString(payload["id"]), coreString(payload["cwd"])
+			log.started = stamp
+			model = coreString(payload["model"])
 		}
 		if event["type"] == "turn_context" {
 			model = coreString(payload["model"])
 			effort = coreString(payload["effort"])
 		}
-		if payload["type"] != "token_count" {
-			continue
+		if event["type"] == "token_usage_record" {
+			usage := coreMap(payload["usage"])
+			if id := coreString(payload["response_id"]); id != "" && !stamp.IsZero() && model != "" && coreSafeInt(usage["input_tokens"]) && coreSafeInt(usage["output_tokens"]) {
+				log.responses = append(log.responses, codexUsageStep{
+					localUsageStep: localUsageStep{at: stamp, model: model, effort: effort,
+						input: coreNum(usage["input_tokens"]), output: coreNum(usage["output_tokens"]),
+						cached: coreNum(usage["cached_input_tokens"]), reasoning: coreNum(usage["reasoning_output_tokens"])},
+					responseID: id,
+				})
+			}
+			return
+		}
+		if event["type"] != "event_msg" || payload["type"] != "token_count" {
+			return
 		}
 		totals := coreMap(coreMap(payload["info"])["total_token_usage"])
-		if len(totals) == 0 {
-			continue
+		if !coreSafeInt(totals["input_tokens"]) || !coreSafeInt(totals["output_tokens"]) || stamp.IsZero() {
+			return
 		}
-		current := map[string]int64{}
-		for _, key := range []string{"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_output_tokens"} {
-			current[key] = coreNum(totals[key])
+		var current, delta [4]int64
+		valid := true
+		for i, key := range [...]string{"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_output_tokens"} {
+			current[i] = coreNum(totals[key])
+			delta[i] = current[i] - previous[i]
+			valid = valid && delta[i] >= 0
 		}
-		if verified && baseline && !stamp.Before(since) && model != "" {
-			key := model + "\x00" + effort
-			u := groups[key]
-			if u == nil {
-				u = map[string]any{"model": model, "reasoningEffort": effort, "source": "codex-session", "sessionId": session, "scope": "run"}
-				groups[key] = u
-			}
-			for from, to := range map[string]string{"input_tokens": "inputTokens", "output_tokens": "outputTokens", "cached_input_tokens": "cachedInputTokens", "reasoning_output_tokens": "reasoningOutputTokens"} {
-				delta := current[from] - previous[from]
-				if delta < 0 {
-					return nil
-				}
-				u[to] = coreNum(u[to]) + delta
-			}
+		if valid && model != "" && (delta[0] > 0 || delta[1] > 0) && delta[2] <= delta[0] && delta[3] <= delta[1] {
+			log.steps = append(log.steps, codexUsageStep{
+				localUsageStep: localUsageStep{at: stamp, model: model, effort: effort, input: delta[0], output: delta[1], cached: delta[2], reasoning: delta[3]},
+				firstTotal:     !baseline,
+			})
 		}
 		previous = current
 		baseline = true
-	}
-	if scan.Err() != nil || !verified {
-		return nil
-	}
-	result := []any{}
-	for _, u := range groups {
-		result = append(result, u)
-	}
-	valid, err := validateTokenUsage(result)
+	})
 	if err != nil {
-		return nil
+		return codexUsageLog{}
 	}
-	return valid
+	return log
 }

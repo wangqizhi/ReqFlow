@@ -1437,7 +1437,9 @@ button.activity-day:focus-visible, .activity-day.selected { outline: 2px solid v
 
 .token-usage-scroll { overflow-x: auto; margin: 12px 0; }
 .token-usage-scroll td:first-child { min-width: 180px; overflow-wrap: anywhere; }
-.token-usage-block .stats-chart-head { flex-wrap: wrap; gap: 12px; }
+.token-usage-block .stats-chart-head { align-items: center; }
+.token-usage-block .stats-chart-head h4 { margin: 0; }
+.token-local-check { align-self: center; white-space: nowrap; }
 .token-usage-scroll td:not(:first-child), .token-usage-scroll th:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .token-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
 .token-summary-card { display: flex; flex-direction: column; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
