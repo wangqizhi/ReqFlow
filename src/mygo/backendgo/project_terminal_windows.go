@@ -20,11 +20,14 @@ func openProjectTerminal(root, cli string, full bool) error {
 	if cli == "" {
 		cli = "codex"
 	}
-	command := map[string]string{"codex": "codex", "claude-code": "claude", "pi": "pi"}[cli]
+	command := map[string]string{"codex": "codex", "claude-code": "claude", "pi": "pi", "agy": "agy"}[cli]
 	if command == "" {
 		return errors.New("不支持的 CLI")
 	}
-	if full {
+	if full && cli == "agy" {
+		// Use Windows PowerShell argument quoting in this block on PowerShell 7 as well.
+		command = `{ $PSNativeCommandArgumentPassing = 'Legacy'; & agy --dangerously-skip-permissions --sandbox=false --mode=accept-edits --settings '{\"allowNonWorkspaceAccess\":true}' }`
+	} else if full {
 		command += map[string]string{"codex": " --dangerously-bypass-approvals-and-sandbox", "claude-code": " --dangerously-skip-permissions", "pi": " --approve"}[cli]
 	}
 	return launchProjectConsole(root, "try { & "+command+" } catch { Write-Host $_ -ForegroundColor Red }; Write-Host 'CLI 已退出，可在此终端重试。'")

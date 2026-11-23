@@ -646,7 +646,7 @@ async function applyOperation(s: Workspace, a: any) {
   }
 
   if (a.op === 'projectRuntime') {
-    if (!['codex', 'claude-code', 'pi'].includes(a.cli)) throw Error('CLI 无效');
+    if (!['codex', 'claude-code', 'pi', 'agy'].includes(a.cli)) throw Error('CLI 无效');
     p.terminalCli = a.cli; p.terminalFullAccess = a.fullAccess !== false; p.versionFile = String(a.versionFile || '').trim();
     return;
   }

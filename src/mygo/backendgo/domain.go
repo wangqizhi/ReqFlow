@@ -1284,7 +1284,7 @@ func coreApplyOperation(s, a map[string]any) error {
 		}
 		return nil
 	case "projectRuntime":
-		if !coreIn(coreString(a["cli"]), "codex", "claude-code", "pi") {
+		if !coreIn(coreString(a["cli"]), "codex", "claude-code", "pi", "agy") {
 			return errors.New("CLI 无效")
 		}
 		file := strings.TrimSpace(coreString(a["versionFile"]))

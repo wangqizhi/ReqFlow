@@ -1815,7 +1815,7 @@ export default function App() {
                     <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
                   </>}
                   {guideTab === 'run' && <>
- <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{[['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi']].map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
+ <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{[['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi'], ['agy', 'Antigravity (agy)']].map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
  <label className="field inline"><input type="checkbox" checked={terminalFullAccess} onChange={e => setTerminalFullAccess(e.target.checked)} />完整控制权限启动</label>
  <label className="field">版本号定位文件<input value={versionFile} onChange={e => setVersionFile(e.target.value)} placeholder="如 VERSION、release-versions.json 或 release-versions.json#components.frontend" /></label>
  <p className="settings-hint">留空读取项目根 package.json；支持单行版本文本或 JSON 的 version。多组件清单的 components 可填版本字符串或含 version 的对象，待验证同时显示交付与组件版本。仅验证某组件可用 文件路径#components.frontend（也可指定 .version）；读取失败不使用 ReqFlow 版本。版本在完成需求时记录，修改配置不追溯更新旧需求。</p>

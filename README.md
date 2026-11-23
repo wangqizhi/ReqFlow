@@ -1,3 +1,8 @@
+# ReqFlow 2.21.5 更新
+
+- Windows 项目终端新增 Antigravity（`agy`）。在项目设置中选择 Antigravity，保留默认勾选的「完整控制权限启动」，即可在项目目录以完整访问模式启动已安装的 `agy`。
+- 详见 [2.21.5 版本说明](docs/release-2.21.5.md)。
+
 # ReqFlow 2.21.4 更新
 
 - 数据看板新增「今日」筛选，按本地自然日查看需求、AI 执行与 Token 用量。
