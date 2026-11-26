@@ -5,7 +5,7 @@ import type { StatsAntigravityUsageResult, StatsLocalUsage, StatsLocalUsageResul
 
 type UsageRow = { key: string; projectId: string; project: string; requirement: string; client: string; model: string; effort: string; input: number; output: number; cached: number; reasoning: number; source: string; shared: boolean; time: string };
 
-const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity' };
+const CLIENT_LABELS: Record<string, string> = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity', agy: 'Antigravity (agy)' };
 export const statsClientLabel = (id: string) => CLIENT_LABELS[id] || id || '未知';
 
 export function statsExecutionClient(event: { execution?: { client?: string; runId?: string }; note?: string }): string {
@@ -143,13 +143,20 @@ export function hasUnreportedAntigravityTask(projects: Project[]): boolean {
   return false;
 }
 
-export function TokenUsage({ projects, days, projectId, today, loadAntigravityUsage, loadLocalUsage }: {
+export function TokenUsage({ projects, days, projectId, today, loadAntigravityUsage, loadLocalUsage, includeLocal: controlledIncludeLocal, onIncludeLocalChange }: {
   projects: Project[]; days: number; projectId: string; today: string;
   loadAntigravityUsage?: () => Promise<StatsAntigravityUsageResult>;
   loadLocalUsage?: (since: string) => Promise<StatsLocalUsageResult>;
+  includeLocal?: boolean;
+  onIncludeLocalChange?: (value: boolean) => void;
 }) {
   const [group, setGroup] = useState('model');
-  const [includeLocal, setIncludeLocal] = useState(false);
+  const [internalIncludeLocal, setInternalIncludeLocal] = useState(false);
+  const includeLocal = controlledIncludeLocal ?? internalIncludeLocal;
+  const setIncludeLocal = (value: boolean) => {
+    setInternalIncludeLocal(value);
+    onIncludeLocalChange?.(value);
+  };
   const [antigravityUsage, setAntigravityUsage] = useState<StatsUsageByRun>({});
   const [localUsage, setLocalUsage] = useState<StatsLocalUsageResult | null>(null);
   const since = days ? usageRangeStart(days, today).toISOString() : '';

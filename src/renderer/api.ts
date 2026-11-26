@@ -110,6 +110,9 @@ export interface ReqFlowBridge {
   /** 实验室「指派」开关（REQ-207）：开启后「提交验证」弹窗才会显示指派浮层。 */
   getAssignSetting?(): Promise<{ ok: boolean; settings: { enabled: boolean } | null }>;
   saveAssignSetting?(enabled: boolean): Promise<{ ok: boolean; error?: string }>;
+  /** 快捷键配置（REQ-332）：默认 Ctrl+N 新建需求，保存在数据目录 shortcuts.json。 */
+  getShortcutSettings?(): Promise<{ ok: boolean; settings: Record<string, string> | null; error?: string }>;
+  saveShortcutSettings?(settings: Record<string, string>): Promise<{ ok: boolean; settings?: Record<string, string> | null; error?: string }>;
   getMemory?(): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
   saveMemory?(settings: MemorySettings): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
   getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
@@ -357,6 +360,16 @@ function createMockBridge(): ReqFlowBridge {
     },
     async saveAISettings(settings) {
       try { localStorage.setItem('reqflow-ai-settings', JSON.stringify(validateAISettings(settings))); return { ok: true }; }
+      catch (e: any) { return { ok: false, error: e.message }; }
+    },
+    async getShortcutSettings() {
+      try {
+        const raw = localStorage.getItem('reqflow-shortcuts');
+        return { ok: true, settings: raw ? JSON.parse(raw) : null };
+      } catch { return { ok: false, settings: null, error: '读取快捷键设置失败' }; }
+    },
+    async saveShortcutSettings(settings) {
+      try { localStorage.setItem('reqflow-shortcuts', JSON.stringify(settings)); return { ok: true, settings }; }
       catch (e: any) { return { ok: false, error: e.message }; }
     },
     async getWorkspace() {

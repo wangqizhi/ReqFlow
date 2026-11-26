@@ -59,11 +59,11 @@ export function useAssignSetting(): [boolean, (enabled: boolean) => Promise<void
 }
 
 export function agentName(id: string) {
-  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id === 'zcode' ? 'ZCode' : id === 'claude-code' ? 'Claude Code' : id === 'dsh' ? 'DeepSeek Harness' : id === 'antigravity' ? 'Antigravity' : id;
+  return id === 'opencode' ? 'OpenCode' : id === 'codex' ? 'Codex' : id === 'pi' ? 'Pi' : id === 'zcode' ? 'ZCode' : id === 'claude-code' ? 'Claude Code' : id === 'dsh' ? 'DeepSeek Harness' : id === 'agy' ? 'Antigravity (agy)' : id === 'antigravity' ? 'Antigravity' : id;
 }
 
-// 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持；REQ-216 新增 Claude Code / DeepSeek Harness）
-export const TERMINAL_AGENTS = ['codex', 'pi', 'zcode', 'claude-code', 'dsh'];
+// 支持在交互终端执行单条需求的 Agent（REQ-206：pi 与 Codex 同样支持；REQ-216 新增 Claude Code / DeepSeek Harness；REQ-330 新增 Antigravity (agy)）
+export const TERMINAL_AGENTS = ['codex', 'pi', 'zcode', 'claude-code', 'dsh', 'agy'];
 
 // 只读任务日志模式：一次性执行、输出日志，不支持继续输入（ZCode）
 export const LOG_AGENTS = ['zcode'];

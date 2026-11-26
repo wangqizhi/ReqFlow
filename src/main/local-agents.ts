@@ -2,8 +2,8 @@ import { ipcMain } from 'electron';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-const definitions = [{ id: 'opencode', name: 'OpenCode', command: 'opencode', package: 'opencode-ai' }, { id: 'pi', name: 'pi', command: 'pi', package: '@earendil-works/pi-coding-agent' }];
-const validId = (id: string) => id === 'codex' || id === 'zcode' || definitions.some(d => d.id === id);
+const definitions = [{ id: 'opencode', name: 'OpenCode', command: 'opencode', package: 'opencode-ai' }, { id: 'pi', name: 'pi', command: 'pi', package: '@earendil-works/pi-coding-agent' }, { id: 'agy', name: 'Antigravity (agy)', command: 'agy', package: '' }];
+const validId = (id: string) => id === 'codex' || id === 'zcode' || id === 'claude-code' || id === 'dsh' || id === 'agy' || definitions.some(d => d.id === id);
 export function version(command: string): Promise<{ installed: boolean; version?: string; error?: string }> {
   return new Promise(resolve => {
     // Only fixed, built-in commands are executed; user input never enters the shell.

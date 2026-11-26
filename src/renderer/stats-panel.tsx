@@ -14,6 +14,14 @@ import { ChevronRight, GitBranch, RefreshCw } from './icons';
 const SERIES_BLUE = '#2a78d6';        // 分类槽 1（白面板 4.6:1）
 const TRACK_BLUE = '#cde2fb';         // 同 ramp 浅阶，条形图轨道
 const RANGES: [label: string, days: number][] = [['今日', 1], ['近 7 天', 7], ['近 14 天', 14], ['近 30 天', 30], ['全部', 0]];
+const STATS_TABS = [
+  ['requirements', '需求趋势'],
+  ['execution', 'AI 执行'],
+  ['projects', '项目分布'],
+  ['tokens', 'Token 消耗'],
+  ['details', '每日明细'],
+] as const;
+type StatsTab = typeof STATS_TABS[number][0];
 
 function dayKeyOf(iso: string): string {
   const t = Date.parse(iso);
@@ -221,8 +229,9 @@ function MilestoneView({ project, state, onBack, onReload }: { project: Project;
 
 export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const [range, setRange] = useState(7);
+  const [activeTab, setActiveTab] = useState<StatsTab>('requirements');
   const [projectId, setProjectId] = useState(''); // 空 = 全部项目合计
-  const [showTable, setShowTable] = useState(false);
+  const [includeLocalUsage, setIncludeLocalUsage] = useState(false);
   const [milestoneId, setMilestoneId] = useState('');
   const [milestones, setMilestones] = useState<MilestoneState>({ loading: false, error: '', data: null });
   const [reload, setReload] = useState(0);
@@ -339,12 +348,29 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
   const currentName = projectId ? projects.find(p => p.id === projectId)?.name : '';
   const milestoneProject = milestoneId ? projects.find(p => p.id === milestoneId) : undefined;
 
+  const detailRows = useMemo(() =>
+    days.slice().reverse().map(day => ({
+      day,
+      created: series.created.find(p => p.day === day)?.value || 0,
+      claims: series.claims.find(p => p.day === day)?.value || 0,
+      finished: series.finished.find(p => p.day === day)?.value || 0,
+      minutes: series.minutes.find(p => p.day === day)?.value || 0,
+    })).filter(r => r.created || r.claims || r.finished || r.minutes),
+  [days, series]);
+
+  const projectTags = (
+    <div className="stats-project-tags" role="group" aria-label="按项目筛选">
+      <button type="button" className={'tag-btn' + (projectId === '' ? ' on' : '')} aria-pressed={projectId === ''} onClick={() => setProjectId('')}>全部</button>
+      {projects.map(p => <button type="button" key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} onClick={() => setProjectId(p.id)}>{p.name}</button>)}
+    </div>
+  );
+
   if (milestoneProject) return <MilestoneView project={milestoneProject} state={milestones}
     onBack={() => setMilestoneId('')} onReload={() => setReload(n => n + 1)} />;
 
   return <section className="stats-panel" aria-label="数据面板">
     <div className="stats-filters">
-      <div className="segmented" role="group" aria-label="统计时间范围">{RANGES.map(([label, value]) => <button key={value} aria-pressed={range === value} className={range === value ? 'on' : ''} onClick={() => setRange(value)}>{label}</button>)}</div>
+      <div className="segmented" role="group" aria-label="统计时间范围">{RANGES.map(([label, value]) => <button type="button" key={value} aria-pressed={range === value} className={range === value ? 'on' : ''} onClick={() => setRange(value)}>{label}</button>)}</div>
     </div>
     <div className="stats-kpis">
       <div className="stats-kpi"><strong>{compact(totals.created)}</strong><span>新建需求</span></div>
@@ -353,36 +379,62 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <div className="stats-kpi"><strong title={formatMinutes(totals.minutes)}>{formatMinutes(totals.minutes)}</strong><span>AI 执行用时</span></div>
       <div className="stats-kpi"><strong>{compact(totals.executing)}</strong><span>当前执行中</span></div>
     </div>
-    <div className="stats-chart-block">
-      <div className="stats-chart-head">
-        <h4>每日新建需求{currentName ? ` · ${currentName}` : ''}</h4>
-        <div className="stats-project-tags">
-          <button className={'tag-btn' + (projectId === '' ? ' on' : '')} aria-pressed={projectId === ''} onClick={() => setProjectId('')}>全部</button>
-          {projects.map(p => <button key={p.id} className={'tag-btn' + (projectId === p.id ? ' on' : '')} aria-pressed={projectId === p.id} onClick={() => setProjectId(p.id)}>{p.name}</button>)}
+    <div className="settings-tabs stats-tabs" role="tablist" aria-label="数据看板分类">
+      {STATS_TABS.map(([id, label]) => (
+        <button key={id} type="button" role="tab" aria-selected={activeTab === id} className={activeTab === id ? 'on' : ''} onClick={() => setActiveTab(id)}>{label}</button>
+      ))}
+    </div>
+    <div className="stats-tab-panel" role="tabpanel" aria-label={STATS_TABS.find(([id]) => id === activeTab)?.[1]}>
+      {activeTab === 'requirements' && (
+        <div className="stats-chart-block">
+          <div className="stats-chart-head">
+            <h4>每日新建需求{currentName ? ` · ${currentName}` : ''}</h4>
+            {projectTags}
+          </div>
+          <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
+          <LineChart key={`created-${range}-${projectId}`} title="新建需求" points={series.created} width={740} />
         </div>
-      </div>
-      <ActivityCalendar events={projectId ? events.created.filter(event => event.project === projectId) : events.created} />
-      <LineChart key={`created-${range}-${projectId}`} title="新建需求" points={series.created} width={740} />
+      )}
+      {activeTab === 'execution' && <>
+        <div className="stats-grid-2">
+          <div className="stats-chart-block"><h4>每日 AI 执行次数</h4><LineChart key={`claims-${range}`} title="AI 执行次数" points={series.claims} width={354} height={150} /></div>
+          <div className="stats-chart-block"><h4>每日 AI 执行用时</h4><LineChart key={`minutes-${range}`} title="AI 执行用时" unit=" 分" points={series.minutes} width={354} height={150} /></div>
+        </div>
+        <div className="stats-chart-block">
+          <h4>AI 客户端使用</h4>
+          <BarList rows={clientRows} unit=" 次" />
+        </div>
+      </>}
+      {activeTab === 'projects' && (
+        <div className="stats-chart-block">
+          <div className="stats-chart-head">
+            <h4>各项目需求量</h4>
+            <span className="stats-subhint">点击项目名称可查看该项目的 Git 提交里程碑</span>
+          </div>
+          <BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} />
+        </div>
+      )}
+      {activeTab === 'tokens' && <>
+        <div className="stats-chart-head stats-token-projects">
+          <h4>项目筛选{currentName ? ` · ${currentName}` : ''}</h4>
+          {projectTags}
+        </div>
+        <TokenUsage projects={projects} days={range} projectId={projectId} today={today} includeLocal={includeLocalUsage} onIncludeLocalChange={setIncludeLocalUsage} loadAntigravityUsage={bridge.getAntigravityStatsUsage} loadLocalUsage={bridge.getLocalStatsUsage} />
+      </>}
+      {activeTab === 'details' && (
+        <div className="stats-chart-block">
+          <div className="stats-chart-head">
+            <h4>每日数据明细{currentName ? ` · ${currentName}` : ''}</h4>
+            {projectTags}
+          </div>
+          {detailRows.length === 0 ? <p className="settings-hint">所选范围暂无数据。</p> : (
+            <table className="stats-table">
+              <thead><tr><th>日期</th><th>新建需求</th><th>AI 执行</th><th>完成执行</th><th>AI 执行用时</th></tr></thead>
+              <tbody>{detailRows.map(r => <tr key={r.day}><td>{r.day}</td><td>{r.created}</td><td>{r.claims}</td><td>{r.finished}</td><td>{r.minutes ? formatMinutes(r.minutes) : '—'}</td></tr>)}</tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
-    <div className="stats-grid-2">
-      <div className="stats-chart-block"><h4>每日 AI 执行次数</h4><LineChart key={`claims-${range}`} title="AI 执行次数" points={series.claims} width={354} height={150} /></div>
-      <div className="stats-chart-block"><h4>每日 AI 执行用时</h4><LineChart key={`minutes-${range}`} title="AI 执行用时" unit=" 分" points={series.minutes} width={354} height={150} /></div>
-    </div>
-    <div className="stats-grid-2">
-      <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} /></div>
-      <div className="stats-chart-block"><h4>AI 客户端使用</h4><BarList rows={clientRows} unit=" 次" /></div>
-    </div>
-    <TokenUsage projects={projects} days={range} projectId={projectId} today={today} loadAntigravityUsage={bridge.getAntigravityStatsUsage} loadLocalUsage={bridge.getLocalStatsUsage} />
-    <div className="settings-actions">
-      <button className="btn" aria-expanded={showTable} onClick={() => setShowTable(!showTable)}>{showTable ? '收起明细表' : '展开明细表'}</button>
-    </div>
-    {showTable && (() => {
-      const rows = days.slice().reverse().map(day => ({ day, created: series.created.find(p => p.day === day)?.value || 0, claims: series.claims.find(p => p.day === day)?.value || 0, finished: series.finished.find(p => p.day === day)?.value || 0, minutes: series.minutes.find(p => p.day === day)?.value || 0 })).filter(r => r.created || r.claims || r.finished || r.minutes);
-      if (rows.length === 0) return <p className="settings-hint">所选范围暂无数据。</p>;
-      return <table className="stats-table">
-        <thead><tr><th>日期</th><th>新建需求</th><th>AI 执行</th><th>完成执行</th><th>AI 执行用时</th></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.day}><td>{r.day}</td><td>{r.created}</td><td>{r.claims}</td><td>{r.finished}</td><td>{r.minutes ? formatMinutes(r.minutes) : '—'}</td></tr>)}</tbody>
-      </table>;
-    })()}
   </section>;
 }

@@ -115,3 +115,23 @@ func TestSettingsValidationAndFailedSavePreserveFile(t *testing.T) {
 		t.Fatal("v20 must fail explicitly")
 	}
 }
+
+func TestShortcutSettingsRoundtrip(t *testing.T) {
+	b := aiTestBackend(t)
+	initial, err := b.Invoke(t.Context(), "shortcuts:get", nil)
+	if err != nil || !coreTruthy(desktopMap(initial)["ok"]) {
+		t.Fatalf("initial shortcuts:get failed: %v %v", initial, err)
+	}
+	saved, err := b.Invoke(t.Context(), "shortcuts:save", []any{map[string]any{"newRequirement": "Ctrl+Shift+N"}})
+	if err != nil || !coreTruthy(desktopMap(saved)["ok"]) {
+		t.Fatalf("shortcuts:save failed: %v %v", saved, err)
+	}
+	loaded, err := b.Invoke(t.Context(), "shortcuts:get", nil)
+	if err != nil || coreString(desktopMap(desktopMap(loaded)["settings"])["newRequirement"]) != "Ctrl+Shift+N" {
+		t.Fatalf("shortcuts:get roundtrip differs: %v %v", loaded, err)
+	}
+	invalid, err := b.Invoke(t.Context(), "shortcuts:save", []any{"bad"})
+	if err != nil || coreTruthy(desktopMap(invalid)["ok"]) {
+		t.Fatalf("invalid shortcuts payload accepted: %v %v", invalid, err)
+	}
+}

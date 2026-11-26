@@ -66,10 +66,13 @@ func startAgentPTY(root, agent, prompt string) (agentPTY, error) {
 	// Claude Code starts with --dangerously-skip-permissions for the same reason.
 	// DeepSeek Harness has no terminal TUI of its own: startDshChatPTY drives the
 	// headless profile through the embedded chat client instead.
+	// Antigravity (agy) starts in interactive mode with full permissions and
+	// non-workspace access so the assigned session can execute without sandbox blocks.
 	invocations := map[string]string{
 		"codex":       "& codex --no-alt-screen --sandbox danger-full-access $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 		"pi":          "$a=@('--approve'); try { if ((& pi --help 2>&1 | Out-String) -match '--tui-mode') { $a=@('--tui-mode','regular')+$a } } catch {}; & pi @a -- $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 		"claude-code": "& claude --dangerously-skip-permissions $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+		"agy":         "& agy --dangerously-skip-permissions --sandbox=false --mode=accept-edits --settings '{\\\"allowNonWorkspaceAccess\\\":true}' --prompt-interactive $p; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
 	}
 	invocation, ok := invocations[agent]
 	if !ok {

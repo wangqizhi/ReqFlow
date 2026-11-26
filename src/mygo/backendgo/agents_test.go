@@ -18,11 +18,14 @@ func TestAgentConfigAndCommandAllowlist(t *testing.T) {
 	if _, err = b.invokeAgents("agents:save", []any{[]any{"echo injected"}}); err == nil {
 		t.Fatal("arbitrary command accepted")
 	}
-	if _, err = b.invokeAgents("agents:save", []any{[]any{"claude-code", "dsh"}}); err != nil {
-		t.Fatal("Claude Code / DeepSeek Harness rejected", err)
+	if _, err = b.invokeAgents("agents:save", []any{[]any{"claude-code", "dsh", "agy"}}); err != nil {
+		t.Fatal("Claude Code / DeepSeek Harness / Antigravity (agy) rejected", err)
 	}
-	if !aiValidAgent("claude-code") || !aiValidAgentCommand("claude") {
-		t.Fatal("Claude Code 标识或命令未加入白名单")
+	if !aiValidAgent("claude-code") || !aiValidAgentCommand("claude") || !aiValidAgent("agy") || !aiValidAgentCommand("agy") {
+		t.Fatal("Claude Code 或 agy 标识或命令未加入白名单")
+	}
+	if !agentMatchesExecutionClient("agy", "antigravity") || !agentMatchesExecutionClient("agy", "agy") || agentMatchesExecutionClient("codex", "antigravity") {
+		t.Fatal("agy execution client matching failed")
 	}
 	if ProbeAgent("codex & echo injected")["installed"] != false {
 		t.Fatal("arbitrary shell command executed")

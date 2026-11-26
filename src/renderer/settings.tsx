@@ -6,8 +6,19 @@ import type { PublishRequestLog } from '../core/publish-log';
 import { emptyBackup, type BackupSettings, type BackupStatus, type RemoteSettings } from '../core/remote';
 import { DEFAULT_BASELINE_TEMPLATE, DEFAULT_PUBLISH_TEMPLATE, DEFAULT_CORE_PROMPT_TEMPLATE } from '../core/domain';
 import { Eye, FolderOpen, Download, Plus, Trash } from './icons';
+import {
+  DEFAULT_SHORTCUTS,
+  SHORTCUT_DEFINITIONS,
+  loadShortcutSettingsFromBridge,
+  normalizeShortcutSettings,
+  publishShortcutSettings,
+  shortcutFromKeyboardEvent,
+  validateShortcut,
+  type ShortcutActionId,
+  type ShortcutSettings,
+} from './shortcuts';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['memory', '全局记忆'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['shortcuts', '快捷键'], ['memory', '全局记忆'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -179,6 +190,11 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const [savedMemory, setSavedMemory] = useState('');
   const [memoryLoaded, setMemoryLoaded] = useState(false);
   const [memoryError, setMemoryError] = useState('');
+  const [shortcuts, setShortcuts] = useState<ShortcutSettings>(DEFAULT_SHORTCUTS);
+  const [savedShortcuts, setSavedShortcuts] = useState('');
+  const [shortcutsLoaded, setShortcutsLoaded] = useState(false);
+  const [capturingShortcut, setCapturingShortcut] = useState<ShortcutActionId | null>(null);
+  const [shortcutErrors, setShortcutErrors] = useState<Partial<Record<ShortcutActionId, string>>>({});
   function acceptMemory(info: MemoryInfo, payload?: MemorySettings) {
     setMemoryInfo(info); setSavedMemory(fingerprint(payload || info.settings));
     // 保存期间没有继续编辑时才回填服务端规范化后的设置（REQ-288）。
@@ -228,7 +244,36 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   }
   useEffect(() => { void detectCLIs(); }, []);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
-  useEffect(() => { setMessage(''); setImportConfirm(false); setTemplateConflict(false); }, [tab]);
+  useEffect(() => { setMessage(''); setImportConfirm(false); setTemplateConflict(false); setCapturingShortcut(null); }, [tab]);
+  useEffect(() => {
+    if (!capturingShortcut) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        setCapturingShortcut(null);
+        setShortcutErrors(prev => ({ ...prev, [capturingShortcut]: '' }));
+        return;
+      }
+      if ((event.key === 'Backspace' || event.key === 'Delete') && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+        setShortcuts(prev => ({ ...prev, [capturingShortcut]: '' }));
+        setShortcutErrors(prev => ({ ...prev, [capturingShortcut]: '' }));
+        setCapturingShortcut(null);
+        return;
+      }
+      const captured = shortcutFromKeyboardEvent(event);
+      if (captured.error) {
+        setShortcutErrors(prev => ({ ...prev, [capturingShortcut]: captured.error }));
+        return;
+      }
+      if (!captured.shortcut) return;
+      setShortcuts(prev => ({ ...prev, [capturingShortcut]: captured.shortcut! }));
+      setShortcutErrors(prev => ({ ...prev, [capturingShortcut]: '' }));
+      setCapturingShortcut(null);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [capturingShortcut]);
   useEffect(() => {
     if (!importConfirm || busy) return;
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setImportConfirm(false); } };
@@ -291,6 +336,15 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
     }).catch((e) => notify(e.message, 'err'));
     bridge.getPublishLogSettings?.().then((r) => { if (!r.ok || !r.settings) throw Error(r.error || '读取发布日志设置失败'); setPublishLogging(r.settings.enabled); setSavedPublishLogging(r.settings.enabled); setPublishLogLoaded(true); }).catch((e) => notify(e.message, 'err'));
     bridge.getBackupSettings?.().then((r) => { if (r.ok) { setBackup(r.settings); setSavedBackup(fingerprint(r.settings)); setStatus(r.status); setBackupLoaded(true); } }).catch((e) => notify(e.message, 'err'));
+    loadShortcutSettingsFromBridge().then((loadedShortcuts) => {
+      setShortcuts(loadedShortcuts);
+      setSavedShortcuts(fingerprint(loadedShortcuts));
+      setShortcutsLoaded(true);
+    }).catch((e) => {
+      setSavedShortcuts(fingerprint(DEFAULT_SHORTCUTS));
+      setShortcutsLoaded(true);
+      notify(e.message, 'err');
+    });
     const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
@@ -334,10 +388,39 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   // 数据 tab（REQ-112）无保存项，操作即时生效
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
+    : tab === 'shortcuts' ? shortcutsLoaded
     : tab === 'logs' ? loaded && (!bridge.savePublishLogSettings || publishLogLoaded)
     : tab === 'memory' ? memoryLoaded
     : tab === 'server' || tab === 'data' ? true
     : backupLoaded && !status.running;
+  function validateAllShortcuts(draft: ShortcutSettings): { ok: true; value: ShortcutSettings } | { ok: false; error: string } {
+    const errors: Partial<Record<ShortcutActionId, string>> = {};
+    const next: ShortcutSettings = { ...DEFAULT_SHORTCUTS };
+    let firstError = '';
+    for (const def of SHORTCUT_DEFINITIONS) {
+      const checked = validateShortcut(draft[def.id] || '');
+      if (!checked.valid) {
+        errors[def.id] = checked.error || '快捷键格式无效';
+        if (!firstError) firstError = `${def.label}：${errors[def.id]}`;
+      } else {
+        next[def.id] = checked.normalized;
+      }
+    }
+    setShortcutErrors(errors);
+    if (firstError) return { ok: false, error: firstError };
+    return { ok: true, value: next };
+  }
+  async function saveShortcutsPayload(draft: ShortcutSettings) {
+    const checked = validateAllShortcuts(draft);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    const normalized = normalizeShortcutSettings(checked.value);
+    const result = bridge.saveShortcutSettings ? await bridge.saveShortcutSettings(normalized) : { ok: true, settings: normalized };
+    if (!result.ok) return result;
+    publishShortcutSettings(normalized);
+    setShortcuts(current => fingerprint(current) === fingerprint(draft) ? normalized : current);
+    setSavedShortcuts(fingerprint(normalized));
+    return result;
+  }
   async function saveCurrentTab(): Promise<boolean> {
     if (savingRef.current) return false;
     // 保存前固定本次写入的编辑态快照；保存期间的新输入不会被误标为已保存（REQ-288）。
@@ -380,6 +463,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       const payload = memory;
       return perform(async () => { const r = await bridge.saveMemory!(payload); if (r.ok) acceptMemory(r, payload); return r; }, '全局记忆已保存，后续开发 Prompt 会引用最新记忆', 'save');
     }
+    if (tab === 'shortcuts') {
+      const payload = shortcuts;
+      return perform(() => saveShortcutsPayload(payload), '快捷键设置已保存并立即生效', 'save');
+    }
     if (tab === 'server' || tab === 'data') return true;
     const payload = backup;
     return perform(async () => { const r = await bridge.saveBackupSettings!(payload); if (r.ok) setSavedBackup(fingerprint(payload)); return r; }, '备份设置已保存', 'save');
@@ -403,7 +490,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const templateDirty = templateVersion !== null && (baselineTpl !== savedTemplates.baseline || publishTpl !== savedTemplates.publish || coreTpl !== savedTemplates.core);
   const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
   const memoryDirty = memoryLoaded && fingerprint(memory) !== savedMemory;
-  const dirty = aiDirty || backupDirty || templateDirty || logDirty || memoryDirty;
+  const shortcutsDirty = shortcutsLoaded && fingerprint(shortcuts) !== savedShortcuts;
+  const dirty = aiDirty || backupDirty || templateDirty || logDirty || memoryDirty || shortcutsDirty;
   useImperativeHandle(ref, () => ({ requestLeave() { if (savingRef.current) { setMessage('设置正在保存，请稍候…'); setMessageKind('info'); return; } if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
   useEffect(() => {
     if (!leaveConfirm || busy || saving) return;
@@ -418,6 +506,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
     const payloadBackup = backup;
     const payloadLogging = publishLogging;
     const payloadMemory = memory;
+    const payloadShortcuts = shortcuts;
     const templateTexts: Record<string, string> = { baseline: baselineTpl, publish: publishTpl, core: coreTpl };
     const success = await perform(async () => {
       if (aiDirty) { const r = await bridge.saveAISettings(payloadAI); if (!r.ok) return r; setSavedAI(fingerprint(payloadAI)); }
@@ -433,12 +522,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       if (backupDirty) { const r = await bridge.saveBackupSettings!(payloadBackup); if (!r.ok) return r; setSavedBackup(fingerprint(payloadBackup)); }
       if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: payloadLogging }); if (!r.ok) return r; setSavedPublishLogging(payloadLogging); }
       if (memoryDirty) { const r = await bridge.saveMemory!(payloadMemory); if (!r.ok) return r; acceptMemory(r, payloadMemory); }
+      if (shortcutsDirty) { const r = await saveShortcutsPayload(payloadShortcuts); if (!r.ok) return r; }
       return { ok: true };
     }, '设置已保存', 'save');
     if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置" data-saving={saving ? 'true' : undefined}>
-      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、全局记忆、远程同步服务端、备份与本机数据</p></div>
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、快捷键、全局记忆、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -490,6 +580,76 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
           <label className="field">{templateKind === 'core' ? '核心需求模板' : templateKind === 'publish' ? '全局发布需求模板' : '全局基准需求模板'}<textarea rows={8} value={templateText} disabled={busy || templateVersion === null} onChange={(e) => templateKind === 'core' ? setCoreTpl(e.target.value) : templateKind === 'publish' ? setPublishTpl(e.target.value) : setBaselineTpl(e.target.value)} placeholder="清空并保存即可恢复内置默认模板" /></label>
           <p className="settings-hint">{templateKind === 'baseline' ? '每个项目可在「编辑设置 → 基线需求模板」里单独覆盖；' : ''}清空并保存则恢复内置默认模板。修改完成后点击右下角「保存设置」。</p>
           {templateConflict && <div className="settings-message err settings-conflict" role="alert"><span>设置已被其他方式修改，请刷新版本后重试。</span><button type="button" className="btn sm" disabled={saving || busy} onClick={() => void refreshTemplateVersion()}>刷新版本</button></div>}
+        </form>}
+        {tab === 'shortcuts' && <form onSubmit={(e) => {
+          e.preventDefault();
+          if (!busy && !saving && tabReady && !capturingShortcut) void saveAndFinish();
+        }}>
+          <p className="settings-hint">配置应用内快捷键。点击「捕获按键」后直接按下目标组合键，也可在输入框手动编辑（如 Ctrl+N、Ctrl+Shift+N、Alt+N）；留空可禁用，修改后点击右下角「保存设置」立即生效。</p>
+          <div className="shortcut-list">
+            {SHORTCUT_DEFINITIONS.map(def => {
+              const value = shortcuts[def.id] || '';
+              const capturing = capturingShortcut === def.id;
+              const fieldError = shortcutErrors[def.id];
+              return <div className={'shortcut-card' + (capturing ? ' capturing' : '')} key={def.id} data-shortcut-capture={capturing ? 'true' : undefined}>
+                <div className="shortcut-row">
+                  <div className="shortcut-info">
+                    <strong>{def.label}</strong>
+                    <p>{def.description}</p>
+                  </div>
+                  <div className="shortcut-controls">
+                    <label className="field shortcut-input-field">
+                      <input
+                        aria-label={def.label + '快捷键'}
+                        className={capturing ? 'shortcut-capturing-input' : undefined}
+                        value={capturing ? '请按下组合键…' : value}
+                        readOnly={capturing}
+                        disabled={busy || !shortcutsLoaded}
+                        placeholder="未设置（留空禁用）"
+                        onChange={e => {
+                          const raw = e.target.value;
+                          setShortcuts(prev => ({ ...prev, [def.id]: raw }));
+                          if (fieldError) setShortcutErrors(prev => ({ ...prev, [def.id]: '' }));
+                        }}
+                        onBlur={() => {
+                          if (capturing) return;
+                          const checked = validateShortcut(shortcuts[def.id] || '');
+                          if (!checked.valid) {
+                            setShortcutErrors(prev => ({ ...prev, [def.id]: checked.error }));
+                          } else {
+                            setShortcuts(prev => ({ ...prev, [def.id]: checked.normalized }));
+                            setShortcutErrors(prev => ({ ...prev, [def.id]: '' }));
+                          }
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={'btn' + (capturing ? ' primary' : '')}
+                      disabled={busy || !shortcutsLoaded}
+                      aria-pressed={capturing}
+                      onClick={() => {
+                        setShortcutErrors(prev => ({ ...prev, [def.id]: '' }));
+                        setCapturingShortcut(capturing ? null : def.id);
+                      }}
+                    >{capturing ? '按 Esc 取消' : '捕获按键'}</button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy || !shortcutsLoaded || (!capturing && value === def.defaultKey)}
+                      onClick={() => {
+                        setCapturingShortcut(null);
+                        setShortcuts(prev => ({ ...prev, [def.id]: def.defaultKey }));
+                        setShortcutErrors(prev => ({ ...prev, [def.id]: '' }));
+                      }}
+                    >恢复默认</button>
+                  </div>
+                </div>
+                {capturing && <p className="settings-hint shortcut-capture-hint" role="status">正在捕获按键：请直接按下目标组合键（如 Ctrl+N）；按 Esc 取消，按 Backspace 清除。</p>}
+                {fieldError && <p className="settings-message err shortcut-error" role="alert">{fieldError}</p>}
+              </div>;
+            })}
+          </div>
         </form>}
         {tab === 'logs' && <>
           <div className="validation-setting"><div><label htmlFor="ai-request-logging">记录 AI 请求日志</label><p>默认开启，记录请求时间、模型、响应状态和耗时；关闭后停止新增记录。</p></div><label className="switch"><input id="ai-request-logging" type="checkbox" checked={form.requestLogging ?? true} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, requestLogging: e.target.checked })} /><span className="slider" /><span className="switch-state">{form.requestLogging === false ? '已关闭' : '已开启'}</span></label></div>

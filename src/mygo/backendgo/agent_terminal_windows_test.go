@@ -66,7 +66,7 @@ $value=Read-Host 'message'
 	if _, err := b.desktopAgent("agent:start", args); agent != "codex" && err == nil {
 		t.Fatal("disabled lab allowed")
 	}
-	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"codex", "pi", "claude-code", "dsh"}); err != nil {
+	if err := desktopAtomicJSON(filepath.Join(b.DataDir, "local-agents.json"), []any{"codex", "pi", "claude-code", "dsh", "agy"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.desktopAgent("agent:start", []any{pid, "opencode", []any{item["id"]}}); err == nil {
@@ -167,6 +167,11 @@ func TestInteractiveClaudeCodeTerminal(t *testing.T) {
 	// REQ-216：Claude Code 以 --dangerously-skip-permissions 启动，
 	// 与 Codex 一样在项目目录保持完全控制，不会突然弹权限确认。
 	runInteractiveAgentTerminal(t, "claude-code", []string{"--dangerously-skip-permissions"}, false)
+}
+
+func TestInteractiveAgyTerminal(t *testing.T) {
+	// REQ-330：Antigravity (agy) 以完整权限与交互模式启动。
+	runInteractiveAgentTerminal(t, "agy", []string{"--dangerously-skip-permissions", "--sandbox=false", "--mode=accept-edits", "--prompt-interactive"}, false)
 }
 
 func TestDshChatInvocation(t *testing.T) {

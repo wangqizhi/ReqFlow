@@ -17,19 +17,19 @@ import (
 	"time"
 )
 
-var aiAgentDefinitions = []map[string]any{{"id": "codex", "name": "Codex", "command": "codex", "package": "@openai/codex"}, {"id": "zcode", "name": "ZCode", "command": "zcode", "package": ""}, {"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}, {"id": "claude-code", "name": "Claude Code", "command": "claude", "package": "@anthropic-ai/claude-code"}, {"id": "dsh", "name": "DeepSeek Harness", "command": "dsh", "package": "@deepseek-ai/dsh"}}
+var aiAgentDefinitions = []map[string]any{{"id": "codex", "name": "Codex", "command": "codex", "package": "@openai/codex"}, {"id": "zcode", "name": "ZCode", "command": "zcode", "package": ""}, {"id": "opencode", "name": "OpenCode", "command": "opencode", "package": "opencode-ai"}, {"id": "pi", "name": "pi", "command": "pi", "package": "@earendil-works/pi-coding-agent"}, {"id": "claude-code", "name": "Claude Code", "command": "claude", "package": "@anthropic-ai/claude-code"}, {"id": "dsh", "name": "DeepSeek Harness", "command": "dsh", "package": "@deepseek-ai/dsh"}, {"id": "agy", "name": "Antigravity (agy)", "command": "agy", "package": ""}}
 var aiAgentVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+(?:-[\w.-]+)?\b`)
 var aiSimpleVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 var agentInstallMu sync.Mutex
 
 func aiValidAgent(id string) bool {
-	return id == "codex" || id == "zcode" || id == "opencode" || id == "pi" || id == "claude-code" || id == "dsh"
+	return id == "codex" || id == "zcode" || id == "opencode" || id == "pi" || id == "claude-code" || id == "dsh" || id == "agy"
 }
 
 // aiValidAgentCommand 是版本探测允许执行的命令白名单；它与 Agent 标识分开，
 // 因为 claude-code 的标识与命令名（claude）不同。
 func aiValidAgentCommand(command string) bool {
-	return command == "codex" || command == "zcode" || command == "opencode" || command == "pi" || command == "claude" || command == "dsh"
+	return command == "codex" || command == "zcode" || command == "opencode" || command == "pi" || command == "claude" || command == "dsh" || command == "agy"
 }
 
 func ProbeAgent(command string) map[string]any {

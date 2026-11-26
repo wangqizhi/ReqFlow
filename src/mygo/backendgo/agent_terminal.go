@@ -38,7 +38,14 @@ func agentTerminalLabel(agent string) string {
 	if agent == "dsh" {
 		return "DeepSeek Harness"
 	}
+	if agent == "agy" {
+		return "Antigravity (agy)"
+	}
 	return agent
+}
+
+func agentMatchesExecutionClient(agent, client string) bool {
+	return agent == client || (agent == "agy" && client == "antigravity")
 }
 
 type agentRun struct {
@@ -125,8 +132,8 @@ func (b *Backend) desktopAgent(channel string, args []any) (any, error) {
 	if channel == "agent:start" {
 		project, agent := desktopText(args, 0), desktopText(args, 1)
 		ids := desktopList(desktopArg(args, 2))
-		if agent != "codex" && agent != "pi" && agent != "zcode" && agent != "claude-code" && agent != "dsh" {
-			return nil, errors.New("目前支持指派给 Codex、Pi、ZCode、Claude Code 或 DeepSeek Harness")
+		if agent != "codex" && agent != "pi" && agent != "zcode" && agent != "claude-code" && agent != "dsh" && agent != "agy" {
+			return nil, errors.New("目前支持指派给 Codex、Pi、ZCode、Claude Code、DeepSeek Harness 或 Antigravity (agy)")
 		}
 		if len(ids) == 0 {
 			return nil, errors.New("请至少选择一条需求")
@@ -373,7 +380,7 @@ func (b *Backend) releaseAgentExecutions(r *agentRun) (int, error) {
 			continue
 		}
 		execution := ActiveAIExecution(item)
-		if execution == nil || execution["client"] != r.agent || coreNum(execution["version"]) != assignment.version || coreString(execution["batchId"]) != assignment.batch {
+		if execution == nil || !agentMatchesExecutionClient(r.agent, coreString(execution["client"])) || coreNum(execution["version"]) != assignment.version || coreString(execution["batchId"]) != assignment.batch {
 			continue
 		}
 		runID := coreString(execution["runId"])

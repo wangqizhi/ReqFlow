@@ -257,6 +257,32 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return desktopOK(map[string]any{"settings": value}), nil
+	case "shortcuts:get", "shortcuts:save":
+		file := filepath.Join(b.DataDir, "shortcuts.json")
+		if channel == "shortcuts:save" {
+			raw, ok := desktopArg(args, 0).(map[string]any)
+			if !ok {
+				return nil, errors.New("快捷键设置无效")
+			}
+			clean := map[string]any{}
+			for _, key := range []string{"newRequirement"} {
+				if v, exists := raw[key]; exists {
+					s, ok := v.(string)
+					if !ok || len(s) > 64 {
+						return nil, errors.New("快捷键格式无效")
+					}
+					clean[key] = strings.TrimSpace(s)
+				}
+			}
+			if e := desktopAtomicJSON(file, clean); e != nil {
+				return nil, e
+			}
+		}
+		value, e := desktopReadJSON(file, nil)
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(map[string]any{"settings": value}), nil
 	case "memory:get":
 		return b.Workspace.memoryInfo()
 	case "memory:save":

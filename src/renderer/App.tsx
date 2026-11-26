@@ -12,7 +12,7 @@ import { bridge, type PublishSession, type ServerAgentEntry } from './api';
 import { publishProject } from './publish';
 import { AgentTerminal, PublishTerminal, useTerminalSetting, agentNeedsInput } from './publish-terminal';
 import {
-  Check, ChevronDown, Download, FileText, FolderOpen, HelpCircle, History,
+  Check, ChevronDown, Download, FileText, Folder, FolderOpen, HelpCircle, History,
   Layers, Maximize2, Play, Plus, RefreshCw, Rocket, Search, Server, Terminal, Trash, X, ImageIcon, Settings, EyeOff, BarChart
 } from './icons';
 import { HelpOverlay } from './help';
@@ -35,6 +35,7 @@ import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
 import { AIConsole, aiConsole, useAIConsole } from './ai-console';
 import { continuePrompt, itemExecuting, sessionOwnsItem, stalledSessionItems, type AgentSession } from './agent-session';
+import { matchesShortcut, useShortcutSettings } from './shortcuts';
 
 const labels: Record<string, string> = {
   feature: '新需求', improvement: '优化', bug: '修复',
@@ -44,7 +45,7 @@ const phases: [string, string][] = [
   ['feature', '需求池'], ['generate', '排期表'],
   ['pending_verification', '待验证'], ['archived', '归档']
 ];
-const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity' };
+const clientLabels = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness', opencode: 'OpenCode', antigravity: 'Antigravity', agy: 'Antigravity (agy)' };
 function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
@@ -52,6 +53,40 @@ function executionDuration(start: string, end = Date.now()) {
 const emptyForm = { title: '', body: '', criteria: '', type: 'feature', priority: 'P1', executor: 'ai' };
 // 上次使用的项目（REQ-029）：启动时恢复；项目切换即记录，关闭程序时最近一次选择已保存
 const LAST_PROJECT_KEY = 'reqflow-last-project';
+const SIDEBAR_VIEW_KEY = 'reqflow-sidebar-project-view';
+const PROJECT_VISITED_KEY = 'reqflow-project-visited';
+
+function readProjectVisited(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(PROJECT_VISITED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function projectRecentTime(pr: Project, visited: Record<string, number>): number {
+  let latest = Number(visited[pr.id]) || 0;
+  const consider = (value: unknown) => {
+    if (typeof value !== 'string' || !value) return;
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms) && ms > latest) latest = ms;
+  };
+  for (const item of pr.items || []) {
+    for (const h of item.history || []) consider(h?.time);
+    for (const e of item.flowEvents || []) consider(e?.time);
+    consider(item.aiExecution?.startedAt);
+    consider(item.aiExecution?.endedAt);
+  }
+  for (const b of pr.batches || []) {
+    consider(b.time);
+    consider(b.submittedAt);
+  }
+  for (const g of pr.guideHistory || []) consider(g?.time);
+  return latest;
+}
 
 export default function App() {
   const [data, setData] = useState<Workspace | null>(null);
@@ -59,6 +94,24 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('');
   const [pid, setPid] = useState('');
   const [projectQuery, setProjectQuery] = useState('');
+  const [sidebarView, setSidebarView] = useState<'folder' | 'recent'>(() => {
+    try { return localStorage.getItem(SIDEBAR_VIEW_KEY) === 'recent' ? 'recent' : 'folder'; } catch { return 'folder'; }
+  });
+  const [projectVisited, setProjectVisited] = useState<Record<string, number>>(readProjectVisited);
+  const shortcuts = useShortcutSettings();
+  function changeSidebarView(next: 'folder' | 'recent') {
+    setSidebarView(next);
+    try { localStorage.setItem(SIDEBAR_VIEW_KEY, next); } catch { /* ignore */ }
+  }
+  function markProjectVisited(id: string) {
+    if (!id) return;
+    const now = Date.now();
+    setProjectVisited(prev => {
+      const next = { ...prev, [id]: now };
+      try { localStorage.setItem(PROJECT_VISITED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
   const [tab, setTabState] = useState('feature');
   const projectTabs = useRef<Record<string, string>>({});
   function savedTab(id: string) {
@@ -316,6 +369,7 @@ export default function App() {
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTabState(savedTab(id));
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate(''); setArchiveBatchId('');
     setPublishConfirm(false); setPublishScript('');
+    markProjectVisited(id);
     void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
   }
 
@@ -884,6 +938,42 @@ export default function App() {
     batch.guideVersion !== p.guideVersion ||
     batch.items.some((old) => p.items.find((i) => i.id === old.id)?.version !== old.version));
 
+  // REQ-332：全局快捷键（默认 Ctrl+N 新建需求）
+  useEffect(() => {
+    const binding = shortcuts.newRequirement;
+    if (!binding || !p) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || mode === 'SETTINGS') return;
+      if (modal || aiOpen || helpOpen || browserOpen || projectManagerOpen || completeConfirm || publishConfirm || dirConfirm || bulkConfirm || releaseItem || contextWizard || rulesOpen || directoryPicker || sshPicker || diffOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('.xterm, [data-shortcut-capture="true"]')) return;
+      if (!matchesShortcut(e, binding)) return;
+      e.preventDefault();
+      if (mode !== 'FLOW') setMode('FLOW');
+      edit();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shortcuts.newRequirement, p, mode, modal, aiOpen, helpOpen, browserOpen, projectManagerOpen, completeConfirm, publishConfirm, dirConfirm, bulkConfirm, releaseItem, contextWizard, rulesOpen, directoryPicker, sshPicker, diffOpen]);
+  // REQ-333：修改项目引导词或源内容变化后，一键重新排期覆盖当前排期表中的待开发需求（排除已归档与执行中）
+  const rescheduleTargets = useMemo(() => {
+    if (!stale || !p) return [];
+    const seen = new Set<string>();
+    const list: Item[] = [];
+    for (const item of allInProgress) {
+      if (!seen.has(item.id)) { seen.add(item.id); list.push(item); }
+    }
+    for (const old of batch?.items || []) {
+      const current = p.items.find(i => i.id === old.id);
+      if (current && !seen.has(current.id) && !current.archived && !itemExecuting(current, agentSession) && (current.status === 'ready' || current.status === 'in_progress')) {
+        seen.add(current.id);
+        list.push(current);
+      }
+    }
+    return list;
+  }, [stale, p, allInProgress, batch, agentSession]);
+
   async function generate(ids = picked.map((i) => i.id)) {
     const r = await act({ op: 'generate', ids });
     if (!r) return;
@@ -894,6 +984,19 @@ export default function App() {
     setBatchId(b.id);
     setSelected([]);
     notify(`已排期 ${ids.length} 条需求，进入待开发`);
+  }
+
+  async function rescheduleStale() {
+    if (!rescheduleTargets.length) return;
+    const ids = rescheduleTargets.map(i => i.id);
+    const r = await act({ op: 'generate', ids }, true);
+    if (!r) return;
+    const pr = r.projects.find((x) => x.id === p?.id)!;
+    const b = pr.batches[0];
+    if (!await act({ op: 'submit', batch: b.id }, true)) return;
+    setBatchId(b.id);
+    setSelected([]);
+    notify(`已重新排期 ${ids.length} 条需求`);
   }
 
   // 单条提交：AI 完成这一条后，单独把它送入待验证，不影响同批其他需求
@@ -1008,6 +1111,19 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  const folderNameById = useMemo(
+    () => new Map((data?.folders || [{ id: 'default', name: 'default' }]).map(f => [f.id, f.name])),
+    [data]
+  );
+  const recentProjects = useMemo(() => {
+    const keyword = projectQuery.trim().toLowerCase();
+    return (data?.projects || [])
+      .map((pr, index) => ({ pr, index, recent: projectRecentTime(pr, projectVisited) }))
+      .filter(({ pr }) => !pr.hidden && pr.name.toLowerCase().includes(keyword))
+      .sort((a, b) => b.recent - a.recent || a.index - b.index)
+      .map(({ pr }) => pr);
+  }, [data, projectQuery, projectVisited]);
+
   if (!data) {
     return (
       <div className="boot">
@@ -1020,19 +1136,27 @@ export default function App() {
     );
   }
 
-  function renderSidebarProject(pr: Project) {
+  function renderSidebarProject(pr: Project, showFolder = false) {
     const counts = sidebarCounts.get(pr.id) || { active: 0, pending: 0 };
     const countLabel = `${counts.active} 条未归档需求，${counts.pending} 条待验证`;
+    const folderName = folderNameById.get(pr.folderId || 'default') || 'default';
     return (<div key={pr.id} role="button" tabIndex={0}
-              draggable={!busy} onDragEnd={projectDragEnd} onDragStart={(e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
-              onDragOver={busy ? undefined : projectDragOver} onDragLeave={projectDragLeave} onDrop={e => { if (!busy) projectDrop(e, pr.id, act); }}
+              draggable={!busy && !showFolder} onDragEnd={showFolder ? undefined : projectDragEnd} onDragStart={showFolder ? undefined : (e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={busy || showFolder ? undefined : projectDragOver} onDragLeave={showFolder ? undefined : projectDragLeave} onDrop={showFolder ? undefined : e => { if (!busy) projectDrop(e, pr.id, act); }}
               data-project-id={pr.id}
-              className={'side-project' + (p?.id === pr.id ? ' active' : '')}
+              className={'side-project' + (showFolder ? ' recent-mode' : '') + (p?.id === pr.id ? ' active' : '')}
               onClick={() => switchProject(pr.id)}
               onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); switchProject(pr.id); } }}
-              title={pr.name}>
+              title={showFolder ? `${pr.name} · 分组：${folderName}` : pr.name}>
               {isSSH(pr.dir) ? <Server size={16} /> : <Layers size={16} />}
-              <span className="project-name">{pr.name}</span>
+              {showFolder ? (
+                <span className="side-project-main">
+                  <span className="project-name">{pr.name}</span>
+                  <span className="side-project-group"><Folder size={11} /><span>{folderName}</span></span>
+                </span>
+              ) : (
+                <span className="project-name">{pr.name}</span>
+              )}
               {isSSH(pr.dir) && sshConnections[pr.dir!] && (
                 <span className={'ssh-status-dot' + (sshConnections[pr.dir!]?.ok ? ' on' : ' off')}
                   role="img"
@@ -1136,17 +1260,25 @@ export default function App() {
           <button className="icon-btn side-add-folder" aria-label="新建文件夹" title="新建文件夹" disabled={busy} onClick={() => setFolderForm(!folderForm)}><Plus size={13} /></button>
           </div>
         </div>
+        <div className="side-view-switch" role="group" aria-label="项目排序方式">
+          <button type="button" aria-pressed={sidebarView === 'folder'} className={sidebarView === 'folder' ? 'on' : ''} onClick={() => changeSidebarView('folder')}>按分组</button>
+          <button type="button" aria-pressed={sidebarView === 'recent'} className={sidebarView === 'recent' ? 'on' : ''} onClick={() => changeSidebarView('recent')}>最近项目</button>
+        </div>
         <nav className="side-projects side-project-scroll" aria-label="项目列表">
           {folderForm && <form className="folder-form" onKeyDown={e => { if (e.key === 'Escape' && !busy) { setFolderForm(false); setFolderName(''); } }} onSubmit={async (e) => { e.preventDefault(); if (await act({ op: 'folder', name: folderName })) { setFolderName(''); setFolderForm(false); } }}><label className="field"><input autoFocus aria-label="文件夹名称" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="文件夹名称" /></label><button className="icon-btn" aria-label="创建文件夹" title="创建文件夹" disabled={busy || !folderName.trim()}><Check size={15} /></button><button type="button" className="icon-btn" aria-label="取消创建文件夹" title="取消" disabled={busy} onClick={() => { setFolderForm(false); setFolderName(''); }}><X size={15} /></button></form>}
-          {(data.folders || [{id: 'default', name: 'default'}]).filter(folder => !projectQuery.trim() || data.projects.some(pr => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
-            // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
-            <button className="side-folder-del" aria-label={'删除文件夹 ' + folder.name} title="删除文件夹（项目迁移到 default）"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
-              <Trash size={12} />
-            </button>
-          )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((pr) => (
-            renderSidebarProject(pr)
-          ))}</details>)}
+          {sidebarView === 'recent' ? (
+            recentProjects.map(pr => renderSidebarProject(pr, true))
+          ) : (
+            (data.folders || [{id: 'default', name: 'default'}]).filter(folder => !projectQuery.trim() || data.projects.some(pr => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))).map((folder) => <details open className="project-folder" key={folder.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('application/reqflow-project'); if (id) void act({op: 'projectFolder', project: id, folderId: folder.id}); }}><summary><FolderOpen size={14} /><span className="folder-name" title={folder.name}>{folder.name}</span>{folder.id !== 'default' && (
+              // REQ-111：鼠标悬浮显示删除按钮；default 固定不可删，删除后项目迁移到 default
+              <button className="side-folder-del" aria-label={'删除文件夹 ' + folder.name} title="删除文件夹（项目迁移到 default）"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingFolder(folder); setModal('deleteFolder'); }}>
+                <Trash size={12} />
+              </button>
+            )}</summary>{data.projects.filter((pr) => !pr.hidden && (pr.folderId || 'default') === folder.id && pr.name.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((pr) => (
+              renderSidebarProject(pr)
+            ))}</details>)
+          )}
         </nav>
           <button className="side-project add" onClick={() => { setName(''); setDescription(''); setModal('project'); }}>
             <Plus size={16} /><span className="project-name">新建项目</span>
@@ -1234,7 +1366,7 @@ export default function App() {
                 <Play size={16} />运行
               </button>
             )}
-            <div className="new-requirement-split" ref={newMenuRef} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setNewMenu(false); }}><button className="btn primary" onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={() => { setNewMenu(false); setContextFeature(''); setContextWizard(true); }}>功能转上下文</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
+            <div className="new-requirement-split" ref={newMenuRef} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setNewMenu(false); }}><button className="btn primary" title={shortcuts.newRequirement ? `记录新需求 (${shortcuts.newRequirement})` : '记录新需求'} onClick={() => edit()}><Plus size={17} />记录新需求</button><button className="btn primary" aria-label="选择记录需求方式" aria-expanded={newMenu} onClick={() => setNewMenu(!newMenu)}><ChevronDown size={17} /></button>{newMenu && <div className="new-requirement-menu"><button type="button" onClick={() => { setNewMenu(false); setAiOpen(true); }}>AI 需求</button><button type="button" onClick={() => { setNewMenu(false); setContextFeature(''); setContextWizard(true); }}>功能转上下文</button><button type="button" onClick={editBaseline} title="按模板生成检查 .gitignore、输出目录与 scripts/ 脚本的基线需求">基线需求</button>{!publishScript && <button type="button" onClick={editPublish} title="生成在 scripts/ 下创建 publish 发布脚本的需求；完成后「浏览项目」旁出现「发布」按钮一键执行">发布功能需求</button>}</div>}</div>
           </div>
         </section>
 
@@ -1294,7 +1426,16 @@ export default function App() {
                   <span className="gen-count">{batch ? '批次 ' + String(batch.number).padStart(2, '0') : '暂无批次'}</span>
                   <div className="segmented" role="group" aria-label="排期日期范围">{[['through', '日期及之前'], ['exact', '当天'], ['all', '全部日期']].map(([id, label]) => <button key={id} className={scheduleMode === id ? 'on' : ''} aria-pressed={scheduleMode === id} onClick={() => setScheduleMode(id)}>{label}</button>)}</div>
                   <input type="date" className="gen-date" aria-label="排期筛选日期" value={scheduleDate} onChange={e => { if (e.target.value) setScheduleDate(e.target.value); }} disabled={scheduleMode === 'all'} />
-                  {stale && <p className="warning gen-warning">源内容已变化，请退回需求池后重新排期。</p>}
+                  {stale && (
+                    <div className="warning gen-warning" role="status">
+                      <span>源内容或项目引导词已变化，排期表里的需求需要重新排期。</span>
+                      {rescheduleTargets.length > 0 && (
+                        <button type="button" className="btn sm primary" disabled={busy} onClick={() => void rescheduleStale()}>
+                          <RefreshCw size={13} />重新排期
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </>}
               </div>
             )}
@@ -1587,8 +1728,8 @@ export default function App() {
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
           {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
-          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness 使用交互终端；ZCode 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入，需在 headless profile 安装 reqflow-agent-dsh 插件并配置模型。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
-          {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness。</p>}
+          {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness / Antigravity (agy) 使用交互终端；ZCode 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入，需在 headless profile 安装 reqflow-agent-dsh 插件并配置模型。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
+          {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness / Antigravity (agy)。</p>}
           <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setMode('MODS'); setNewMenu(false); }}>配置 Agent</button>}</div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (
