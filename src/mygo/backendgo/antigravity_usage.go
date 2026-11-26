@@ -49,6 +49,17 @@ func addAntigravityWindow(runs map[string]*antigravityRun, project string, execu
 
 // Read at dashboard time so already-completed tasks can use their local
 // transcripts and the completion tool call has had time to be flushed to disk.
+func antigravityRoots(home string) []string {
+	roots := []string{filepath.Join(home, ".config", "antigravity")}
+	for _, name := range []string{"antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup", "antigravity-acp"} {
+		roots = append(roots, filepath.Join(home, ".gemini", name))
+	}
+	if override := os.Getenv("ANTIGRAVITY_DATA_DIR"); override != "" {
+		roots = append([]string{override}, roots...)
+	}
+	return roots
+}
+
 func antigravityStatsUsage(home string, state map[string]any) map[string][]any {
 	runs := map[string]*antigravityRun{}
 	now := time.Now()
@@ -97,8 +108,8 @@ func antigravityStatsUsage(home string, state map[string]any) map[string][]any {
 
 	linked := map[string]*antigravityTranscript{}
 	ambiguous := map[string]bool{}
-	for _, dir := range []string{"antigravity", "antigravity-cli", "antigravity-ide"} {
-		brain := filepath.Join(home, ".gemini", dir, "brain")
+	for _, root := range antigravityRoots(home) {
+		brain := filepath.Join(root, "brain")
 		entries, _ := os.ReadDir(brain)
 		for _, entry := range entries {
 			if !entry.IsDir() || !antigravityUUID.MatchString(entry.Name()) {
@@ -168,6 +179,44 @@ func antigravityRunID(file string) string {
 	return id
 }
 
+func decodeAntigravityReceipt(content string) (string, string, bool) {
+	if !strings.Contains(content, `"runFile"`) {
+		return "", "", false
+	}
+	for offset := 0; offset < len(content); {
+		rel := strings.IndexByte(content[offset:], '{')
+		if rel < 0 {
+			return "", "", false
+		}
+		offset += rel
+		var receipt struct {
+			OK      bool                `json:"ok"`
+			RunFile string              `json:"runFile"`
+			Project struct{ ID string } `json:"project"`
+		}
+		if json.NewDecoder(strings.NewReader(content[offset:])).Decode(&receipt) == nil && receipt.OK {
+			if id := antigravityRunID(receipt.RunFile); id != "" && receipt.Project.ID != "" {
+				return id, receipt.Project.ID, true
+			}
+		}
+		offset++
+	}
+	return "", "", false
+}
+
+func antigravityReadCommand(command string) bool {
+	lower := strings.ToLower(command)
+	if !strings.Contains(lower, "reqflow.mjs") {
+		return false
+	}
+	for _, field := range strings.Fields(lower) {
+		if strings.Trim(field, `"'`) == "read" {
+			return true
+		}
+	}
+	return false
+}
+
 func readAntigravityTranscript(file, session string, runs map[string]*antigravityRun) *antigravityTranscript {
 	transcript := &antigravityTranscript{session: session, runs: map[string]bool{}}
 	f, err := os.Open(file)
@@ -179,21 +228,15 @@ func readAntigravityTranscript(file, session string, runs map[string]*antigravit
 	readRequested := false
 	seen := map[int64]bool{}
 	err = scanJSONLines(f, func(event map[string]any) {
-		if readRequested && event["type"] == "GENERIC" && event["status"] == "DONE" {
-			content := coreString(event["content"])
-			if start := strings.IndexByte(content, '{'); start >= 0 && strings.Contains(content, `"runFile"`) {
-				var receipt struct {
-					OK      bool                `json:"ok"`
-					RunFile string              `json:"runFile"`
-					Project struct{ ID string } `json:"project"`
-				}
-				if json.NewDecoder(strings.NewReader(content[start:])).Decode(&receipt) == nil && receipt.OK {
-					id := antigravityRunID(receipt.RunFile)
-					if run := runs[id]; run != nil && receipt.Project.ID == run.project {
+		if event["type"] == "GENERIC" {
+			if readRequested && event["status"] == "DONE" {
+				if id, projectID, ok := decodeAntigravityReceipt(coreString(event["content"])); ok {
+					if run := runs[id]; run != nil && projectID == run.project {
 						transcript.runs[id] = true
 					}
 				}
 			}
+			return
 		}
 		readRequested = false
 		if event["type"] != "PLANNER_RESPONSE" || event["status"] != "DONE" {
@@ -203,13 +246,21 @@ func readAntigravityTranscript(file, session string, runs map[string]*antigravit
 		for _, value := range coreList(event["tool_calls"]) {
 			tool := coreMap(value)
 			args := coreMap(tool["args"])
+			if tool["name"] == "run_command" {
+				if antigravityReadCommand(coreString(args["CommandLine"])) {
+					readRequested = true
+				}
+				continue
+			}
 			if tool["name"] != "call_mcp_tool" || !coreIn(coreString(args["ServerName"]), "reqflow", "reqflow-agent-antigravity_reqflow") {
 				continue
 			}
 			input := coreMap(args["Arguments"])
 			switch args["ToolName"] {
 			case "reqflow_read":
-				readRequested = input["execute"] == true
+				if input["execute"] == true {
+					readRequested = true
+				}
 			case "reqflow_complete":
 				id := antigravityRunID(coreString(input["runFile"]))
 				if run := runs[id]; run != nil && !stamp.Before(run.start) && !stamp.After(run.end) {

@@ -1,3 +1,8 @@
+# ReqFlow 2.21.6 更新
+
+- 修复数据看板「任务 Token 消耗」在未勾选「计入 Agent 本地会话」时漏统计 Antigravity 插件已完成任务用量的问题，同时改进 Antigravity 并行工具调用及 CLI 降级领取记录的会话关联。
+- 详见 [2.21.6 版本说明](docs/release-2.21.6.md)。
+
 # ReqFlow 2.21.5 更新
 
 - Windows 项目终端新增 Antigravity（`agy`）。在项目设置中选择 Antigravity，保留默认勾选的「完整控制权限启动」，即可在项目目录以完整访问模式启动已安装的 `agy`。

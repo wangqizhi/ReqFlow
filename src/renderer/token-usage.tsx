@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Project } from '../core/domain';
 import { localDate } from '../core/dates';
-import type { StatsLocalUsage, StatsLocalUsageResult, StatsUsageByRun } from './api';
+import type { StatsAntigravityUsageResult, StatsLocalUsage, StatsLocalUsageResult, StatsUsageByRun } from './api';
 
 type UsageRow = { key: string; projectId: string; project: string; requirement: string; client: string; model: string; effort: string; input: number; output: number; cached: number; reasoning: number; source: string; shared: boolean; time: string };
 
@@ -130,14 +130,41 @@ function localUsageRows(sessions: StatsLocalUsage[], projects: Project[], projec
     }));
 }
 
-export function TokenUsage({ projects, days, projectId, today, loadLocalUsage }: {
+export function hasUnreportedAntigravityTask(projects: Project[]): boolean {
+  for (const project of projects) {
+    for (const item of project.items || []) {
+      for (const event of item.history || []) {
+        if (event.event !== '实现完成') continue;
+        if (Array.isArray(event.usage) && event.usage.length) continue;
+        if (event.execution?.runId && statsExecutionClient(event) === 'antigravity') return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function TokenUsage({ projects, days, projectId, today, loadAntigravityUsage, loadLocalUsage }: {
   projects: Project[]; days: number; projectId: string; today: string;
+  loadAntigravityUsage?: () => Promise<StatsAntigravityUsageResult>;
   loadLocalUsage?: (since: string) => Promise<StatsLocalUsageResult>;
 }) {
   const [group, setGroup] = useState('model');
   const [includeLocal, setIncludeLocal] = useState(false);
+  const [antigravityUsage, setAntigravityUsage] = useState<StatsUsageByRun>({});
   const [localUsage, setLocalUsage] = useState<StatsLocalUsageResult | null>(null);
   const since = days ? usageRangeStart(days, today).toISOString() : '';
+
+  useEffect(() => {
+    if (!loadAntigravityUsage || !hasUnreportedAntigravityTask(projects)) {
+      setAntigravityUsage({});
+      return;
+    }
+    let cancelled = false;
+    loadAntigravityUsage().then(result => {
+      if (!cancelled && result.ok) setAntigravityUsage(result.usageByRun);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projects, loadAntigravityUsage]);
 
   useEffect(() => {
     setLocalUsage(null);
@@ -156,7 +183,7 @@ export function TokenUsage({ projects, days, projectId, today, loadLocalUsage }:
   }, [includeLocal, since, projects, loadLocalUsage]);
 
   const supplemental = includeLocal && localUsage?.ok ? localUsage : null;
-  const rows = taskUsageRows(projects, days, projectId, supplemental?.usageByRun, today);
+  const rows = taskUsageRows(projects, days, projectId, supplemental?.usageByRun ?? antigravityUsage, today);
   if (supplemental) rows.push(...localUsageRows(supplemental.sessions, projects, projectId, days ? localDate(new Date(since)) : '', today));
   const groups = new Map<string, { label: string; input: number; output: number; cached: number; reasoning: number }>();
   for (const row of rows) {

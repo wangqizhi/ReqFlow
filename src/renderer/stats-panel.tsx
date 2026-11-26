@@ -372,7 +372,7 @@ export function StatsPanel({ workspace }: { workspace?: Workspace | null }) {
       <div className="stats-chart-block"><h4>各项目需求量</h4><BarList rows={projectRows} onSelect={id => { setMilestones({ loading: true, error: '', data: null }); setMilestoneId(id); }} /></div>
       <div className="stats-chart-block"><h4>AI 客户端使用</h4><BarList rows={clientRows} unit=" 次" /></div>
     </div>
-    <TokenUsage projects={projects} days={range} projectId={projectId} today={today} loadLocalUsage={bridge.getLocalStatsUsage} />
+    <TokenUsage projects={projects} days={range} projectId={projectId} today={today} loadAntigravityUsage={bridge.getAntigravityStatsUsage} loadLocalUsage={bridge.getLocalStatsUsage} />
     <div className="settings-actions">
       <button className="btn" aria-expanded={showTable} onClick={() => setShowTable(!showTable)}>{showTable ? '收起明细表' : '展开明细表'}</button>
     </div>

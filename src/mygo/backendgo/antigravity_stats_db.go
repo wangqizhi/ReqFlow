@@ -11,13 +11,7 @@ import (
 )
 
 func collectAntigravityStats(home string, start time.Time, add collectLocalUsage) {
-	roots := []string{filepath.Join(home, ".config", "antigravity")}
-	for _, name := range []string{"antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup", "antigravity-acp"} {
-		roots = append(roots, filepath.Join(home, ".gemini", name))
-	}
-	if override := os.Getenv("ANTIGRAVITY_DATA_DIR"); override != "" {
-		roots = append([]string{override}, roots...)
-	}
+	roots := antigravityRoots(home)
 	sessions, seen := map[string]bool{}, map[string]bool{}
 	for _, root := range roots {
 		// A live SQLite database can have recent records in its WAL while the

@@ -278,6 +278,13 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return workspaceResponse(desktopOK(r), desktopArg(args, 0)), nil
+	case "stats:antigravity-usage":
+		record, err := b.Workspace.store.read()
+		if err != nil {
+			return nil, err
+		}
+		home, _ := os.UserHomeDir()
+		return desktopOK(map[string]any{"usageByRun": antigravityStatsUsage(home, coreMap(record["data"]))}), nil
 	case "stats:local-usage":
 		var start time.Time
 		if since := desktopText(args, 0); since != "" {

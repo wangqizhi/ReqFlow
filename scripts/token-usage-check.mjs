@@ -9,7 +9,7 @@ const temp = await mkdtemp(path.join(os.tmpdir(), 'reqflow-usage-'));
 try {
   const outfile = path.join(temp, 'usage.mjs');
   await build({ entryPoints: ['src/renderer/token-usage.tsx'], bundle: true, platform: 'node', format: 'esm', outfile });
-  const { taskUsageRows } = await import(pathToFileURL(outfile));
+  const { taskUsageRows, hasUnreportedAntigravityTask } = await import(pathToFileURL(outfile));
   const now = Date.now();
   const history = (offset, tokens) => ({ event: '实现完成', time: new Date(now + offset).toISOString(), execution: { runId: 'run' }, usage: [{ model: 'model', reasoningEffort: 'high', scope: 'run', sessionId: 'exact-session', inputTokens: tokens, outputTokens: 10 }] });
   const projects = [{ id: 'p', name: 'Project', items: [{ id: 'a', number: 'REQ-A', history: [history(0, 100)] }, { id: 'b', number: 'REQ-B', history: [history(1, 120)] }] }];
@@ -25,11 +25,13 @@ try {
   assert.deepEqual(taskUsageRows(projects, 7), []);
   assert.equal(taskUsageRows(projects, 0).length, 1);
   const antigravityUsage = { run: [{ model: 'gemini-example', inputTokens: 50, outputTokens: 10, scope: 'run', sessionId: 'agy-session' }] };
+  assert.equal(hasUnreportedAntigravityTask(projects), false);
   for (const item of projects[0].items) for (const event of item.history) {
     event.execution.client = 'pi';
     event.note = '[ReqFlow Antigravity run run]\nCompleted';
     delete event.usage;
   }
+  assert.equal(hasUnreportedAntigravityTask(projects), true);
   const recovered = taskUsageRows(projects, 0, 'p', antigravityUsage);
   assert.equal(recovered.length, 1);
   assert.equal(recovered[0].client, 'antigravity');

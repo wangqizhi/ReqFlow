@@ -29,6 +29,7 @@ export type StatsTokenUsage = {
   sessionId?: string;
 };
 export type StatsUsageByRun = Record<string, StatsTokenUsage[]>;
+export type StatsAntigravityUsageResult = { ok: true; usageByRun: StatsUsageByRun } | { ok: false; error: string };
 export type StatsLocalUsage = StatsTokenUsage & { projectId: string; client: string; sessionId: string; day: string };
 export type StatsLocalUsageResult = { ok: true; usageByRun: StatsUsageByRun; sessions: StatsLocalUsage[] } | { ok: false; error: string };
 
@@ -221,6 +222,7 @@ export interface ReqFlowBridge {
   gitStatus?(root: string): Promise<({ ok: true } & GitStatusInfo) | { ok: false; error: string }>;
   /** 里程碑视图：读取项目目录最近的 Git 提交历史（只读）。仅桌面版提供。 */
   gitMilestones?(root: string, limit?: number): Promise<({ ok: true } & GitMilestoneInfo) | { ok: false; error: string }>;
+  getAntigravityStatsUsage?(): Promise<StatsAntigravityUsageResult>;
   getLocalStatsUsage?(since: string): Promise<StatsLocalUsageResult>;
   gitInit?(root: string): Promise<GitOpResult>;
   gitStage?(root: string, mode: 'stage' | 'unstage', paths: string[]): Promise<GitOpResult>;
