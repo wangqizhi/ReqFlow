@@ -6,6 +6,10 @@ import { TerminalWindow } from './publish-terminal';
 import './styles.css';
 import { installDraggableOverlays } from './draggable-overlays';
 import { ShutdownDialog } from './shutdown';
+import { applyCachedTheme, loadPreferencesFromBridge } from './preferences';
+// REQ-343：首屏渲染前按本地缓存应用配色，再从数据目录同步最新偏好（独立窗口同样跟随）
+applyCachedTheme();
+void loadPreferencesFromBridge().catch(() => { /* 读取失败保持缓存配色 */ });
 installDraggableOverlays();
 
 const params = new URLSearchParams(location.search);

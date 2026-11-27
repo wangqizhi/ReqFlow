@@ -135,3 +135,23 @@ func TestShortcutSettingsRoundtrip(t *testing.T) {
 		t.Fatalf("invalid shortcuts payload accepted: %v %v", invalid, err)
 	}
 }
+
+func TestPreferencesRoundtrip(t *testing.T) {
+	b := aiTestBackend(t)
+	dir := t.TempDir()
+	saved, err := b.Invoke(t.Context(), "preferences:save", []any{map[string]any{"theme": "dark", "defaultProjectDir": dir}})
+	if err != nil || !coreTruthy(desktopMap(saved)["ok"]) {
+		t.Fatalf("preferences:save failed: %v %v", saved, err)
+	}
+	loaded, err := b.Invoke(t.Context(), "preferences:get", nil)
+	settings := desktopMap(desktopMap(loaded)["settings"])
+	if err != nil || coreString(settings["theme"]) != "dark" || coreString(settings["defaultProjectDir"]) != dir {
+		t.Fatalf("preferences:get roundtrip differs: %v %v", loaded, err)
+	}
+	for _, bad := range []map[string]any{{"theme": "neon"}, {"defaultProjectDir": "relative/dir"}} {
+		r, err := b.Invoke(t.Context(), "preferences:save", []any{bad})
+		if err != nil || coreTruthy(desktopMap(r)["ok"]) {
+			t.Fatalf("invalid preferences accepted: %v %v %v", bad, r, err)
+		}
+	}
+}

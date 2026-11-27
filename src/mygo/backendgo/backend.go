@@ -283,6 +283,42 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 			return nil, e
 		}
 		return desktopOK(map[string]any{"settings": value}), nil
+	case "preferences:get", "preferences:save":
+		// REQ-338/339/343：通用偏好（配色、默认项目目录）保存在数据目录 preferences.json
+		file := filepath.Join(b.DataDir, "preferences.json")
+		if channel == "preferences:save" {
+			raw, ok := desktopArg(args, 0).(map[string]any)
+			if !ok {
+				return nil, errors.New("偏好设置无效")
+			}
+			clean := map[string]any{}
+			if v, exists := raw["theme"]; exists {
+				theme, ok := v.(string)
+				if !ok || !coreIn(theme, "classic", "cream", "dark") {
+					return nil, errors.New("配色无效")
+				}
+				clean["theme"] = theme
+			}
+			if v, exists := raw["defaultProjectDir"]; exists {
+				dir, ok := v.(string)
+				dir = strings.TrimSpace(dir)
+				if !ok || len(dir) > 1024 {
+					return nil, errors.New("默认项目目录无效")
+				}
+				if dir != "" && !filepath.IsAbs(dir) {
+					return nil, errors.New("默认项目目录必须是绝对路径")
+				}
+				clean["defaultProjectDir"] = dir
+			}
+			if e := desktopAtomicJSON(file, clean); e != nil {
+				return nil, e
+			}
+		}
+		value, e := desktopReadJSON(file, nil)
+		if e != nil {
+			return nil, e
+		}
+		return desktopOK(map[string]any{"settings": value}), nil
 	case "memory:get":
 		return b.Workspace.memoryInfo()
 	case "memory:save":
@@ -449,7 +485,15 @@ func (b *Backend) Invoke(ctx context.Context, channel string, args []any) (resul
 		if !filepath.IsAbs(root) || !info.IsDir() {
 			return nil, errors.New("项目目录无效")
 		}
-		err = openProjectTerminal(root, coreString(p["terminalCli"]), p["terminalFullAccess"] != false)
+		// REQ-341：可指定本次打开的 CLI；未指定时使用项目设置中的默认 CLI
+		cli := coreString(p["terminalCli"])
+		if override := strings.TrimSpace(desktopText(args, 1)); override != "" {
+			if !coreIn(override, "codex", "claude-code", "pi", "agy") {
+				return nil, errors.New("不支持的 CLI")
+			}
+			cli = override
+		}
+		err = openProjectTerminal(root, cli, p["terminalFullAccess"] != false)
 		return desktopOK(nil), err
 	case "dir:open", "dir:editor":
 		// REQ-146：从资源管理器打开项目目录；仅允许绝对路径下的目录。

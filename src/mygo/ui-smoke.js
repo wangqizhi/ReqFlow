@@ -401,10 +401,9 @@
     const remoteHeading = [...document.querySelectorAll('.side-label')].find(el => el.textContent === '远程项目');
     checks.remoteProjectSection = { ok: !remoteHeading && !collaboration };
     await click(newProject);
-    await waitFor(() => !!button('导入项目'));
-    checks.projectCreateChoices = { ok: !!button('从本地创建') && !!button('导入项目') };
-    await click(button('从本地创建'));
+    // REQ-340：新建项目直接显示详情表单，导入项目作为表单内的入口
     await waitFor(() => !!document.querySelector('.project-create'));
+    checks.projectCreateChoices = { ok: !button('从本地创建') && !!button('导入项目') && !!document.querySelector('.project-create input[required]') };
     await click(button('连接远程服务器'));
     await waitFor(() => !!document.querySelector('.ssh-directory'));
     const sshDialog = document.querySelector('.ssh-directory');
@@ -439,18 +438,18 @@
     const probe = { calls: 0 };
     const detectApi = window.reqflow?.detectLocalAgents;
     if (typeof detectApi === 'function') window.reqflow.detectLocalAgents = (...args) => { probe.calls += 1; return detectApi.apply(window.reqflow, args); };
-    await click(button('插件/MOD/AGENT'));
-    await waitFor(() => !!document.querySelector('[aria-label="插件/MOD/AGENT"]'));
-    const modsNav = () => document.querySelector('[aria-label="插件功能菜单"]');
+    // REQ-335：插件/MOD/AGENT 并入设置，「插件 / MOD 说明」移入帮助的标签页
+    checks.modsMerged = { ok: !button('插件/MOD/AGENT') };
+    await click(button('帮助 · CLI 参考'));
+    await waitFor(() => !!document.querySelector('.help-panel [role="tablist"]'));
+    await click([...document.querySelectorAll('.help-panel [role="tab"]')].find(el => el.textContent === '插件 / MOD 说明'));
+    checks.modsProtocolInHelp = { ok: !!document.querySelector('.help-panel .help-body.mod-document h1, .help-panel .help-body.mod-document h2') };
+    await click(document.querySelector('[aria-label="关闭帮助"]'));
+    const openModsSettings = async () => { await click(button('设置')); await waitFor(() => !!document.querySelector('[aria-label="设置功能菜单"]')); };
+    const modsNav = () => document.querySelector('[aria-label="设置功能菜单"]');
     const modsMenu = label => [...modsNav().querySelectorAll('button')].find(el => el.textContent.startsWith(label));
-    checks.modsWorkspace = { ok: !document.querySelector('.overlay') && !document.querySelector('.mods-page [role="dialog"], .mods-page [role="tablist"]') && modsNav().querySelectorAll('button').length === 5 && document.querySelector('.mods-page').clientWidth === document.querySelector('.main').clientWidth };
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    checks.modsWorkspace.ok &&= !!document.querySelector('.mods-page');
-    // REQ-235：插件 / MOD 说明占满右侧工作区，不再只占据中间一段阅读宽度。
-    const modsPage = document.querySelector('.mods-page');
-    const protocolDoc = modsPage.querySelector('.mod-document');
-    const contentWidth = modsPage.querySelector('.settings-page-head')?.getBoundingClientRect().width || 0;
-    checks.modsProtocolFullWidth = { ok: !!protocolDoc && contentWidth > 0 && Math.abs(protocolDoc.getBoundingClientRect().width - contentWidth) < 2 && protocolDoc.scrollWidth <= protocolDoc.clientWidth + 1, document: protocolDoc?.getBoundingClientRect().width || 0, content: contentWidth };
+    await openModsSettings();
+    checks.modsWorkspace = { ok: !!modsMenu('Local Agent') && !!modsMenu('Server Agent') && !!modsMenu('实验室') };
     await new Promise(resolve => setTimeout(resolve, 250));
     await click(modsMenu('Local Agent'));
     const detectStatus = document.querySelector('[role="status"].agent-detect-status')?.textContent || '';
@@ -460,16 +459,18 @@
     await click(modsMenu('实验室'));
     checks.statsMoved = { ok: !document.querySelector('.stats-panel') };
     checks.modsWorkspace.ok &&= modsMenu('实验室').getAttribute('aria-current') === 'page';
+    await click(modsMenu('AI 供应商'));
     await click(button('返回项目菜单'));
     checks.modsWorkspace.ok &&= !document.querySelector('.mods-page') && document.querySelector('.main h1').textContent === originalProject;
     const terminalSetting = async enabled => {
-      await click(button('插件/MOD/AGENT'));
+      await openModsSettings();
       await click(modsMenu('实验室'));
       const toggle = document.querySelector('[aria-label="启用 Terminal"]');
       if (!toggle) throw Error('terminalSetting(' + enabled + ') toggle missing after ' + lastAction + '; completed checks: ' + Object.keys(checks).join(','));
       if (toggle.checked !== enabled) await click(toggle);
       await waitFor(() => toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled));
       checks.terminalSetting = { ok: toggle.checked === enabled && localStorage.getItem('reqflow-lab-terminal') === String(enabled) };
+      await click(modsMenu('AI 供应商'));
       await click(button('返回项目菜单'));
     };
     const terminalVeil = () => document.querySelector('.publish-terminal-body > .terminal-loading');
@@ -644,30 +645,49 @@
       await switchProject(originalProject);
     };
     const dashboardEntry = button('数据看板');
-    checks.statsMoved.ok &&= dashboardEntry.previousElementSibling.textContent.includes('插件/MOD/AGENT') && !!dashboardEntry.querySelector('svg');
+    checks.statsMoved.ok &&= !!dashboardEntry.nextElementSibling?.textContent.includes('设置') && !!dashboardEntry.querySelector('svg');
     await click(dashboardEntry);
     await waitFor(() => !!document.querySelector('.stats-page .stats-panel'));
+    // REQ-331：数据看板分标签显示；整页不出现竖向滚动，切换标签时内容区高度保持不变
+    const statsPage = document.querySelector('.stats-page');
+    const statsTab = label => [...document.querySelectorAll('.stats-tabs [role="tab"]')].find(el => el.textContent === label);
+    const tabHeights = [], pageOverflow = [];
+    const openStatsTab = async label => {
+      await click(statsTab(label));
+      await waitFor(() => statsTab(label).getAttribute('aria-selected') === 'true');
+      tabHeights.push(Math.round(document.querySelector('.stats-tab-panel').getBoundingClientRect().height));
+      pageOverflow.push(statsPage.scrollHeight > statsPage.clientHeight + 1);
+    };
     const statsPanel = document.querySelector('.stats-panel');
     const kpis = statsPanel.querySelectorAll('.stats-kpi').length;
-    const lines = statsPanel.querySelectorAll('.stats-plot svg path').length;
-    const barRows = statsPanel.querySelectorAll('.stats-bar-row').length;
-    await click([...statsPanel.querySelectorAll('button')].find(el => el.textContent === '展开明细表'));
-    await waitFor(() => !!document.querySelector('.stats-table tbody tr'));
-    const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
+    await openStatsTab('需求趋势');
+    let lines = statsPanel.querySelectorAll('.stats-plot svg path').length;
     const projectTag = [...statsPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent !== '全部');
-    if (projectTag) await click(projectTag);
+    const projectTagName = projectTag?.textContent;
+    await openStatsTab('AI 执行');
+    lines += statsPanel.querySelectorAll('.stats-plot svg path').length;
+    const barRows = statsPanel.querySelectorAll('.stats-bar-row').length;
+    await openStatsTab('每日明细');
+    const tableRows = document.querySelectorAll('.stats-table tbody tr').length;
+    await openStatsTab('Token 消耗');
+    await openStatsTab('项目分布');
+    checks.statsTabsStable = { ok: tabHeights.length === 5 && new Set(tabHeights).size === 1 && pageOverflow.every(v => !v), heights: tabHeights, overflow: pageOverflow };
     const projectBars = [...statsPanel.querySelectorAll('.stats-chart-block')].find(el => el.querySelector('h4')?.textContent === '各项目需求量');
-    await click([...projectBars.querySelectorAll('button')].find(el => el.textContent.includes(projectTag.textContent)));
+    await click([...projectBars.querySelectorAll('button')].find(el => el.textContent.includes(projectTagName)));
     await waitFor(() => !!document.querySelector('.milestone-view'));
     const milestone = document.querySelector('.milestone-view');
     checks.projectMilestones = { ok: !!milestone && !!milestone.querySelector('.milestone-hero h2') && milestone.querySelectorAll('.milestone-stat').length === 4 && (!milestone.querySelector('.milestone-timeline') || milestone.querySelectorAll('.milestone-item').length > 0) };
     const milestoneBack = [...milestone.querySelectorAll('button')].find(el => el.textContent.trim() === '返回统计');
     if (milestoneBack) await click(milestoneBack);
+    await waitFor(() => !!document.querySelector('.stats-panel .stats-tabs'));
+    await click(statsTab('需求趋势'));
     await waitFor(() => !!document.querySelector('.stats-panel .activity-calendar'));
     const restoredPanel = document.querySelector('.stats-panel');
+    const tagAgain = [...restoredPanel.querySelectorAll('.stats-project-tags .tag-btn')].find(el => el.textContent === projectTagName);
+    if (tagAgain) await click(tagAgain);
     const calendar = restoredPanel.querySelector('.activity-calendar');
     const calendarCells = [...calendar.querySelectorAll('button.activity-day')];
-    const calendarProject = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state.projects.find(p => p.name === projectTag?.textContent);
+    const calendarProject = (await window.mygo.call('ReqFlow.Invoke', 'workspace:get', [])).state.projects.find(p => p.name === projectTagName);
     const created = new Map();
     for (const item of calendarProject?.items || []) {
       const time = item.history.find(e => e.event === '创建')?.time || item.flowEvents?.[0]?.time;
@@ -680,9 +700,12 @@
     todayCell.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     const navigated = document.activeElement === calendarCells.at(-8);
     await click(calendarCells[0]);
-    checks.activityCalendar = { ok: calendarCells.length === 365 && new Set(calendarCells.map(cell => cell.dataset.date)).size === 365 && navigated && calendarCells[0].getAttribute('aria-pressed') === 'true' && calendarCells.every(cell => cell.getAttribute('aria-label').includes(`新建 ${created.get(cell.dataset.date) || 0} 条需求`)) };
+    checks.activityCalendar = { ok: calendarCells.length === 365 && new Set(calendarCells.map(cell => cell.dataset.date)).size === 365 && navigated && calendarCells[0].getAttribute('aria-pressed') === 'true' && calendarCells.every(cell => cell.getAttribute('aria-label').includes(`新建 ${created.get(cell.dataset.date) || 0} 条`)) };
     const todayRange = [...restoredPanel.querySelectorAll('.stats-filters button')].find(el => el.textContent === '今日');
     await click(todayRange);
+    const todayPlotsOk = [...restoredPanel.querySelectorAll('.stats-plot')].every(el => el.getAttribute('aria-label').includes('共 1 天'));
+    await click(statsTab('Token 消耗'));
+    await waitFor(() => !!restoredPanel.querySelector('.token-usage-block'));
     const tokenBlock = restoredPanel.querySelector('.token-usage-block');
     const localUsage = tokenBlock.querySelector('input[type="checkbox"]');
     const unchecked = !localUsage.checked;
@@ -690,12 +713,10 @@
     await waitFor(() => tokenBlock.textContent.includes('本地会话按实际用量日期统计'));
     const loaded = localUsage.checked;
     await click(localUsage);
-    checks.statsTodayAndLocalUsage = { ok: todayRange.getAttribute('aria-pressed') === 'true' &&
-      [...restoredPanel.querySelectorAll('.stats-plot')].every(el => el.getAttribute('aria-label').includes('共 1 天')) &&
-      unchecked && loaded && !localUsage.checked };
-    const rangeButton = [...restoredPanel.querySelectorAll('.segmented button')].find(el => el.textContent === '全部');
+    checks.statsTodayAndLocalUsage = { ok: todayRange.getAttribute('aria-pressed') === 'true' && todayPlotsOk && unchecked && loaded && !localUsage.checked };
+    const rangeButton = [...restoredPanel.querySelectorAll('.stats-filters .segmented button')].find(el => el.textContent === '全部');
     if (rangeButton) await click(rangeButton);
-    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.stats-chart-head h4').length === 2 && restoredPanel.querySelectorAll('.token-usage-block .segmented button').length === 3 && restoredPanel.querySelector('.token-usage-block').textContent.includes('未采集不代表零消耗') };
+    checks.statsPanel = { ok: kpis === 5 && lines === 3 && barRows > 0 && tableRows > 0 && restoredPanel.querySelectorAll('.token-usage-block .segmented button').length === 3 && restoredPanel.querySelector('.token-usage-block').textContent.includes('未采集不代表零消耗') };
     await click(button('返回项目'));
     await waitFor(() => !document.querySelector('.stats-panel'));
     // 独立浏览窗口由 smokeUI 在主窗口脚本结束后单独检查。

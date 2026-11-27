@@ -30,7 +30,8 @@ import { AttachmentImage } from './attachment-image';
 import { PublishTail } from './publish-tail';
 import { ContentWorkspace } from './content';
 import { executorLabel, useLocalAgents, useAssignSetting, agentName, agentLogOnly, TERMINAL_AGENTS } from './assignment';
-import { ModsPage, modsTabs } from './mods';
+import { ModsPage, modsSettingTabs } from './mods';
+const allSettingsTabs: readonly (readonly [string, string])[] = [...settingsTabs, ...modsSettingTabs];
 import { StatsPanel } from './stats-panel';
 import { localDate, matchesSchedule } from '../core/dates';
 import { AIConsole, aiConsole, useAIConsole } from './ai-console';
@@ -50,41 +51,23 @@ function executionDuration(start: string, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000));
   return seconds < 60 ? seconds + ' 秒' : seconds < 3600 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 + ' 秒' : Math.floor(seconds / 3600) + ' 小时 ' + Math.floor(seconds % 3600 / 60) + ' 分';
 }
+const TERMINAL_CLIS = [['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi'], ['agy', 'Antigravity (agy)']] as const;
 const emptyForm = { title: '', body: '', criteria: '', type: 'feature', priority: 'P1', executor: 'ai' };
 // 上次使用的项目（REQ-029）：启动时恢复；项目切换即记录，关闭程序时最近一次选择已保存
 const LAST_PROJECT_KEY = 'reqflow-last-project';
 const SIDEBAR_VIEW_KEY = 'reqflow-sidebar-project-view';
-const PROJECT_VISITED_KEY = 'reqflow-project-visited';
+// REQ-334：最近项目只按「新建需求」与「完成验证」排序，点击切换项目不再改变顺序
+const RECENT_EVENTS = new Set(['创建', '验证通过', '验证失败']);
 
-function readProjectVisited(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(PROJECT_VISITED_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function projectRecentTime(pr: Project, visited: Record<string, number>): number {
-  let latest = Number(visited[pr.id]) || 0;
-  const consider = (value: unknown) => {
-    if (typeof value !== 'string' || !value) return;
-    const ms = Date.parse(value);
-    if (Number.isFinite(ms) && ms > latest) latest = ms;
-  };
+function projectRecentTime(pr: Project): number {
+  let latest = 0;
   for (const item of pr.items || []) {
-    for (const h of item.history || []) consider(h?.time);
-    for (const e of item.flowEvents || []) consider(e?.time);
-    consider(item.aiExecution?.startedAt);
-    consider(item.aiExecution?.endedAt);
+    for (const h of item.history || []) {
+      if (!h || !RECENT_EVENTS.has(h.event) || typeof h.time !== 'string') continue;
+      const ms = Date.parse(h.time);
+      if (Number.isFinite(ms) && ms > latest) latest = ms;
+    }
   }
-  for (const b of pr.batches || []) {
-    consider(b.time);
-    consider(b.submittedAt);
-  }
-  for (const g of pr.guideHistory || []) consider(g?.time);
   return latest;
 }
 
@@ -97,20 +80,10 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<'folder' | 'recent'>(() => {
     try { return localStorage.getItem(SIDEBAR_VIEW_KEY) === 'recent' ? 'recent' : 'folder'; } catch { return 'folder'; }
   });
-  const [projectVisited, setProjectVisited] = useState<Record<string, number>>(readProjectVisited);
   const shortcuts = useShortcutSettings();
   function changeSidebarView(next: 'folder' | 'recent') {
     setSidebarView(next);
     try { localStorage.setItem(SIDEBAR_VIEW_KEY, next); } catch { /* ignore */ }
-  }
-  function markProjectVisited(id: string) {
-    if (!id) return;
-    const now = Date.now();
-    setProjectVisited(prev => {
-      const next = { ...prev, [id]: now };
-      try { localStorage.setItem(PROJECT_VISITED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
   }
   const [tab, setTabState] = useState('feature');
   const projectTabs = useRef<Record<string, string>>({});
@@ -178,11 +151,11 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState('ai');
   const [settingsBusy, setSettingsBusy] = useState(false);
   const settingsPage = useRef<SettingsPageHandle>(null);
-  const [modsTab, setModsTab] = useState('protocol');
+  const settingsModsTab = modsSettingTabs.some(([id]) => id === settingsTab);
   const [modsUpdates, setModsUpdates] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS' | 'EXECUTING' | 'MODS'>('FLOW');
+  const [mode, setMode] = useState<'FLOW' | 'CONTENT' | 'SETTINGS' | 'STATS' | 'EXECUTING'>('FLOW');
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null); // REQ-111 文件夹删除确认
   const [targetProject, setTargetProject] = useState('');
@@ -309,12 +282,24 @@ export default function App() {
   const [dirConfirm, setDirConfirm] = useState(false); // REQ-146：点击项目目录后确认是否从资源管理器打开
   const [editorOpening, setEditorOpening] = useState(false);
   // REQ-277：目录浮层与项目设置目录旁的图标按钮共用打开终端 CLI 逻辑，防重复提交
-  const openTerminalCli = async () => {
+  const openTerminalCli = async (cli?: string) => {
     if (!p || terminalOpening || !bridge.openProjectTerminal) return;
     setTerminalOpening(true);
-    try { const r = await bridge.openProjectTerminal(p.id); if (!r.ok) notify(r.error || '打开终端失败', 'err'); else setDirConfirm(false); }
+    try { const r = await bridge.openProjectTerminal(p.id, cli); if (!r.ok) notify(r.error || '打开终端失败', 'err'); else { setDirConfirm(false); setCliPicker(null); } }
     catch (e: any) { notify(e.message, 'err'); }
     finally { setTerminalOpening(false); }
+  };
+  // REQ-341：单击弹出 CLI 选择浮层（默认选中项目设置中的 CLI），双击直接以默认 CLI 打开
+  const [cliPicker, setCliPicker] = useState<string | null>(null);
+  const cliClickTimer = useRef<number | undefined>(undefined);
+  const pickTerminalCli = () => {
+    window.clearTimeout(cliClickTimer.current);
+    cliClickTimer.current = window.setTimeout(() => setCliPicker(p?.terminalCli || 'codex'), 240);
+  };
+  const openDefaultTerminalCli = () => {
+    window.clearTimeout(cliClickTimer.current);
+    setCliPicker(null);
+    void openTerminalCli();
   };
   useEffect(() => {
     if (!publishConfirm) return;
@@ -369,7 +354,6 @@ export default function App() {
     setPid(id); setSelected([]); setBatchId(''); setQuery(''); setTabState(savedTab(id));
     setBrowserOpen(false); setTypeFilter('all'); setArchiveDate(''); setArchiveBatchId('');
     setPublishConfirm(false); setPublishScript('');
-    markProjectVisited(id);
     void load({ quiet: true }); // REQ-076：切换项目时立即刷新 flow 状态
   }
 
@@ -483,6 +467,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal, editing, bodyExpanded, deleteRulesConfirm, busy]);
+
+  // REQ-337：打开记录新需求弹窗（含 Ctrl+N）时默认聚焦需求说明输入框，光标置于末尾
+  useEffect(() => {
+    if (modal !== 'item' || editing) return;
+    const timer = window.setTimeout(() => {
+      const el = bodyInput.current;
+      if (!el) return;
+      el.focus();
+      const end = el.value.length;
+      try { el.setSelectionRange(end, end); } catch { /* ignore */ }
+    }, 30);
+    return () => window.clearTimeout(timer);
+  }, [modal, editing]);
 
   // REQ-074：需求说明超出输入框高度时，在「展开更多设置」旁显示「放大编辑」按钮
   useEffect(() => {
@@ -944,7 +941,7 @@ export default function App() {
     if (!binding || !p) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || mode === 'SETTINGS') return;
-      if (modal || aiOpen || helpOpen || browserOpen || projectManagerOpen || completeConfirm || publishConfirm || dirConfirm || bulkConfirm || releaseItem || contextWizard || rulesOpen || directoryPicker || sshPicker || diffOpen) return;
+      if (modal || aiOpen || helpOpen || browserOpen || projectManagerOpen || completeConfirm || publishConfirm || dirConfirm || bulkConfirm || releaseItem || contextWizard || rulesOpen || directoryPicker || sshPicker || diffOpen || cliPicker !== null) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest('.xterm, [data-shortcut-capture="true"]')) return;
       if (!matchesShortcut(e, binding)) return;
@@ -955,7 +952,7 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shortcuts.newRequirement, p, mode, modal, aiOpen, helpOpen, browserOpen, projectManagerOpen, completeConfirm, publishConfirm, dirConfirm, bulkConfirm, releaseItem, contextWizard, rulesOpen, directoryPicker, sshPicker, diffOpen]);
+  }, [shortcuts.newRequirement, p, mode, modal, aiOpen, helpOpen, browserOpen, projectManagerOpen, completeConfirm, publishConfirm, dirConfirm, bulkConfirm, releaseItem, contextWizard, rulesOpen, directoryPicker, sshPicker, diffOpen, cliPicker]);
   // REQ-333：修改项目引导词或源内容变化后，一键重新排期覆盖当前排期表中的待开发需求（排除已归档与执行中）
   const rescheduleTargets = useMemo(() => {
     if (!stale || !p) return [];
@@ -1118,11 +1115,11 @@ export default function App() {
   const recentProjects = useMemo(() => {
     const keyword = projectQuery.trim().toLowerCase();
     return (data?.projects || [])
-      .map((pr, index) => ({ pr, index, recent: projectRecentTime(pr, projectVisited) }))
+      .map((pr, index) => ({ pr, index, recent: projectRecentTime(pr) }))
       .filter(({ pr }) => !pr.hidden && pr.name.toLowerCase().includes(keyword))
       .sort((a, b) => b.recent - a.recent || a.index - b.index)
       .map(({ pr }) => pr);
-  }, [data, projectQuery, projectVisited]);
+  }, [data, projectQuery]);
 
   if (!data) {
     return (
@@ -1138,7 +1135,8 @@ export default function App() {
 
   function renderSidebarProject(pr: Project, showFolder = false) {
     const counts = sidebarCounts.get(pr.id) || { active: 0, pending: 0 };
-    const countLabel = `${counts.active} 条未归档需求，${counts.pending} 条待验证`;
+    // REQ-336：有待验证时红色徽标只显示待验证数量
+    const countLabel = counts.pending > 0 ? `${counts.pending} 条待验证（共 ${counts.active} 条未归档需求）` : `${counts.active} 条未归档需求`;
     const folderName = folderNameById.get(pr.folderId || 'default') || 'default';
     return (<div key={pr.id} role="button" tabIndex={0}
               draggable={!busy && !showFolder} onDragEnd={showFolder ? undefined : projectDragEnd} onDragStart={showFolder ? undefined : (e) => { e.dataTransfer.setData(projectDragType, pr.id); e.dataTransfer.effectAllowed = 'move'; }}
@@ -1163,7 +1161,7 @@ export default function App() {
                   aria-label={sshConnections[pr.dir!]?.ok ? '远程连接正常' : '远程连接已断开'}
                   title={sshConnections[pr.dir!]?.ok ? '远程连接正常' : (sshConnections[pr.dir!]?.error || '远程连接已断开')} />
               )}
-              <span className={'small-count' + (counts.pending > 0 ? ' has-pending' : '')} title={countLabel} aria-label={countLabel}>{counts.active}</span>
+              <span className={'small-count' + (counts.pending > 0 ? ' has-pending' : '')} title={countLabel} aria-label={countLabel}>{counts.pending > 0 ? counts.pending : counts.active}</span>
               <button className="side-project-hide" aria-label={'隐藏项目 ' + pr.name} title="隐藏项目" disabled={busy} onClick={async e => {
                 e.stopPropagation();
                 const result = await act({ op: 'projectVisibility', project: pr.id, hidden: true });
@@ -1238,13 +1236,7 @@ export default function App() {
           <div className="side-label">设置</div>
           <nav className="side-projects side-menu" aria-label="设置功能菜单">
             <button className="side-project" disabled={settingsBusy} onClick={() => settingsPage.current?.requestLeave()}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
-            {settingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}><Settings size={16} /><span className="project-name">{title}</span></button>)}
-          </nav>
-        </> : mode === 'MODS' ? <>
-          <div className="side-label">插件 / MOD / AGENT</div>
-          <nav className="side-projects side-menu" aria-label="插件功能菜单">
-            <button className="side-project" onClick={() => setMode('FLOW')}><FolderOpen size={16} /><span className="project-name">返回项目菜单</span></button>
-            {modsTabs.map(([id, title]) => <button className={'side-project' + (modsTab === id ? ' active' : '')} aria-current={modsTab === id ? 'page' : undefined} key={id} onClick={() => setModsTab(id)}><Layers size={16} /><span className="project-name">{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
+            {allSettingsTabs.map(([id, title]) => <button className={'side-project' + (settingsTab === id ? ' active' : '')} aria-current={settingsTab === id ? 'page' : undefined} key={id} disabled={settingsBusy} onClick={() => setSettingsTab(id)}>{modsSettingTabs.some(([tab]) => tab === id) ? <Layers size={16} /> : <Settings size={16} />}<span className="project-name">{title}</span>{id === 'agents' && modsUpdates > 0 && <span className="small-count" title={modsUpdates + ' 个 Agent 有可用更新'}>{modsUpdates}</span>}</button>)}
           </nav>
         </> : mode === 'CONTENT' ? <>
           <div className="side-label">上下文管理</div>
@@ -1288,7 +1280,6 @@ export default function App() {
         <button className={'side-label side-label-action' + (mode === 'EXECUTING' ? ' active' : '')} aria-current={mode === 'EXECUTING' ? 'page' : undefined} onClick={() => { setMode('EXECUTING'); setNewMenu(false); }}>执行中 <span className="small-count">{globalExecuting.length}</span></button>
         </>}
         <div className="side-foot">
-          <button className={'btn plain' + (mode === 'MODS' ? ' active' : '')} aria-current={mode === 'MODS' ? 'page' : undefined} onClick={() => { if (mode !== 'MODS') setModsTab('protocol'); setMode('MODS'); setNewMenu(false); }}><Layers />插件/MOD/AGENT</button>
           <button className={'btn plain' + (mode === 'STATS' ? ' active' : '')} aria-current={mode === 'STATS' ? 'page' : undefined} onClick={() => { setMode('STATS'); setNewMenu(false); }}><BarChart />数据看板</button>
           <button className="btn plain" aria-current={mode === 'SETTINGS' ? 'page' : undefined} onClick={() => { setMode('SETTINGS'); setNewMenu(false); }}><Settings />设置</button>
           <div className="side-help-update"><button className="btn plain" title="帮助 · CLI 参考" onClick={() => setHelpOpen(true)}>
@@ -1317,12 +1308,13 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'MODS' ? <ModsPage tab={modsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} notify={notify} /> : mode === 'SETTINGS' ? <SettingsPage ref={settingsPage} tab={settingsTab} project={p} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
+        {mode === 'SETTINGS' && settingsModsTab && <ModsPage tab={settingsTab} projectDir={p?.dir} onUpdateCountChange={setModsUpdates} notify={notify} />}
+        {mode === 'SETTINGS' ? <div className="settings-host" style={settingsModsTab ? { display: 'none' } : undefined}><SettingsPage ref={settingsPage} tab={settingsTab} project={p} onBusyChange={setSettingsBusy} onLeave={() => { setMode('FLOW'); void load({ quiet: true }); }} notify={notify} onArchived={() => void load({ quiet: true })} onExport={async () => {
           const result = await bridge.getWorkspace();
           if (!result.ok) throw Error(result.error || '读取工作区失败');
           download(JSON.stringify(result.state, null, 2), 'reqflow-backup.json');
           notify('全部数据已导出');
-        }} /> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="segmented" aria-label="执行状态"><button aria-pressed={executionView === 'executing'} onClick={() => setExecutionView('executing')}>执行中 · {globalExecuting.length}</button><button aria-pressed={executionView === 'pending'} onClick={() => setExecutionView('pending')}>待验证 {globalPending.length > 0 && <span className="pending-count">{globalPending.length}</span>}</button></div><div className="execution-list">{executionView === 'pending' ? <>{!globalPending.length && <div className="empty">暂无待验证需求</div>}{globalPending.map(({ project, item }) => <article className="req-card" key={item.id}><div className="card-body"><div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('pending_verification'); }}>{project.name}</button><code>{item.number}</code><span className="status pending_verification">待验证</span></div><p className="body-copy">{item.title || item.body}</p><VerificationVersions item={item} /></div></article>)}</> : <>
+        }} /></div> : mode === 'STATS' ? <div className="stats-page"><div className="stats-page-heading"><div><h1><BarChart size={22} />数据看板</h1><p>查看需求增长与 AI 执行情况</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><StatsPanel workspace={data} /></div> : mode === 'EXECUTING' ? <div className="stats-page execution-page"><div className="stats-page-heading"><div><h1><Play size={22} />执行中</h1><p>{globalExecuting.length} 条任务 · {new Set(globalExecuting.map(entry => entry.project.id)).size} 个项目</p></div><button className="btn" onClick={() => setMode('FLOW')}><FolderOpen />返回项目</button></div><div className="segmented" aria-label="执行状态"><button aria-pressed={executionView === 'executing'} onClick={() => setExecutionView('executing')}>执行中 · {globalExecuting.length}</button><button aria-pressed={executionView === 'pending'} onClick={() => setExecutionView('pending')}>待验证 {globalPending.length > 0 && <span className="pending-count">{globalPending.length}</span>}</button></div><div className="execution-list">{executionView === 'pending' ? <>{!globalPending.length && <div className="empty">暂无待验证需求</div>}{globalPending.map(({ project, item }) => <article className="req-card" key={item.id}><div className="card-body"><div className="meta"><button className="btn" onClick={() => { switchProject(project.id); setTabState('pending_verification'); }}>{project.name}</button><code>{item.number}</code><span className="status pending_verification">待验证</span></div><p className="body-copy">{item.title || item.body}</p><VerificationVersions item={item} /></div></article>)}</> : <>
           {globalExecuting.some(({ item }) => !!activeAIExecution(item)) && <div className="settings-actions"><label className="check-label"><input type="checkbox" checked={globalExecuting.filter(({ item }) => !!activeAIExecution(item)).every(({ project, item }) => globalSelected.includes(project.id + ':' + item.id))} onChange={e => setGlobalSelected(e.target.checked ? globalExecuting.filter(({ item }) => !!activeAIExecution(item)).map(({ project, item }) => project.id + ':' + item.id) : [])} />全选可释放任务</label><button className="btn" disabled={busy || !globalSelected.length} onClick={() => setBulkConfirm('global')}>批量释放 · 已选 {globalSelected.length} 条</button></div>}
           {!globalExecuting.length && <div className="empty">暂无执行中的任务</div>}
           {globalExecuting.map(({ project, item: i }) => {
@@ -1378,7 +1370,7 @@ export default function App() {
             <div className="guide-settings-summary">
               {p?.dir && <button type="button" className="linked-dir" title={p.dir + '（点击确认后从资源管理器打开）'} onClick={() => isSSH(p.dir) ? void browseProject() : setDirConfirm(true)}><FolderOpen size={13} />{p.dir}</button>}
               {/* REQ-277：目录后提供打开终端 CLI 图标按钮，远程目录不支持本机终端 */}
-              {p?.dir && !isSSH(p.dir) && bridge.openProjectTerminal && <button type="button" className="icon-btn dir-terminal" aria-label="打开终端 CLI" title="在项目目录打开终端 CLI" disabled={terminalOpening} onClick={() => void openTerminalCli()}><Terminal size={14} /></button>}
+              {p?.dir && !isSSH(p.dir) && bridge.openProjectTerminal && <button type="button" className="icon-btn dir-terminal" aria-label="打开终端 CLI" title="单击选择 CLI，双击直接打开默认 CLI" disabled={terminalOpening} onClick={pickTerminalCli} onDoubleClick={openDefaultTerminalCli}><Terminal size={14} /></button>}
               {/* REQ-147：以简要标志说明项目设置，替代「新需求的默认设置」占位，保持一行 */}
               {p?.contextRules && <button className="btn sm" onClick={() => setRulesOpen(true)}>守则</button>}
               <span className={'guide-flag' + (p?.guidance ? ' on' : '')} title={p?.guidance ? '已配置项目引导词' : '未配置项目引导词'}>{p?.guidance && <Check size={12} />}引导词</span>
@@ -1727,10 +1719,10 @@ export default function App() {
             {(localAgents || []).filter(id => !TERMINAL_AGENTS.includes(id)).map(id => <button key={id} className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'agent:' + id)}>{agentName(id)}</button>)}
             {completeConfirm.items.some(item => (p?.items.find(i => i.id === item.id)?.executor || 'ai') !== 'ai') && <button className="btn" disabled={busy || completing} onClick={() => void assignItems(completeConfirm.items.map(item => item.id), 'ai')}>全部取消指派</button>}
           </div>}
-          {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在插件/MOD/AGENT 面板配置。</p>}
+          {assignEnabled && localAgents && localAgents.length === 0 && <p className="settings-hint">还没有已配置的 Agent，可先在「设置 → Local Agent」配置。</p>}
           {assignEnabled && !!localAgents?.length && <p className="settings-hint">Codex / Pi / Claude Code / DeepSeek Harness / Antigravity (agy) 使用交互终端；ZCode 使用只读任务日志（headless 一次执行），不支持继续沟通，缺少登录、模型配置或需要人工操作时请先在官方客户端处理。DeepSeek Harness 的交互终端先执行指派任务，之后可在同一终端继续输入，需在 headless profile 安装 reqflow-agent-dsh 插件并配置模型。指派在项目目录执行本次需求（列表入口合并为一份 Prompt）；「指派给」由对应 Agent 之后领取时生效。取消指派恢复默认 AI 执行。</p>}
           {!assignEnabled && <p className="settings-hint">实验室未开启「指派」，这里只确认是否完成。需要 Agent 执行时，先在「插件 / MOD / AGENT → 实验室」打开「指派」，再回到这里选择 Codex / pi / Claude Code / DeepSeek Harness / Antigravity (agy)。</p>}
-          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setModsTab('agents'); setMode('MODS'); setNewMenu(false); }}>配置 Agent</button>}</div>
+          <div className="settings-actions"><button className="btn" disabled={busy || completing} onClick={() => setCompleteConfirm(null)}>取消</button><button className="btn primary" disabled={busy || completing} onClick={() => void confirmComplete()}>确认已完成，提交验证</button>{assignEnabled && <button className="btn plain" disabled={busy || completing} onClick={() => { setCompleteConfirm(null); setSettingsTab('agents'); setMode('SETTINGS'); setNewMenu(false); }}>配置 Agent</button>}</div>
         </div></div>}
       {publishConfirm && pendingVerifyItems.length > 0 && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="还有未验证的功能"
@@ -1767,7 +1759,7 @@ export default function App() {
             <p className="detail-body">{p.dir}</p>
             <div className="settings-actions">
               <button className="btn" onClick={() => setDirConfirm(false)}>取消</button>
-              <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={() => void openTerminalCli()}>打开终端 CLI</button>
+              <button className="btn" disabled={terminalOpening || !bridge.openProjectTerminal} title="单击选择 CLI，双击直接打开默认 CLI" onClick={pickTerminalCli} onDoubleClick={openDefaultTerminalCli}>打开终端 CLI</button>
               <button className="btn" disabled={editorOpening || !bridge.openProjectEditor} title="使用 VS Code 打开项目文件夹" onClick={() => void openProjectEditor()}>{editorOpening ? '打开中…' : '从编辑器打开'}</button>
               <button className="btn primary" onClick={() => void openProjectDir()}>打开目录</button>
             </div>
@@ -1956,7 +1948,7 @@ export default function App() {
                     <p className="settings-hint">「记录新需求 → 基线需求」以此模板预填一条需求；留空时优先使用设置里的全局模板，再回退到占位中的默认模板。</p>
                   </>}
                   {guideTab === 'run' && <>
- <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{[['codex', 'Codex'], ['claude-code', 'Claude Code'], ['pi', 'pi'], ['agy', 'Antigravity (agy)']].map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
+ <div className="field"><span>项目终端 CLI</span><div className="segmented" role="group" aria-label="项目终端 CLI">{TERMINAL_CLIS.map(([id, label]) => <button type="button" key={id} aria-pressed={terminalCli === id} className={terminalCli === id ? 'on' : ''} onClick={() => setTerminalCli(id)}>{label}</button>)}</div></div>
  <label className="field inline"><input type="checkbox" checked={terminalFullAccess} onChange={e => setTerminalFullAccess(e.target.checked)} />完整控制权限启动</label>
  <label className="field">版本号定位文件<input value={versionFile} onChange={e => setVersionFile(e.target.value)} placeholder="如 VERSION、release-versions.json 或 release-versions.json#components.frontend" /></label>
  <p className="settings-hint">留空读取项目根 package.json；支持单行版本文本或 JSON 的 version。多组件清单的 components 可填版本字符串或含 version 的对象，待验证同时显示交付与组件版本。仅验证某组件可用 文件路径#components.frontend（也可指定 .version）；读取失败不使用 ReqFlow 版本。版本在完成需求时记录，修改配置不追溯更新旧需求。</p>
@@ -2203,6 +2195,14 @@ export default function App() {
 
       {diffOpen && p?.dir && <FileDiff root={p.dir} close={() => setDiffOpen(false)} />}
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {cliPicker !== null && p && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget && !terminalOpening) setCliPicker(null); }} onKeyDown={e => { if (e.key === 'Escape' && !terminalOpening) { e.stopPropagation(); setCliPicker(null); } }}>
+        <div className="dialog cli-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="cli-picker-title">
+          <div className="dialog-head"><div><h3 id="cli-picker-title">选择终端 CLI</h3><p>在项目目录打开所选 CLI；默认项来自项目设置，双击终端按钮可直接打开默认 CLI。</p></div><button className="icon-btn" aria-label="关闭" disabled={terminalOpening} onClick={() => setCliPicker(null)}><X size={18} /></button></div>
+          <p className="detail-body" title={p.dir}>{p.dir}</p>
+          <div className="segmented cli-picker-options" role="group" aria-label="终端 CLI">{TERMINAL_CLIS.map(([id, label]) => <button type="button" key={id} autoFocus={cliPicker === id} aria-pressed={cliPicker === id} className={cliPicker === id ? 'on' : ''} onClick={() => setCliPicker(id)} onDoubleClick={() => void openTerminalCli(id)}>{label}{(p.terminalCli || 'codex') === id ? ' · 默认' : ''}</button>)}</div>
+          <div className="dialog-actions"><button className="btn" disabled={terminalOpening} onClick={() => setCliPicker(null)}>取消</button><button className="btn primary" disabled={terminalOpening || !bridge.openProjectTerminal} onClick={() => void openTerminalCli(cliPicker)}>{terminalOpening ? '打开中…' : '打开'}</button></div>
+        </div>
+      </div>}
       {browserOpen && p && (
         <ProjectBrowser
           project={p}

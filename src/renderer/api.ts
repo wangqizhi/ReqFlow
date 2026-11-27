@@ -113,6 +113,9 @@ export interface ReqFlowBridge {
   /** 快捷键配置（REQ-332）：默认 Ctrl+N 新建需求，保存在数据目录 shortcuts.json。 */
   getShortcutSettings?(): Promise<{ ok: boolean; settings: Record<string, string> | null; error?: string }>;
   saveShortcutSettings?(settings: Record<string, string>): Promise<{ ok: boolean; settings?: Record<string, string> | null; error?: string }>;
+  /** 通用偏好（REQ-338/339/343）：配色与默认项目目录，保存在数据目录 preferences.json。 */
+  getPreferences?(): Promise<{ ok: boolean; settings: Record<string, unknown> | null; error?: string }>;
+  savePreferences?(settings: Record<string, unknown>): Promise<{ ok: boolean; settings?: Record<string, unknown> | null; error?: string }>;
   getMemory?(): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
   saveMemory?(settings: MemorySettings): Promise<({ ok: true } & MemoryInfo) | { ok: false; error: string }>;
   getContextSettings?(): Promise<{ ok: boolean; dir?: string; git?: boolean; error?: string }>;
@@ -200,7 +203,7 @@ export interface ReqFlowBridge {
   showDataFile?(): Promise<unknown>;
   openConfigDir?(): Promise<{ ok: boolean; error?: string }>;
   // 项目目录（REQ-146）：从资源管理器打开关联的项目目录。仅桌面版提供。
-  openProjectTerminal?(project: string): Promise<{ ok: boolean; error?: string }>;
+  openProjectTerminal?(project: string, cli?: string): Promise<{ ok: boolean; error?: string }>;
   openProjectDir?(dir: string): Promise<{ ok: boolean; error?: string }>;
   openProjectEditor?(dir: string): Promise<{ ok: boolean; error?: string }>;
   // 文件浏览仅桌面版提供；浏览器 mock 预览下为 undefined，界面做降级提示
@@ -370,6 +373,16 @@ function createMockBridge(): ReqFlowBridge {
     },
     async saveShortcutSettings(settings) {
       try { localStorage.setItem('reqflow-shortcuts', JSON.stringify(settings)); return { ok: true, settings }; }
+      catch (e: any) { return { ok: false, error: e.message }; }
+    },
+    async getPreferences() {
+      try {
+        const raw = localStorage.getItem('reqflow-preferences');
+        return { ok: true, settings: raw ? JSON.parse(raw) : null };
+      } catch { return { ok: false, settings: null, error: '读取偏好设置失败' }; }
+    },
+    async savePreferences(settings) {
+      try { localStorage.setItem('reqflow-preferences', JSON.stringify(settings)); return { ok: true, settings }; }
       catch (e: any) { return { ok: false, error: e.message }; }
     },
     async getWorkspace() {

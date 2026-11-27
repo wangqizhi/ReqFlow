@@ -7,6 +7,8 @@ const channels = {
   saveAssignSetting: 'lab:assign:save',
   getShortcutSettings: 'shortcuts:get',
   saveShortcutSettings: 'shortcuts:save',
+  getPreferences: 'preferences:get',
+  savePreferences: 'preferences:save',
   getMemory: 'memory:get',
   saveMemory: 'memory:save',
   getContextSettings: 'context:settings:get',

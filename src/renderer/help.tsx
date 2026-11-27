@@ -4,6 +4,8 @@
 import { useEffect, useState } from 'react';
 import { CLI_DOCS, CLI_GLOBAL_OPTIONS, CLI_NOTES, CLI_USAGE } from '../core/cli-help';
 import { bridge } from './api';
+import { renderMarkdown } from './markdown';
+import { modProtocolDoc } from './mods';
 import { Check, Copy, FolderOpen, Terminal, X } from './icons';
 
 const AGENT_SNIPPET = `# Node.js 子进程调用示例（Agent 对接推荐方式）
@@ -28,7 +30,12 @@ await reqflow('submit', '--project', pid, '--batch', bid);         // 3. 确认�
 await reqflow('complete', '--project', pid, '--id', id1);          // 4. AI 完成后
 await reqflow('verify', '--project', pid, '--id', id1, '--pass', 'true');`;
 
+// REQ-335：帮助按标签分页显示，「插件 / MOD 说明」由原插件页移入
+const HELP_TABS = [['start', '快速上手'], ['cli', 'CLI 参考'], ['agent', 'Agent 对接'], ['mod', '插件 / MOD 说明'], ['data', '数据与备份']] as const;
+type HelpTab = typeof HELP_TABS[number][0];
+
 export function HelpOverlay({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<HelpTab>('start');
   const [info, setInfo] = useState<{ version: string; dataFile: string; platform?: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -53,14 +60,19 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
       <div className="help-panel">
         <header className="help-header">
           <div>
-            <h2>帮助 · CLI 命令参考</h2>
+            <h2>帮助</h2>
             <p>ReqFlow {info?.version ?? ''} — 图形界面与命令行共用同一份本地数据，可放心混用。</p>
           </div>
           <button className="icon-btn" aria-label="关闭帮助" onClick={onClose}><X size={20} /></button>
         </header>
 
-        <div className="help-body">
-          <section>
+        <div className="settings-tabs help-tabs" role="tablist" aria-label="帮助分类">
+          {HELP_TABS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
+        </div>
+
+        <div className={'help-body' + (tab === 'mod' ? ' fb-md mod-document' : '')} role="tabpanel" aria-label={HELP_TABS.find(([id]) => id === tab)?.[1]}>
+          {tab === 'mod' && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(modProtocolDoc) }} />}
+          {tab === 'start' && <section>
             <h3><Terminal size={16} /> 快速上手</h3>
             <ol className="help-steps">
               <li>左侧新建或切换项目，在「需求池」里记录需求（标题、说明、验收条件）。</li>
@@ -68,9 +80,9 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
               <li>开发完成后点击需求卡片或上方的「提交验证」进入待验证；需要修改时退回待执行。</li>
               <li>人工检查：通过则归档；未通过填写原因退回，原因自动带入下一轮 Prompt。</li>
             </ol>
-          </section>
+          </section>}
 
-          <section>
+          {tab === 'cli' && <section>
             <h3><Terminal size={16} /> CLI 用法</h3>
             <p className="help-desc">
               命令行模式不打开窗口，直接读写本地工作区并输出 JSON（成功 <code>{'{"ok":true,...}'}</code>，失败 <code>{'{"ok":false,"error":...}'}</code>，退出码 0/1）。
@@ -103,18 +115,18 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
             <ul className="help-notes">
               {CLI_NOTES.map((n, i) => <li key={i}>{n}</li>)}
             </ul>
-          </section>
+          </section>}
 
-          <section>
+          {tab === 'agent' && <section>
             <h3><Terminal size={16} /> Agent 对接示例</h3>
             <pre className="help-code">{AGENT_SNIPPET}</pre>
             <p className="help-desc">
               Windows 图形程序在部分终端直接运行时可能不显示输出；子进程管道读取始终有效。
               交互调试可用 <code>ReqFlow.exe --cli help | more</code> 或重定向到文件。
             </p>
-          </section>
+          </section>}
 
-          <section>
+          {tab === 'data' && <section>
             <h3><FolderOpen size={16} /> 数据与备份</h3>
             <p className="help-desc">
               全部数据保存在本地单个文件中：{info ? <code>{info.dataFile}</code> : '正在读取…'}
@@ -128,7 +140,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             <p className="help-desc">备份：直接复制该文件；迁移：在「设置 → 数据」导出全部数据后，在其他机器用 <code>--cli workspace import</code> 导入。</p>
-          </section>
+          </section>}
         </div>
       </div>
     </div>

@@ -2,8 +2,7 @@ import { ServerAgentPage } from './server-agent';
 import protocol from '../../docs/mod-protocol.md?raw';
 import { bridge, type LocalAgent } from './api';
 import { useCallback, useEffect, useState } from 'react';
-import { renderMarkdown } from './markdown';
-import { Layers, ExternalLink, Copy } from './icons';
+import { ExternalLink, Copy } from './icons';
 import { AGENT_MENTION, useAssignSetting } from './assignment';
 import { useTerminalSetting } from './publish-terminal';
 
@@ -32,7 +31,9 @@ function probeLocalAgents(force = false): Promise<LocalAgent[]> {
   return agentProbeRunning;
 }
 
-export const modsTabs = [['protocol', '插件 / MOD 说明'], ['agents', 'Local Agent'], ['server', 'Server Agent'], ['lab', '实验室']] as const;
+// REQ-335：插件/MOD/AGENT 并入设置；「插件 / MOD 说明」移入帮助，其余子模块保持原名作为设置分类
+export const modsSettingTabs = [['agents', 'Local Agent'], ['server', 'Server Agent'], ['lab', '实验室']] as const;
+export const modProtocolDoc = protocol;
 
 export function ModsPage({ tab, projectDir, onUpdateCountChange, notify }: { tab: string; projectDir?: string; onUpdateCountChange(count: number): void; notify(text: string, kind?: 'ok' | 'err'): void }) {
   const [terminalEnabled, setTerminalEnabled] = useTerminalSetting();
@@ -100,8 +101,8 @@ export function ModsPage({ tab, projectDir, onUpdateCountChange, notify }: { tab
       setLabStatus('已调起 ' + agent.name + ' 窗口' + '；Agent 引用已复制到剪贴板，若输入框未自动填入请手动粘贴发送。');
     } catch (e: any) { setLabError(e.message); } finally { setLabBusyId(''); }
   }
-  return <section className="mods-page" aria-label="插件/MOD/AGENT">
-      <header className="settings-page-head"><h1><Layers />{modsTabs.find(([id]) => id === tab)?.[1]}</h1><p>管理本地 Agent、查看接入说明与实验功能</p></header>
+  return <section className="mods-page" aria-label="插件 / Agent 设置">
+      <header className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{modsSettingTabs.find(([id]) => id === tab)?.[1]}</h1><p>管理本地 Agent、Server Agent 与实验功能；接入说明见「帮助 → 插件 / MOD 说明」</p></header>
       {tab === 'server' ? <div className="local-agent-body"><ServerAgentPage notify={notify} /></div> : tab === 'agents' ? <div className="local-agent-body">
         <p className="settings-hint">打开本页会自动检测系统里的 Agent 是否已安装、版本是否需要更新；结果缓存 5 分钟，窗口重新获得焦点或点击「重新检测」会刷新。配置后可以在「提交验证」弹窗中指派（需先在实验室打开「指派」）。Codex 默认可指派；其他 Agent 在此开启后出现在指派选项中。</p>
         <div className="settings-actions">
@@ -157,7 +158,7 @@ export function ModsPage({ tab, projectDir, onUpdateCountChange, notify }: { tab
         <div className="settings-actions"><button className="btn" disabled={migrating || backend !== 'json'} onClick={() => void migrate()}>{migrating ? '迁移中…' : '迁移到 SQLite'}</button></div>
         <p className="settings-hint">Codex 本次调起链接：<code className="lab-link">{labUrl || '—'}</code></p>
         <p className="settings-hint">链接格式：<code>codex://threads/new?path=&lt;项目目录&gt;&amp;prompt=&lt;Agent引用&gt;</code></p>
-        <p className="settings-hint">Agent 引用：<code>{AGENT_MENTION}</code>（Codex）。在绑定 ReqFlow 项目目录的聊天中只发送对应引用，即可授权读取排期并开始实现，完成后回写待验证（见「插件 / MOD 说明」）。</p>
-      </div> : <article className="help-body fb-md mod-document" dangerouslySetInnerHTML={{ __html: renderMarkdown(protocol) }} />}
+        <p className="settings-hint">Agent 引用：<code>{AGENT_MENTION}</code>（Codex）。在绑定 ReqFlow 项目目录的聊天中只发送对应引用，即可授权读取排期并开始实现，完成后回写待验证（见「帮助 → 插件 / MOD 说明」）。</p>
+      </div> : null}
     </section>;
 }

@@ -17,8 +17,9 @@ import {
   type ShortcutActionId,
   type ShortcutSettings,
 } from './shortcuts';
+import { DEFAULT_PREFERENCES, THEMES, loadPreferencesFromBridge, savePreferences, type Preferences } from './preferences';
 
-export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['shortcuts', '快捷键'], ['memory', '全局记忆'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
+export const settingsTabs = [['ai', 'AI 供应商'], ['template', '提示词模板'], ['shortcuts', '快捷键'], ['general', '通用'], ['memory', '全局记忆'], ['backup', '同步备份'], ['logs', '请求日志'], ['data', '数据']] as const;
 const cliNames = { codex: 'Codex', zcode: 'ZCode', pi: 'Pi', claude: 'Claude Code' };
 
 type DataUsage = { dataDir: string; backend: string; dirSize: number; databasePath: string; databaseSize: number };
@@ -193,6 +194,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const [shortcuts, setShortcuts] = useState<ShortcutSettings>(DEFAULT_SHORTCUTS);
   const [savedShortcuts, setSavedShortcuts] = useState('');
   const [shortcutsLoaded, setShortcutsLoaded] = useState(false);
+  const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFERENCES);
+  const [savedPrefs, setSavedPrefs] = useState('');
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutActionId | null>(null);
   const [shortcutErrors, setShortcutErrors] = useState<Partial<Record<ShortcutActionId, string>>>({});
   function acceptMemory(info: MemoryInfo, payload?: MemorySettings) {
@@ -345,6 +349,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       setShortcutsLoaded(true);
       notify(e.message, 'err');
     });
+    loadPreferencesFromBridge().then((loadedPrefs) => {
+      setPrefs(loadedPrefs); setSavedPrefs(fingerprint(loadedPrefs)); setPrefsLoaded(true);
+    }).catch((e) => { setSavedPrefs(fingerprint(DEFAULT_PREFERENCES)); setPrefsLoaded(true); notify(e.message, 'err'); });
     const timer = setInterval(() => bridge.getBackupSettings?.().then((r) => { if (r.ok) setStatus(r.status); }).catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
@@ -389,6 +396,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const tabReady = tab === 'ai' ? loaded
     : tab === 'template' ? templateVersion !== null
     : tab === 'shortcuts' ? shortcutsLoaded
+    : tab === 'general' ? prefsLoaded
     : tab === 'logs' ? loaded && (!bridge.savePublishLogSettings || publishLogLoaded)
     : tab === 'memory' ? memoryLoaded
     : tab === 'server' || tab === 'data' ? true
@@ -420,6 +428,11 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
     setShortcuts(current => fingerprint(current) === fingerprint(draft) ? normalized : current);
     setSavedShortcuts(fingerprint(normalized));
     return result;
+  }
+  async function savePrefsPayload(draft: Preferences) {
+    const r = await savePreferences(draft);
+    if (r.ok) setSavedPrefs(fingerprint({ ...draft, defaultProjectDir: draft.defaultProjectDir.trim() }));
+    return r;
   }
   async function saveCurrentTab(): Promise<boolean> {
     if (savingRef.current) return false;
@@ -463,6 +476,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       const payload = memory;
       return perform(async () => { const r = await bridge.saveMemory!(payload); if (r.ok) acceptMemory(r, payload); return r; }, '全局记忆已保存，后续开发 Prompt 会引用最新记忆', 'save');
     }
+    if (tab === 'general') {
+      const payload = prefs;
+      return perform(() => savePrefsPayload(payload), '通用设置已保存并立即生效', 'save');
+    }
     if (tab === 'shortcuts') {
       const payload = shortcuts;
       return perform(() => saveShortcutsPayload(payload), '快捷键设置已保存并立即生效', 'save');
@@ -491,7 +508,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
   const logDirty = publishLogLoaded && publishLogging !== savedPublishLogging;
   const memoryDirty = memoryLoaded && fingerprint(memory) !== savedMemory;
   const shortcutsDirty = shortcutsLoaded && fingerprint(shortcuts) !== savedShortcuts;
-  const dirty = aiDirty || backupDirty || templateDirty || logDirty || memoryDirty || shortcutsDirty;
+  const prefsDirty = prefsLoaded && fingerprint({ ...prefs, defaultProjectDir: prefs.defaultProjectDir.trim() }) !== savedPrefs;
+  const dirty = aiDirty || backupDirty || templateDirty || logDirty || memoryDirty || shortcutsDirty || prefsDirty;
   useImperativeHandle(ref, () => ({ requestLeave() { if (savingRef.current) { setMessage('设置正在保存，请稍候…'); setMessageKind('info'); return; } if (busy) return; if (dirty) setLeaveConfirm(true); else onLeave(); } }));
   useEffect(() => {
     if (!leaveConfirm || busy || saving) return;
@@ -507,6 +525,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
     const payloadLogging = publishLogging;
     const payloadMemory = memory;
     const payloadShortcuts = shortcuts;
+    const payloadPrefs = prefs;
     const templateTexts: Record<string, string> = { baseline: baselineTpl, publish: publishTpl, core: coreTpl };
     const success = await perform(async () => {
       if (aiDirty) { const r = await bridge.saveAISettings(payloadAI); if (!r.ok) return r; setSavedAI(fingerprint(payloadAI)); }
@@ -523,12 +542,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
       if (logDirty) { const r = await bridge.savePublishLogSettings!({ enabled: payloadLogging }); if (!r.ok) return r; setSavedPublishLogging(payloadLogging); }
       if (memoryDirty) { const r = await bridge.saveMemory!(payloadMemory); if (!r.ok) return r; acceptMemory(r, payloadMemory); }
       if (shortcutsDirty) { const r = await saveShortcutsPayload(payloadShortcuts); if (!r.ok) return r; }
+      if (prefsDirty) { const r = await savePrefsPayload(payloadPrefs); if (!r.ok) return r; }
       return { ok: true };
     }, '设置已保存', 'save');
     if (success) onLeave();
   }
   return <section className="settings-page" aria-label="设置" data-saving={saving ? 'true' : undefined}>
-      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、快捷键、全局记忆、远程同步服务端、备份与本机数据</p></div>
+      <div className="settings-page-head"><div className="eyebrow">SETTINGS</div><h1>{settingsTabs.find(([id]) => id === tab)?.[1]}</h1><p>配置 AI、提示词模板、快捷键、配色与默认目录、全局记忆、远程同步服务端、备份与本机数据</p></div>
       <div className="settings-body">
         {tab === 'ai' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
           <p className="settings-hint">用于 AI 需求整理、建议讨论与 Git 提交文案。AI 配置独立保存在本机，不同步到远程仓库。</p>
@@ -650,6 +670,22 @@ export const SettingsPage = forwardRef<SettingsPageHandle, { tab: string; projec
               </div>;
             })}
           </div>
+        </form>}
+        {tab === 'general' && <form onSubmit={(e) => { e.preventDefault(); if (!busy && !saving && tabReady) void saveAndFinish(); }}>
+          <div className="field"><span>配色</span>
+            <div className="segmented theme-options" role="group" aria-label="配色">
+              {THEMES.map(theme => <button type="button" key={theme.id} title={theme.description} aria-pressed={prefs.theme === theme.id} className={prefs.theme === theme.id ? 'on' : ''} disabled={busy || !prefsLoaded} onClick={() => setPrefs(prev => ({ ...prev, theme: theme.id }))}><span className={'theme-swatch ' + theme.id} aria-hidden="true" />{theme.label}</button>)}
+            </div>
+          </div>
+          <p className="settings-hint">{THEMES.find(theme => theme.id === prefs.theme)?.description}。保存后整个应用（含独立终端与浏览窗口）立即切换。</p>
+          <div className="field"><span>默认项目目录</span>
+            <div className="default-dir-row">
+              <label className="field"><input aria-label="默认项目目录" value={prefs.defaultProjectDir} disabled={busy || !prefsLoaded} placeholder="未设置（新建项目时目录留空）" onChange={e => setPrefs(prev => ({ ...prev, defaultProjectDir: e.target.value }))} /></label>
+              <button type="button" className="btn" disabled={busy || !prefsLoaded || !bridge.pickDir} onClick={async () => { const r = await bridge.pickDir!(); if (!r.ok) { notify(r.error || '选择目录失败', 'err'); return; } if (r.dir) setPrefs(prev => ({ ...prev, defaultProjectDir: r.dir! })); }}><FolderOpen />选择文件夹</button>
+              {prefs.defaultProjectDir && <button type="button" className="btn" disabled={busy || !prefsLoaded} onClick={() => setPrefs(prev => ({ ...prev, defaultProjectDir: '' }))}>清除</button>}
+            </div>
+          </div>
+          <p className="settings-hint">配置后，新建项目时填写项目名称会自动把目录补全为「默认项目目录\项目名称」，仍可手动修改；未配置时目录保持留空。</p>
         </form>}
         {tab === 'logs' && <>
           <div className="validation-setting"><div><label htmlFor="ai-request-logging">记录 AI 请求日志</label><p>默认开启，记录请求时间、模型、响应状态和耗时；关闭后停止新增记录。</p></div><label className="switch"><input id="ai-request-logging" type="checkbox" checked={form.requestLogging ?? true} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, requestLogging: e.target.checked })} /><span className="slider" /><span className="switch-state">{form.requestLogging === false ? '已关闭' : '已开启'}</span></label></div>
